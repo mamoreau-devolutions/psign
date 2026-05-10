@@ -205,13 +205,17 @@ enum Command {
         #[command(flatten)]
         args: ArtifactSigningSubmitPortableArgs,
     },
-    /// Print lowercase hex CAB Authenticode digest **without** requiring PKCS#7 (unsigned / structural check).
+    /// Print CAB Authenticode digest **without** requiring PKCS#7 (unsigned / structural check).
     ///
-    /// Algorithm must match what will be used at signing time (default SHA-256).
+    /// Algorithm must match what will be used at signing time (default SHA-256). **`--encoding raw`** matches **`pe-digest`** for hash-file workflows.
     CabDigest {
         path: PathBuf,
         #[arg(long, value_enum, default_value_t = HashAlg::Sha256)]
         algorithm: HashAlg,
+        #[arg(long, value_enum, default_value_t = DigestEncoding::Hex)]
+        encoding: DigestEncoding,
+        #[arg(long, value_name = "PATH")]
+        output: Option<PathBuf>,
     },
 }
 
@@ -250,7 +254,7 @@ fn hex_lower(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn write_pe_digest_output(
+fn write_digest_output(
     encoding: DigestEncoding,
     digest: &[u8],
     output: Option<&Path>,
@@ -499,7 +503,7 @@ fn run() -> Result<()> {
         } => {
             let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
             let digest = pe_authenticode_digest(&bytes, algorithm.into())?;
-            write_pe_digest_output(encoding, &digest, output.as_deref())?;
+            write_digest_output(encoding, &digest, output.as_deref())?;
         }
         Command::VerifyPe { path } => {
             let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
@@ -640,11 +644,16 @@ fn run() -> Result<()> {
         Command::ArtifactSigningSubmit { args } => {
             run_portable_artifact_signing_submit(args)?;
         }
-        Command::CabDigest { path, algorithm } => {
+        Command::CabDigest {
+            path,
+            algorithm,
+            encoding,
+            output,
+        } => {
             let data = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
             let ctx = parse_cab_context(&data)?;
             let digest = compute_cab_authenticode_digest(&data, &ctx, algorithm.into())?;
-            println!("{}", hex_lower(&digest));
+            write_digest_output(encoding, &digest, output.as_deref())?;
         }
     }
     Ok(())
