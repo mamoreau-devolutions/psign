@@ -10,10 +10,7 @@
 //! [`parse_pe_pkcs7_spc_indirect_data`] and [`spc_indirect_data_replace_message_digest`] support **Linux-side digest substitution** before a future **`SignedData`** signer assembles countersignatures / PKCS#9 attributes. **`WIN_CERTIFICATE`** embedding remains [`crate::pe_embed`].
 
 use anyhow::{Result, anyhow};
-use authenticode::{
-    AttributeCertificateIterator, DigestInfo, SpcIndirectDataContent,
-    WIN_CERT_TYPE_PKCS_SIGNED_DATA,
-};
+use authenticode::{DigestInfo, SpcIndirectDataContent};
 use cms::content_info::ContentInfo;
 use cms::signed_data::SignedData;
 use der::asn1::{ObjectIdentifier, OctetString};
@@ -27,23 +24,6 @@ pub const PKCS7_ID_DATA_OID: &str = "1.2.840.113549.1.7.1";
 
 /// CMS **`signedData`** content type OID (string form).
 pub const PKCS7_ID_SIGNED_DATA_OID: &str = "1.2.840.113549.1.7.2";
-
-fn first_pkcs7_signed_data_blob(pe_image: &[u8]) -> Result<Vec<u8>> {
-    let parsed = crate::pe_digest::ParsedPe::parse(pe_image)?;
-    let pe = parsed.as_pe_trait();
-    let Some(iter) = AttributeCertificateIterator::new(pe).map_err(|e| anyhow!("{e}"))? else {
-        return Err(anyhow!("PE has no certificate table"));
-    };
-    for entry in iter {
-        let attr = entry.map_err(|e| anyhow!("{e}"))?;
-        if attr.certificate_type == WIN_CERT_TYPE_PKCS_SIGNED_DATA {
-            return Ok(attr.data.to_vec());
-        }
-    }
-    Err(anyhow!(
-        "no PKCS#7 Authenticode attribute certificate in PE certificate table"
-    ))
-}
 
 fn signed_data_from_pkcs7_der(pkcs7_der: &[u8]) -> Result<SignedData> {
     let normalized = crate::pkcs7_wire::normalize_pkcs7_der_for_authenticode(pkcs7_der);
@@ -65,7 +45,7 @@ fn signed_data_from_pkcs7_der(pkcs7_der: &[u8]) -> Result<SignedData> {
 ///
 /// Fails if there is no certificate table, no PKCS#7 entry, or CMS parsing does not yield encapsulated Authenticode content.
 pub fn parse_pe_pkcs7_spc_indirect_data(pe_image: &[u8]) -> Result<SpcIndirectDataContent> {
-    let pkcs7 = first_pkcs7_signed_data_blob(pe_image)?;
+    let pkcs7 = crate::verify_pe::pe_first_pkcs7_signed_data_der(pe_image)?;
     let sd = signed_data_from_pkcs7_der(&pkcs7)?;
     let encap_any = sd
         .encap_content_info

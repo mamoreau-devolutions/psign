@@ -99,3 +99,42 @@ pub fn for_each_pe_pkcs7_signed_data(
 
     Ok(pkcs7_count)
 }
+
+/// PKCS#7 **`SignedData`** bytes from the **first** **`WIN_CERT_TYPE_PKCS_SIGNED_DATA`** attribute certificate (PE certificate-table order).
+///
+/// For multi-signed PEs, use [`for_each_pe_pkcs7_signed_data`] to visit every blob.
+pub fn pe_first_pkcs7_signed_data_der(pe_image: &[u8]) -> Result<Vec<u8>> {
+    let parsed = ParsedPe::parse(pe_image)?;
+    let pe = parsed.as_pe_trait();
+    let Some(iter) = AttributeCertificateIterator::new(pe)
+        .map_err(|e| anyhow!("certificate table invalid: {e}"))?
+    else {
+        return Err(anyhow!("PE has no certificate table"));
+    };
+    for entry in iter {
+        let attr = entry.map_err(|e| anyhow!("attribute certificate entry invalid: {e}"))?;
+        if attr.certificate_type == WIN_CERT_TYPE_PKCS_SIGNED_DATA {
+            return Ok(attr.data.to_vec());
+        }
+    }
+    Err(anyhow!(
+        "no PKCS#7 Authenticode entries found in certificate table"
+    ))
+}
+
+#[cfg(test)]
+mod pe_first_pkcs7_tests {
+    use super::*;
+
+    #[test]
+    fn first_pkcs7_starts_with_sequence_on_tiny_fixture() {
+        let bytes =
+            include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi");
+        let der = pe_first_pkcs7_signed_data_der(bytes).expect("extract pkcs7");
+        assert!(
+            der.len() > 128,
+            "expected non-trivial PKCS#7 payload on signed fixture"
+        );
+        assert_eq!(der.first().copied(), Some(0x30));
+    }
+}
