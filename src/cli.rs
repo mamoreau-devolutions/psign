@@ -40,6 +40,11 @@ pub enum Command {
     Catdb(CatdbArgs),
     /// Remove embedded signature data from a PE file (native `remove`).
     Remove(RemoveArgs),
+    /// Inspect Authenticode PKCS#7 layers (nested `1.3.6.1.4.1.311.2.4.1`, timestamp OIDs) as JSON — same portable parser as **`signtool-portable inspect-authenticode`**.
+    InspectSignature(InspectSignatureArgs),
+    /// Submit a digest to Azure Code Signing **data-plane** REST (`:sign` LRO); requires `--features artifact-signing-rest`. Prints signature + operation JSON on success.
+    #[cfg(feature = "artifact-signing-rest")]
+    ArtifactSigningSubmit(ArtifactSigningSubmitArgs),
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -134,6 +139,53 @@ pub enum Pkcs7ContentEmbedding {
     Embedded,
     DetachedSignedData,
     Pkcs7DetachedSignedData,
+}
+
+#[derive(Args, Debug)]
+pub struct InspectSignatureArgs {
+    pub path: PathBuf,
+    /// PE (**embedded** attribute PKCS#7 rows) vs raw PKCS#7 file.
+    #[arg(long, value_enum, default_value_t = InspectSignatureInput::Pe)]
+    pub input: InspectSignatureInput,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+pub enum InspectSignatureInput {
+    Pe,
+    Pkcs7,
+}
+
+#[cfg(feature = "artifact-signing-rest")]
+#[derive(Args, Debug)]
+pub struct ArtifactSigningSubmitArgs {
+    /// Regional hostname segment (e.g. `westus`) for `https://{region}.codesigning.azure.net/`.
+    #[arg(long)]
+    pub region: String,
+    #[arg(long)]
+    pub account_name: String,
+    #[arg(long)]
+    pub profile_name: String,
+    /// Raw digest bytes file (same length as hash algorithm, e.g. 32 for SHA-256).
+    #[arg(long)]
+    pub digest_file: PathBuf,
+    #[arg(long, default_value = "RS256")]
+    pub signature_algorithm: String,
+    #[arg(long, default_value = "2023-06-15-preview")]
+    pub api_version: String,
+    #[arg(long)]
+    pub correlation_id: Option<String>,
+    #[arg(long)]
+    pub access_token: Option<String>,
+    #[arg(long)]
+    pub managed_identity: bool,
+    #[arg(long)]
+    pub tenant_id: Option<String>,
+    #[arg(long)]
+    pub client_id: Option<String>,
+    #[arg(long)]
+    pub client_secret: Option<String>,
+    #[arg(long)]
+    pub authority: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -352,6 +404,9 @@ pub struct SignArgs {
     /// Require Windows System Component Verification EKU (native `/uw`).
     #[arg(long, visible_alias = "uw")]
     pub eku_windows_system_component: bool,
+    /// When selecting from a certificate store, require an **EKU** OID string starting with this prefix (PowerShell OpenAuthenticode uses Azure Trusted Signing profile certs under `1.3.6.1.4.1.311.97.`).
+    #[arg(long = "signing-cert-eku-prefix")]
+    pub signing_cert_eku_oid_prefix: Option<String>,
     /// Split digest: generate digest and unsigned PKCS#7 (native `/dg`).
     #[arg(long, visible_alias = "dg")]
     pub digest_generate: Option<PathBuf>,

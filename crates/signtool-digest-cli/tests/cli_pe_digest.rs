@@ -2,6 +2,7 @@
 
 use assert_cmd::Command;
 use predicates::prelude::*;
+use serde_json::Value;
 use signtool_authenticode_trust::pe_first_pkcs7_terminal_root;
 use std::path::PathBuf;
 
@@ -34,7 +35,13 @@ fn help_lists_core_subcommands() {
         "verify-msix",
         "verify-catalog",
         "verify-script",
+        "cab-digest",
+        "pe-has-page-hashes",
+        "pe-page-hash-info",
+        "verify-pe-page-hashes",
+        "pe-authenticode-ranges",
         "artifact-signing-metadata-check",
+        "inspect-authenticode",
     ] {
         assert!(
             out.contains(needle),
@@ -130,6 +137,37 @@ fn verify_pe_pkcs7_indirect_digest_matches_on_tiny32_fixture() {
     let mut cmd = Command::cargo_bin("signtool-portable").unwrap();
     cmd.arg("verify-pe").arg(tiny32_fixture());
     cmd.assert().success();
+}
+
+#[test]
+fn inspect_authenticode_pe_outputs_json_with_signers() {
+    let mut cmd = Command::cargo_bin("signtool-portable").unwrap();
+    cmd.args(["inspect-authenticode", "--input", "pe"])
+        .arg(tiny32_fixture());
+    let assert = cmd.assert().success();
+    let out = std::str::from_utf8(&assert.get_output().stdout).expect("utf8");
+    let v: Value = serde_json::from_str(out.trim()).expect("inspect JSON");
+    let entries = v
+        .get("entries")
+        .and_then(Value::as_array)
+        .expect("top-level entries[]");
+    assert!(
+        !entries.is_empty(),
+        "expected ≥1 attribute-cert PKCS#7 on signed PE fixture"
+    );
+    let pkcs7 = entries[0].get("pkcs7").expect("pkcs7 object");
+    let signers = pkcs7
+        .get("signers")
+        .and_then(Value::as_array)
+        .expect("signers[]");
+    assert!(
+        !signers.is_empty(),
+        "expected ≥1 signer in outer SignedData"
+    );
+    assert!(
+        pkcs7.get("nested_signatures").is_some(),
+        "nested_signatures field should be present"
+    );
 }
 
 #[test]

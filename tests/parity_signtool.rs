@@ -63,6 +63,16 @@ fn env_path(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.trim().is_empty())
 }
 
+fn env_flag_true(name: &str) -> bool {
+    matches!(
+        std::env::var(name)
+            .ok()
+            .map(|s| s.trim().to_ascii_lowercase())
+            .as_deref(),
+        Some("1") | Some("true") | Some("yes")
+    )
+}
+
 fn native_signtool() -> &'static str {
     r"C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe"
 }
@@ -452,6 +462,82 @@ fn artifact_signing_decoupled_pe_executes() {
         rust_out.status.success(),
         "{}",
         String::from_utf8_lossy(&rust_out.stderr)
+    );
+}
+
+#[test]
+#[ignore = "requires SIGNTOOL_RS_UNSIGNED_FIXTURE,SIGNTOOL_RS_TEST_PFX,SIGNTOOL_RS_TIMESTAMP_URL"]
+fn append_signature_pe_nested_pkcs7_visible_to_inspector() {
+    let unsigned = match env_path("SIGNTOOL_RS_UNSIGNED_FIXTURE") {
+        Some(v) => v,
+        None => return,
+    };
+    let pfx = match env_path("SIGNTOOL_RS_TEST_PFX") {
+        Some(v) => v,
+        None => return,
+    };
+    let tsa = match env_path("SIGNTOOL_RS_TIMESTAMP_URL") {
+        Some(v) => v,
+        None => return,
+    };
+    let pfx_password = env_path("SIGNTOOL_RS_TEST_PFX_PASSWORD");
+    let first = std::env::temp_dir().join("signtool_rs_append_inspect_a.exe");
+    let second = std::env::temp_dir().join("signtool_rs_append_inspect_b.exe");
+    let _ = std::fs::copy(&unsigned, &first).expect("copy unsigned first");
+    let _ = std::fs::copy(&unsigned, &second).expect("copy unsigned second");
+
+    let mut one = Command::cargo_bin("signtool-windows").expect("binary available");
+    one.arg("sign")
+        .arg("--pfx")
+        .arg(&pfx)
+        .arg("--digest")
+        .arg("sha256")
+        .arg("--timestamp-url")
+        .arg(&tsa)
+        .arg("--timestamp-digest")
+        .arg("sha256")
+        .arg("--auto-select")
+        .arg(&first);
+    if let Some(p) = pfx_password.as_ref() {
+        one.arg("--password").arg(p);
+    }
+    let o1 = one.output().expect("first sign");
+    assert!(
+        o1.status.success(),
+        "{}",
+        String::from_utf8_lossy(&o1.stderr)
+    );
+    let _ = std::fs::copy(&first, &second).expect("copy signed to second before append");
+
+    let mut two = Command::cargo_bin("signtool-windows").expect("binary available");
+    two.arg("sign")
+        .arg("--pfx")
+        .arg(&pfx)
+        .arg("--digest")
+        .arg("sha256")
+        .arg("--timestamp-url")
+        .arg(&tsa)
+        .arg("--timestamp-digest")
+        .arg("sha256")
+        .arg("--append-signature")
+        .arg("--auto-select")
+        .arg(&second);
+    if let Some(p) = pfx_password.as_ref() {
+        two.arg("--password").arg(p);
+    }
+    let o2 = two.output().expect("second sign append");
+    assert!(
+        o2.status.success(),
+        "{}",
+        String::from_utf8_lossy(&o2.stderr)
+    );
+
+    let bytes = std::fs::read(&second).expect("read double-signed pe");
+    let rep = signtool_authenticode_trust::inspect_pe_authenticode(&bytes).expect("inspect");
+    let outer = &rep.entries[0].pkcs7;
+    assert!(
+        !outer.nested_signatures.is_empty(),
+        "append-signature should place a nested PKCS#7 under Microsoft OID 1.3.6.1.4.1.311.2.4.1"
     );
 }
 
@@ -1214,4 +1300,77 @@ fn wsf_sign_aligns_with_native_sip_stack() {
             String::from_utf8_lossy(&nv_nat.stdout)
         );
     }
+}
+
+#[cfg(feature = "artifact-signing-rest")]
+#[test]
+#[ignore = "requires SIGNTOOL_RS_ARTIFACT_SIGNING_REST_REGION, ACCOUNT_NAME, PROFILE_NAME, DIGEST_FILE and auth (see docs/migration-artifact-signing.md#rest-hash-signing-gated-smoke-test)"]
+fn artifact_signing_rest_submit_smoke() {
+    let region = match env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_REST_REGION") {
+        Some(v) => v,
+        None => return,
+    };
+    let account_name = match env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_REST_ACCOUNT_NAME") {
+        Some(v) => v,
+        None => return,
+    };
+    let profile_name = match env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_REST_PROFILE_NAME") {
+        Some(v) => v,
+        None => return,
+    };
+    let digest_file = match env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_REST_DIGEST_FILE") {
+        Some(v) => v,
+        None => return,
+    };
+
+    let access_token = env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_REST_ACCESS_TOKEN");
+    let mi = env_flag_true("SIGNTOOL_RS_ARTIFACT_SIGNING_REST_MANAGED_IDENTITY");
+    let tenant = env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_REST_TENANT_ID");
+    let client_id = env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_REST_CLIENT_ID");
+    let client_secret = env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_REST_CLIENT_SECRET");
+
+    let auth_ready = access_token.is_some()
+        || mi
+        || (tenant.is_some() && client_id.is_some() && client_secret.is_some());
+    if !auth_ready {
+        return;
+    }
+
+    let mut cmd = Command::cargo_bin("signtool-windows").expect("binary available");
+    cmd.arg("artifact-signing-submit")
+        .arg("--region")
+        .arg(&region)
+        .arg("--account-name")
+        .arg(&account_name)
+        .arg("--profile-name")
+        .arg(&profile_name)
+        .arg("--digest-file")
+        .arg(&digest_file);
+
+    if let Some(alg) = env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_REST_SIGNATURE_ALGORITHM") {
+        cmd.arg("--signature-algorithm").arg(&alg);
+    }
+
+    if let Some(tok) = access_token {
+        cmd.arg("--access-token").arg(&tok);
+    } else if mi {
+        cmd.arg("--managed-identity");
+    } else {
+        cmd.arg("--tenant-id").arg(tenant.as_ref().expect("tenant"));
+        cmd.arg("--client-id").arg(client_id.as_ref().expect("client id"));
+        cmd.arg("--client-secret")
+            .arg(client_secret.as_ref().expect("client secret"));
+    }
+
+    let out = cmd.output().expect("run artifact-signing-submit");
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Succeeded") && stdout.contains("signature"),
+        "unexpected stdout (want LRO Succeeded + signature material):\n{stdout}"
+    );
 }

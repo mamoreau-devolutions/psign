@@ -2,7 +2,7 @@
 
 This project can replace **AzureSignTool** for Windows signing when built with **`--features azure-kv-sign`**. **`signtool-portable`** remains the cross-platform companion for digest checks and PE/catalog verification — it does not perform Key Vault signing.
 
-**Azure Artifact Signing (Trusted Signing)** via Microsoft’s decoupled **`Azure.CodeSigning.Dlib.dll`** is **not** the Key Vault path: use **`--dlib`** / **`--trusted-signing-dlib-root`** with **`--dmdf`** only (never mixed with **`--azure-key-vault-url`**). See [`migration-artifact-signing.md`](migration-artifact-signing.md).
+**Azure Artifact Signing (Trusted Signing)** via Microsoft’s decoupled **`Azure.CodeSigning.Dlib.dll`** is **not** the Key Vault path: use **`--dlib`** / **`--trusted-signing-dlib-root`** with **`--dmdf`** only (never mixed with **`--azure-key-vault-url`**). See [`migration-artifact-signing.md`](migration-artifact-signing.md). PowerShell OpenAuthenticode overlap (inspect JSON, REST submit, EKU prefix selection) is summarized in [`psa-interoperability.md`](psa-interoperability.md).
 
 ## Signing (`signtool-windows`)
 

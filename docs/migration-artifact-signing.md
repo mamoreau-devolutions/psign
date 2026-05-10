@@ -6,6 +6,24 @@ Microsoft **Artifact Signing** (often called **Trusted Signing**) integrates wit
 
 **signtool-portable** cannot load the mixed-mode/.NET dlib or call **`SignerSignEx3`**; use it **after** signing for digest consistency checks and **anchor-based trust verification** (see [Portable post-sign verification](#portable-post-sign-verification) below).
 
+### Optional: Azure Code Signing **REST** hash signing (experimental)
+
+PowerShell OpenAuthenticode can sign via the **`Azure.CodeSigning.Sdk`** client against the same **data-plane** API documented in Azure REST specs (**`CertificateProfileOperations_Sign`**, host template **`https://{region}.codesigning.azure.net/`**, OAuth scope **`https://codesigning.azure.net/.default`**).
+
+With **`cargo build -p signtool-rs --features artifact-signing-rest --bin signtool-windows`**:
+
+```powershell
+signtool-windows.exe artifact-signing-submit `
+  --region westus `
+  --account-name myAccount `
+  --profile-name myProfile `
+  --digest-file .\digest.sha256.bin `
+  --signature-algorithm RS256 `
+  --managed-identity
+```
+
+This runs the **`:sign`** LRO and prints the final JSON (**`signature`**, **`signingCertificate`**, …). It does **not** embed an Authenticode PKCS#7 into a PE by itself — combine with your signing pipeline or continue using **`--dlib`** / **`--trusted-signing-dlib-root`** for **`SignerSignEx3`** embedding.
+
 ## Flag mapping (Microsoft sample → signtool-windows)
 
 | SignTool / docs | signtool-windows |
@@ -134,3 +152,32 @@ Required-style variables when running that test locally:
 | `SIGNTOOL_RS_ARTIFACT_SIGNING_TEST_PFX_PASSWORD` | Optional PFX password |
 
 Either **`SIGNTOOL_RS_ARTIFACT_SIGNING_DLIB`** or **`SIGNTOOL_RS_ARTIFACT_SIGNING_DLIB_ROOT`** must be set; the test prefers **`_DLIB`** when both are present.
+
+<a id="rest-hash-signing-gated-smoke-test"></a>
+
+### REST hash signing (gated smoke test)
+
+Build with **`--features artifact-signing-rest`**, then run the ignored test **`artifact_signing_rest_submit_smoke`** when you have a **Trusted Signing** account and a **raw digest file** (for example **32 bytes** for SHA-256):
+
+```powershell
+cargo test -p signtool-rs --features artifact-signing-rest `
+  --test parity_signtool artifact_signing_rest_submit_smoke -- --ignored --nocapture
+```
+
+| Variable | Purpose |
+|----------|---------|
+| `SIGNTOOL_RS_ARTIFACT_SIGNING_REST_REGION` | Regional segment (e.g. `westus`) |
+| `SIGNTOOL_RS_ARTIFACT_SIGNING_REST_ACCOUNT_NAME` | Code signing account name |
+| `SIGNTOOL_RS_ARTIFACT_SIGNING_REST_PROFILE_NAME` | Certificate profile name |
+| `SIGNTOOL_RS_ARTIFACT_SIGNING_REST_DIGEST_FILE` | Path to raw digest bytes |
+| `SIGNTOOL_RS_ARTIFACT_SIGNING_REST_SIGNATURE_ALGORITHM` | Optional (default API/`RS256`) |
+
+Authentication (**one** path):
+
+| Variable | Purpose |
+|----------|---------|
+| `SIGNTOOL_RS_ARTIFACT_SIGNING_REST_ACCESS_TOKEN` | Bearer token for **`https://codesigning.azure.net/.default`** |
+| `SIGNTOOL_RS_ARTIFACT_SIGNING_REST_MANAGED_IDENTITY` | Set to **`1`** / **`true`** / **`yes`** for IMDS (VMs/containers) |
+| `SIGNTOOL_RS_ARTIFACT_SIGNING_REST_TENANT_ID` | With client credentials |
+| `SIGNTOOL_RS_ARTIFACT_SIGNING_REST_CLIENT_ID` | With client credentials |
+| `SIGNTOOL_RS_ARTIFACT_SIGNING_REST_CLIENT_SECRET` | With client credentials |

@@ -9,6 +9,7 @@ use crate::win::sealing::validate_sign_constraints_paths;
 use anyhow::{Context as _, Result, anyhow};
 use base64::Engine as _;
 use serde::Deserialize;
+use x509_cert::der::Decode;
 use std::cell::RefCell;
 use std::mem::size_of;
 use url::Url;
@@ -27,10 +28,17 @@ thread_local! {
     static KV_HTTP: RefCell<Option<KvCallbackState>> = const { RefCell::new(None) };
 }
 
+#[derive(Clone, Copy)]
+enum KvCertKeyKind {
+    Rsa,
+    Ec,
+}
+
 struct KvCallbackState {
     client: reqwest::blocking::Client,
     token: String,
     sign_url: String,
+    key_kind: KvCertKeyKind,
 }
 
 #[derive(Deserialize)]
@@ -210,6 +218,46 @@ fn kv_rsa_alg(alg_id: ALG_ID) -> Result<&'static str> {
     }
 }
 
+fn kv_ecdsa_alg(alg_id: ALG_ID) -> Result<String> {
+    if alg_id == CALG_SHA_256 {
+        Ok("ES256".to_string())
+    } else if alg_id == CALG_SHA_384 {
+        Ok("ES384".to_string())
+    } else if alg_id == CALG_SHA_512 {
+        Ok("ES512".to_string())
+    } else {
+        Err(anyhow!(
+            "unsupported digest algorithm for Azure Key Vault ECDSA signing (try SHA256/384/512)"
+        ))
+    }
+}
+
+fn kv_cert_key_kind(cer_der: &[u8]) -> Result<KvCertKeyKind> {
+    let cert = x509_cert::Certificate::from_der(cer_der)
+        .map_err(|e| anyhow!("Azure Key Vault certificate DER (public key): {e}"))?;
+    match cert
+        .tbs_certificate
+        .subject_public_key_info
+        .algorithm
+        .oid
+        .to_string()
+        .as_str()
+    {
+        "1.2.840.113549.1.1.1" => Ok(KvCertKeyKind::Rsa),
+        "1.2.840.10045.2.1" => Ok(KvCertKeyKind::Ec),
+        other => Err(anyhow!(
+            "Azure Key Vault signing is not implemented for certificate public key OID {other}"
+        )),
+    }
+}
+
+fn kv_signature_alg(kind: KvCertKeyKind, algid_hash: ALG_ID) -> Result<String> {
+    match kind {
+        KvCertKeyKind::Rsa => kv_rsa_alg(algid_hash).map(|s| s.to_string()),
+        KvCertKeyKind::Ec => kv_ecdsa_alg(algid_hash),
+    }
+}
+
 unsafe extern "system" fn azure_kv_digest_callback(
     _p_cert: *const CERT_CONTEXT,
     _p_metadata: *const CRYPT_INTEGER_BLOB,
@@ -222,15 +270,15 @@ unsafe extern "system" fn azure_kv_digest_callback(
         return E_FAIL;
     }
     let digest = unsafe { std::slice::from_raw_parts(pb_digest, cb_digest as usize) };
-    let alg = match kv_rsa_alg(algid_hash) {
-        Ok(a) => a,
-        Err(_) => return E_FAIL,
-    };
 
     let outcome = KV_HTTP.with(|slot| {
         let borrowed = slot.borrow();
         let Some(state) = borrowed.as_ref() else {
             return Err(anyhow!("Azure KV signing thread-local state was not installed"));
+        };
+        let alg = match kv_signature_alg(state.key_kind, algid_hash) {
+            Ok(a) => a,
+            Err(_) => return Err(anyhow!("unsupported digest / key kind for KV")),
         };
         let body = serde_json::json!({
             "alg": alg,
@@ -404,6 +452,7 @@ pub(crate) fn sign_with_azure_key_vault(
     let cer_der = base64::engine::general_purpose::STANDARD
         .decode(cert.cer.trim())
         .context("decode certificate cer (base64)")?;
+    let key_kind = kv_cert_key_kind(&cer_der)?;
 
     let store = open_memory_cert_store()?;
     // SAFETY: `cer_der` is valid DER for the duration of import.
@@ -461,6 +510,7 @@ pub(crate) fn sign_with_azure_key_vault(
             client: http,
             token,
             sign_url: sign_url.to_string(),
+            key_kind,
         });
     });
 

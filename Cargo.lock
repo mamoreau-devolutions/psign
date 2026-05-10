@@ -2476,6 +2476,7 @@ dependencies = [
  "picky",
  "picky-asn1-x509",
  "rcgen",
+ "serde",
  "sha1 0.10.6",
  "sha2 0.10.9",
  "signtool-sip-digest",
@@ -2515,10 +2516,12 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "signtool-authenticode-trust",
  "signtool-sip-digest",
  "url",
  "uuid",
  "windows",
+ "x509-cert",
 ]
 
 [[package]]

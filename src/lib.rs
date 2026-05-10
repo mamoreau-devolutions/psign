@@ -68,6 +68,13 @@ pub fn run_windows_cli() -> ! {
             Command::Timestamp(args) => crate::win::timestamp::timestamp_file(args, &cli.global),
             Command::Catdb(args) => crate::win::catdb::catdb_command(args, &cli.global),
             Command::Remove(args) => crate::win::remove_signature::remove_command(args, &cli.global),
+            Command::InspectSignature(args) => {
+                crate::win::inspect_signature::inspect_signature_command(args, &cli.global)
+            }
+            #[cfg(feature = "artifact-signing-rest")]
+            Command::ArtifactSigningSubmit(args) => {
+                crate::win::artifact_signing_rest::artifact_signing_submit_command(args, &cli.global)
+            }
         }
     }
 

@@ -1,7 +1,10 @@
 #[cfg(feature = "azure-kv-sign")]
 pub mod azure_kv_sign;
+#[cfg(feature = "artifact-signing-rest")]
+pub mod artifact_signing_rest;
 pub mod catdb;
 pub mod cert_props;
+pub mod inspect_signature;
 pub mod code_sign_format;
 pub mod common;
 pub mod remove_signature;

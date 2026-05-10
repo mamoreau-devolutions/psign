@@ -533,6 +533,19 @@ fn issuer_simple_contains(cert: *const CERT_CONTEXT, needle: &str) -> Result<boo
 }
 
 pub(crate) fn validate_cert_constraints(cert: *const CERT_CONTEXT, args: &SignArgs) -> Result<()> {
+    if let Some(prefix) = args
+        .signing_cert_eku_oid_prefix
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let usages = cert_usage_strings(cert)?;
+        if !usages.iter().any(|oid| oid.starts_with(prefix)) {
+            return Err(anyhow!(
+                "certificate does not include an enhanced key usage OID starting with '{prefix}'"
+            ));
+        }
+    }
     if let Some(want) = &args.eku_oid {
         let usages = cert_usage_strings(cert)?;
         let ok = usages
@@ -564,6 +577,20 @@ pub(crate) fn validate_cert_constraints(cert: *const CERT_CONTEXT, args: &SignAr
         }
     }
     Ok(())
+}
+
+fn cert_matches_signing_eku_prefix(cert: *const CERT_CONTEXT, args: &SignArgs) -> Result<bool> {
+    let Some(prefix) = args
+        .signing_cert_eku_oid_prefix
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
+        return Ok(true);
+    };
+    Ok(cert_usage_strings(cert)?
+        .iter()
+        .any(|oid| oid.starts_with(prefix)))
 }
 
 fn find_cert(store: HCERTSTORE, args: &SignArgs) -> Result<CertContext> {
@@ -677,18 +704,32 @@ fn find_cert(store: HCERTSTORE, args: &SignArgs) -> Result<CertContext> {
             }
         };
         if has_private_key(current.cast_const()) {
-            if best_ctx.is_none() || not_after > best_not_after {
+            if cert_matches_signing_eku_prefix(current.cast_const(), args)?
+                && (best_ctx.is_none() || not_after > best_not_after)
+            {
                 best_ctx = Some(adopt_cert(current)?);
                 best_not_after = not_after;
             }
         } else if best_ctx.is_none() {
-            best_ctx = Some(adopt_cert(current)?);
-            best_not_after = not_after;
+            if cert_matches_signing_eku_prefix(current.cast_const(), args)? {
+                best_ctx = Some(adopt_cert(current)?);
+                best_not_after = not_after;
+            }
         }
         prev = Some(current.cast_const());
     }
-    let selected =
-        best_ctx.ok_or_else(|| anyhow!("selected store does not contain a signing certificate"))?;
+    let selected = best_ctx.ok_or_else(|| {
+        if args
+            .signing_cert_eku_oid_prefix
+            .as_ref()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+        {
+            anyhow!("no certificate in the selected store matched --signing-cert-eku-prefix")
+        } else {
+            anyhow!("selected store does not contain a signing certificate")
+        }
+    })?;
     if !args.auto_select && args.pfx.is_none() {
         return Err(anyhow!(
             "system-store signing requires --auto-select or explicit certificate filters"

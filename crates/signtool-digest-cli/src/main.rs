@@ -8,8 +8,9 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::Deserialize;
 use signtool_authenticode_trust::{
     AuthenticodeTrustPolicy, TrustVerifyPeOptions, TrustVerifyPeReport,
-    parse_verification_date_ymd, trust_verify_cab_bytes, trust_verify_catalog_bytes,
-    trust_verify_detached_bytes, trust_verify_pe_bytes,
+    inspect_authenticode_pkcs7_der, inspect_pe_authenticode, parse_verification_date_ymd,
+    trust_verify_cab_bytes, trust_verify_catalog_bytes, trust_verify_detached_bytes,
+    trust_verify_pe_bytes,
 };
 use signtool_sip_digest::cab_digest::{
     compute_cab_authenticode_digest, parse_cab_context, verify_cab_digest_consistency,
@@ -174,6 +175,13 @@ enum Command {
     VerifyCatalog { path: PathBuf },
     /// Script signed file (PowerShell-class or WSH): compare PKCS#7 indirect digest to Rust heuristic strip/hash.
     VerifyScript { path: PathBuf },
+    /// Inspect PKCS#7 layers: signers, timestamp-related attribute OIDs, nested signatures (`1.3.6.1.4.1.311.2.4.1`). JSON to stdout.
+    InspectAuthenticode {
+        path: PathBuf,
+        /// Treat **`path`** as a PE image (**embedded** attribute certs) vs raw PKCS#7 bytes.
+        #[arg(long, value_enum, default_value_t = InspectInputKind::Pe)]
+        input: InspectInputKind,
+    },
     /// Validate JSON metadata shape for Microsoft Artifact Signing (`Endpoint`, `CodeSigningAccountName`, `CertificateProfileName`; optional `ExcludeCredentials` string array). No network / no signing.
     ///
     /// Reads **`--path`** or stdin when omitted (use `-` for stdin explicitly).
@@ -189,6 +197,12 @@ enum Command {
         #[arg(long, value_enum, default_value_t = HashAlg::Sha256)]
         algorithm: HashAlg,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum InspectInputKind {
+    Pe,
+    Pkcs7,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -417,6 +431,16 @@ fn run() -> Result<()> {
             let ext = script_ext_from_path(&path)?;
             verify_script_digest_consistency(&raw, ext)
                 .with_context(|| format!("verify-script {}", path.display()))?;
+        }
+        Command::InspectAuthenticode { path, input } => {
+            let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+            let json = match input {
+                InspectInputKind::Pe => serde_json::to_string_pretty(&inspect_pe_authenticode(&bytes)?)?,
+                InspectInputKind::Pkcs7 => {
+                    serde_json::to_string_pretty(&inspect_authenticode_pkcs7_der(&bytes)?)?
+                }
+            };
+            println!("{json}");
         }
         Command::ArtifactSigningMetadataCheck { path } => {
             run_artifact_signing_metadata_check(path)?;

@@ -6,6 +6,7 @@ description = "Portable Authenticode PKCS#7 trust verification (anchors, chain, 
 
 [dependencies]
 anyhow = "1"
+serde = { version = "1", features = ["derive"] }
 cms = "0.2.3"
 der = { version = "0.7", features = ["derive"] }
 digest = "0.10"
