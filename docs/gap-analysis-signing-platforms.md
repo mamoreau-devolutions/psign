@@ -2,6 +2,31 @@
 
 This document compares **Windows SDK `signtool.exe`**, **AzureSignTool**, **Azure Artifact Signing (Trusted Signing)**, and this repository’s **`signtool-windows`** / **`signtool-portable`**. It is the product-facing companion to the engineering-focused [`rust-sip-gaps.md`](rust-sip-gaps.md) and [`parity-matrix.md`](parity-matrix.md).
 
+**Concrete reversing steps (IDA, ilspycmd, writable copies of Kits binaries):** [`reversing-playbook-authenticode.md`](reversing-playbook-authenticode.md).
+
+## Format × capability matrix
+
+Legend: **Sign** = produce/embed Authenticode; **WT verify** = `WinVerifyTrust`-style OS verify; **Digest** = recompute SIP indirect data vs PKCS#7; **Trust** = portable CMS + explicit anchors.
+
+| Subject format | Native `signtool` | `signtool-windows` | `signtool-portable` |
+|----------------|-------------------|--------------------|---------------------|
+| PE / WinMD | Sign, WT verify | Sign, WT verify, optional `--rust-sip pe` | Digest, inspect, trust-verify-pe |
+| CAB | Sign, WT verify | Same | verify-cab, trust-verify-cab, cab-digest |
+| MSI | Sign, WT verify | Same | verify-msi |
+| ESD / WIM | Sign, WT verify | Same | verify-esd |
+| MSIX / APPX (cleartext) | Sign, WT verify | Same (+ `--dlib` / `--dmdf`) | verify-msix |
+| MSIX encrypted | Sign (OS) | Delegates OS | **Rejected** (explicit error) |
+| Catalog `.cat` | Sign, WT verify | WT + Rust assists | verify-catalog, trust-verify-catalog |
+| PS scripts | Sign, WT verify | Same | verify-script |
+| WSH `.js`/`.vbs`/`.wsf` | Sign, WT verify | Same | verify-script |
+| Detached PKCS#7 | Verify | Verify | trust-verify-detached |
+| VBA / `mso.dll` SIP | Sign (OS) | OS | **Not portable** |
+| Extension SIP DLLs | Sign (OS) | OS | **Not portable** |
+
+**AzureSignTool** targets the same **embedding path as SignTool** (Windows): typically PE (and same SIP stack as invoked by `SignerSignEx3`). It does **not** define new subject formats—it replaces the CSP with **KV `keys/sign`**.
+
+**Artifact Signing REST** (`:sign` LRO) returns **signature material** for a **hash**; embedding still requires **Windows `SignerSignEx3` + dlib** or **future portable PKCS#7 + embed** (see roadmap).
+
 ## Executive summary
 
 | Goal | Today | Gap |
@@ -93,15 +118,7 @@ Details: [`migration-azuresigntool.md`](migration-azuresigntool.md).
 
 ## Reverse engineering notes (IDA / ILSpy / ilspycmd)
 
-Useful when aligning behavior with closed-source binaries. **No automation is required for day-to-day builds**; this is optional depth.
-
-| Binary | What to learn | Suggested tools |
-|--------|----------------|-----------------|
-| **`signtool.exe`** | Argument routing → **`WinTrust`**, **`SignerSignEx3`**, SIP subject detection | IDA / Ghidra on Kits x64 binary; compare with [`windows-signing-components.md`](windows-signing-components.md) |
-| **`mssign32.dll`** | **`SignerSignEx3`**, **`SignerTimeStampEx3`**, error paths | IDA — complements MSDN |
-| **`WINTRUST.dll`** | SIP dispatch, indirect data ASN.1 | IDA |
-| **`Azure.CodeSigning.Dlib.dll`** | Exports used by **`SIGNER_DIGEST_SIGN_INFO`** / decoupled bridge | IDA + `dumpbin /exports` |
-| **`AzureSignTool`** (NuGet) | KV REST + signing API usage | **ilspycmd** / ILSpy — maps cleanly to this repo’s KV client |
+See **[`reversing-playbook-authenticode.md`](reversing-playbook-authenticode.md)** for copy-to-writable-directory (**Program Files** permission pitfall), **ilspycmd** one-liners, and xref hints.
 
 When filing issues, prefer **parity scenario IDs** from [`parity-matrix.md`](parity-matrix.md) and **gap IDs** from [`rust-sip-gaps.md`](rust-sip-gaps.md) (e.g. **`linux_trust_rfc3161_tsa_crypto_gap`**).
 
@@ -112,6 +129,7 @@ When filing issues, prefer **parity scenario IDs** from [`parity-matrix.md`](par
 | Tier | Command / script | Platform |
 |------|-------------------|----------|
 | Unix CI | `cargo digest-test` / workflows in **`ci-unix.yml`** | Linux |
+| Unix local mirror | **`scripts/linux-portable-validation.sh`** (from repo root; bash) | Linux / WSL / Git Bash |
 | Windows parity | `./scripts/run-parity-diff.ps1`, `./scripts/ci/run-exhaustive-parity-ci.ps1` | Windows |
 | MSIX focus | `./scripts/msix-parity-sign.ps1` | Windows |
 | Optional KV / Artifact env tests | Ignored tests in **`tests/parity_signtool.rs`** | Windows |
@@ -120,6 +138,7 @@ When filing issues, prefer **parity scenario IDs** from [`parity-matrix.md`](par
 
 ## Related documents
 
+- [`reversing-playbook-authenticode.md`](reversing-playbook-authenticode.md) — IDA / ilspycmd workflow.
 - [`roadmap-authenticode-linux.md`](roadmap-authenticode-linux.md) — phased Linux strategy.
 - [`rust-sip-gaps.md`](rust-sip-gaps.md) — SIP/Tier 1b/1c engineering backlog.
 - [`parity-matrix.md`](parity-matrix.md) — scenario status.

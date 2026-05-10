@@ -1,5 +1,7 @@
 # Parity Matrix
 
+Product-oriented **tool comparison** (native SignTool vs Azure vs **`signtool-windows`** / **`signtool-portable`**): [`gap-analysis-signing-platforms.md`](gap-analysis-signing-platforms.md).
+
 `Status` values:
 - `done`: implemented in Rust and parity-tested.
 - `partial`: implemented with limitations or delegated path.

@@ -2,6 +2,8 @@
 
 GitHub Actions exercises differential parity between native `signtool.exe` and **`signtool-windows`** (crate **`signtool-rs`**). Certificate material comes from the public **Devolutions Authenticode** test PKI ([`devolutions-authenticode`](https://github.com/Devolutions/devolutions-authenticode)): `authenticode-test-ca.crt` and `authenticode-test-cert.pfx` with password `CodeSign123!` (test-only; do not use in production).
 
+On **Linux**, the default portable gate is **`ci-unix.yml`**; locally you can run **`bash scripts/linux-portable-validation.sh`** from the repo root (same steps as that workflow’s Rust checks).
+
 ## Tier 1 — Default workflow (`windows.yml`)
 
 Runs on every push, PR, and daily schedule.
