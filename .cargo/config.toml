@@ -1,6 +1,6 @@
 [alias]
 # Main Windows CLI (`default-members` omit root crate — always pass `-p signtool-rs`).
-windows-bin = "build -p signtool-rs --bin signtool-rs --locked"
+windows-bin = "build -p signtool-rs --bin signtool-windows --locked"
 # Portable Authenticode digest stack (no Win32). See docs/roadmap-authenticode-linux.md.
 digest-check = "check -p signtool-sip-digest -p signtool-digest-cli -p signtool-authenticode-trust --locked"
 # `signtool-digest-cli` has integration tests only — keep it last so `--lib` does not silence them.

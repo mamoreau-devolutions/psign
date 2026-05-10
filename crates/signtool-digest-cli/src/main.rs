@@ -27,7 +27,7 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
-#[command(name = "signtool-digest")]
+#[command(name = "signtool-portable")]
 #[command(version, about = "Portable Authenticode SIP digest utilities (no Windows CryptoAPI)", long_about = None)]
 struct Cli {
     #[command(subcommand)]

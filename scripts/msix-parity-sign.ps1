@@ -51,12 +51,12 @@ function Resolve-SignTool {
 }
 
 function Resolve-RustBin {
-    $rustBin = Join-Path $workspace "target\debug\signtool-rs.exe"
+    $rustBin = Join-Path $workspace "target\debug\signtool-windows.exe"
     if (-not (Test-Path -LiteralPath $rustBin)) {
-        cargo build -p signtool-rs --bin signtool-rs | Out-Null
+        cargo build -p signtool-rs --bin signtool-windows | Out-Null
     }
     if (-not (Test-Path -LiteralPath $rustBin)) {
-        throw "Unable to locate signtool-rs.exe after build."
+        throw "Unable to locate signtool-windows.exe after build."
     }
     return $rustBin
 }

@@ -1,6 +1,6 @@
 # AuthRoot-style anchors on Linux
 
-Windows resolves Authenticode chains against machine/user certificate stores plus **Microsoft Authenticode roots**. On Linux, **`signtool-digest trust-verify-pe`** requires you to supply **explicit roots** (and optionally intermediates embedded in the PE PKCS#7).
+Windows resolves Authenticode chains against machine/user certificate stores plus **Microsoft Authenticode roots**. On Linux, **`signtool-portable trust-verify-pe`** requires you to supply **explicit roots** (and optionally intermediates embedded in the PE PKCS#7).
 
 ## Phase A — anchor directory (recommended first ship)
 
@@ -30,7 +30,7 @@ Pass **`--authroot-cab /path/to/authrootstl.cab`** on any **`trust-verify-*`** s
 ## Example
 
 ```bash
-signtool-digest trust-verify-pe \
+signtool-portable trust-verify-pe \
   --anchor-dir ./my-trusted-roots \
   ./signed.exe
 ```
@@ -38,7 +38,7 @@ signtool-digest trust-verify-pe \
 With Microsoft root harvest from CAB:
 
 ```bash
-signtool-digest trust-verify-pe \
+signtool-portable trust-verify-pe \
   --authroot-cab ./authrootstl.cab \
   --anchor-dir ./extra-enterprise-roots \
   --verbose-chain \
@@ -48,13 +48,13 @@ signtool-digest trust-verify-pe \
 Strict **code signing** EKU is default; for diagnostics only:
 
 ```bash
-signtool-digest trust-verify-pe --allow-loose-signing-cert ...
+signtool-portable trust-verify-pe --allow-loose-signing-cert ...
 ```
 
 Expired corpora / reproducible CI: pin verification instant:
 
 ```bash
-signtool-digest trust-verify-pe --anchor-dir ./roots --as-of 2023-07-01 ./fixture.exe
+signtool-portable trust-verify-pe --anchor-dir ./roots --as-of 2023-07-01 ./fixture.exe
 ```
 
 ## Related docs

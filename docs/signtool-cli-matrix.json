@@ -1,5 +1,5 @@
 {
-  "native_style_cli_aliases": "On Windows, argv tokens starting with `/` after the subcommand are rewritten to GNU-style flags before clap parses (e.g. `verify /pa /q file.exe`, `verify /vr`, `verify /p7s path.p7s`, `verify /testroot`, `verify /sl`, `verify /ph` pairs with `/v` like native, `sign /fd SHA256 /tseal URL file`, `sign /sa OID value`, `sign /seal`, `sign /c TemplateName`, `timestamp /force`, `remove /s file.exe`). Additionally, signtool-rs accepts `--` long aliases mirroring native names (sign `--fd`, `--tr`, `--tseal`, `--c`, `--sa`, `--fdchw`, `--tdchw`, `--rmc`, `--seal`, `--itos`, `--force`, `--nosealwarn`, `--noenclavewarn`; verify `--tw`, `--kp`, `--vr`, `--sha1`, `--p7s`, `--testroot`, `--sl`, `--bp`, `--enclave`; timestamp `--tr`/`--td`/`--tp`, `--force`, `--nosealwarn`; catdb `--d`/`--g`/`--r`/`--u`; remove `--s`/`--c`/`--u`).",
+  "native_style_cli_aliases": "On Windows, argv tokens starting with `/` after the subcommand are rewritten to GNU-style flags before clap parses (e.g. `verify /pa /q file.exe`, `verify /vr`, `verify /p7s path.p7s`, `verify /testroot`, `verify /sl`, `verify /ph` pairs with `/v` like native, `sign /fd SHA256 /tseal URL file`, `sign /sa OID value`, `sign /seal`, `sign /c TemplateName`, `timestamp /force`, `remove /s file.exe`). Additionally, signtool-windows accepts `--` long aliases mirroring native names (sign `--fd`, `--tr`, `--tseal`, `--c`, `--sa`, `--fdchw`, `--tdchw`, `--rmc`, `--seal`, `--itos`, `--force`, `--nosealwarn`, `--noenclavewarn`; verify `--tw`, `--kp`, `--vr`, `--sha1`, `--p7s`, `--testroot`, `--sl`, `--bp`, `--enclave`; timestamp `--tr`/`--td`/`--tp`, `--force`, `--nosealwarn`; catdb `--d`/`--g`/`--r`/`--u`; remove `--s`/`--c`/`--u`).",
   "invocation": [
     {"native": "@responsefile", "rust": "@responsefile", "tier": "P0", "status": "implemented", "notes": "UTF-8 (optional BOM) or UTF-16 LE/BE with BOM; invalid UTF-8 falls back to UTF-16 LE without BOM; one argument per line; double-quoted lines with \"\" escapes; blank line separates commands when @file is the only tail arg; inline @path splices one block; `@@` prefix strips one `@` for a literal leading at-sign; native signtool may mis-parse @ when the signtool.exe path contains spaces—parity script uses a TEMP copy"}
   ],
@@ -83,7 +83,7 @@
       {"native": "/ms", "rust": "--multiple-semantics", "tier": "P1", "status": "partial", "notes": "Documented no-op; WinVerifyTrust default varies by OS"},
       {"native": "/p7", "rust": "--verify-pkcs7-file", "tier": "P0", "status": "partial", "notes": "Same WinTrust file path as PE; PKCS-only semantics limited"},
       {"native": "/d", "rust": "--print-description", "tier": "P1", "status": "implemented", "notes": "SPC_SP_OPUS_INFO from WinVerifyTrust state; requires -v like native"},
-      {"native": "/ph", "rust": "--verify-page-hashes", "tier": "P1", "status": "implemented", "notes": "Requires -v like native; WTD_HASH_ONLY_FLAG + OID scan for SPC_PE_IMAGE_PAGE_HASHES; warns exit 2 if absent; portable probe + table parse (no WinTrust): `signtool-digest pe-has-page-hashes` / `pe-page-hash-info` — see `portable_digest_cli`"},
+      {"native": "/ph", "rust": "--verify-page-hashes", "tier": "P1", "status": "implemented", "notes": "Requires -v like native; WTD_HASH_ONLY_FLAG + OID scan for SPC_PE_IMAGE_PAGE_HASHES; warns exit 2 if absent; portable probe + table parse (no WinTrust): `signtool-portable pe-has-page-hashes` / `pe-page-hash-info` — see `portable_digest_cli`"},
       {"native": "/r", "rust": "--chain-root-subject", "tier": "P0", "status": "implemented"},
       {"native": "/sha1", "rust": "--signer-thumbprint-sha1", "tier": "P0", "status": "implemented", "notes": "Repeatable; signer cert SHA1 must match one value"},
       {"native": "/ca", "rust": "--intermediate-ca-sha1", "tier": "P0", "status": "implemented", "notes": "Repeatable; at least one intermediate CA thumbprint must match chain"},
@@ -169,7 +169,7 @@
       "extensions": [".wim", ".esd"],
       "windows_mechanism": "WIM/ESD image SIP (`EsdSip.dll`; GUID `9F3053C5-439D-4BF7-8A77-04F0450A1D9F`).",
       "rust_path": "`SignerSignEx3` / `WinVerifyTrust` — OS SIP; `code_sign_format::WimImage`; experimental digest parity in `sip_rust::esd_digest` (`--rust-sip esd`, `verify --rust-sip-esd-digest-check`); `remove` rejects.",
-      "parity": "No bundled signed WIM in-repo; optional local sign/verify with native `signtool` then `signtool-rs verify /pa --rust-sip-esd-digest-check` for Rust consistency."
+      "parity": "No bundled signed WIM in-repo; optional local sign/verify with native `signtool` then `signtool-windows verify /pa --rust-sip-esd-digest-check` for Rust consistency."
     },
     {
       "extensions": [".js", ".vbs", ".wsf"],
@@ -179,14 +179,14 @@
     }
   ],
   "portable_digest_cli": {
-    "binary": "signtool-digest",
+    "binary": "signtool-portable",
     "crate": "crates/signtool-digest-cli",
     "depends_on": "crates/signtool-sip-digest; crates/signtool-authenticode-trust (trust-verify-* subcommands)",
     "platforms_note": "Builds on Linux/macOS/Windows; no `windows` / WinVerifyTrust dependency.",
     "purpose": "Optional digest recomputation vs PKCS#7 indirect data and PE page-hash OID scans — additive to native signtool, not a full replacement.",
     "commands": [
       {"name": "pe-digest", "maps_to_native_concept": "PE SIP image hash (algorithm-selectable)"},
-      {"name": "verify-pe", "maps_to_native_concept": "Consistency check after conceptual WinTrust success — similar to `signtool-rs verify --rust-sip-pe-digest-check`"},
+      {"name": "verify-pe", "maps_to_native_concept": "Consistency check after conceptual WinTrust success — similar to `signtool-windows verify --rust-sip-pe-digest-check`"},
       {"name": "trust-verify-pe", "maps_to_native_concept": "Explicit-anchor PKCS#7 trust + picky chain + PE digest (not WinTrust); optional `--as-of YYYY-MM-DD` for expired fixtures"},
       {"name": "trust-verify-cab", "maps_to_native_concept": "`verify-cab` digest consistency then same trust stack as PE"},
       {"name": "trust-verify-catalog", "maps_to_native_concept": "`verify-catalog` CMS digest consistency then picky trust when Authenticode-wrapped"},

@@ -2,7 +2,7 @@
 
 This doc complements [`rust-sip-architecture.md`](rust-sip-architecture.md) and the parity matrix. **Rust SIP** means optional digest recomputation vs PKCS#7 indirect data after (or beside) OS **`WinVerifyTrust`** / **`SignerSignEx3`** — not replacing CryptSIP registration. Portable digest code lives in **`crates/signtool-sip-digest`** (Linux CI runs its unit tests). The **`signtool-rs`**
 crate **`check`**s on Linux with a stub **`main`**; full **`win`** / **`WinVerifyTrust`** paths remain Windows-only.
-Use **`signtool-digest`** ([`crates/signtool-digest-cli`](../crates/signtool-digest-cli)) on Unix for portable digest / PKCS#7 consistency checks.
+Use **`signtool-portable`** ([`crates/signtool-digest-cli`](../crates/signtool-digest-cli)) on Unix for portable digest / PKCS#7 consistency checks.
 
 **CI parity:** On Ubuntu, **`ci-unix`** runs **`cargo clippy -D warnings`** on **`signtool-sip-digest`**, **`signtool-digest-cli`**, **`signtool-authenticode-trust`**, and the **`signtool-rs` library** (CLI/`win` stays Windows-only). `signtool-digest-cli` integration tests run **`pe-digest`**, **`verify-pe`**, **`trust-verify-pe`** (failure without anchors; success with extracted embedded root + **`--as-of`** inside cert validity), **`pe-has-page-hashes`**, **`pe-page-hash-info`**, **`verify-pe-page-hashes`** (expects failure on tiny fixtures — no page-hash attrs), and **`pe-authenticode-ranges`** on **`tiny32.signed.efi`** / **`tiny64.signed.efi`** (golden SHA-256 hex + expect **`no`** page-hash attributes / empty info for those fixtures).
 
@@ -61,7 +61,7 @@ Prioritize based on whether you need **offline signing** without `mssign32` or *
 
 ## Next milestones (suggested order)
 
-1. **PE page-hash segments** — Align **contiguous verify** with **`WinVerifyTrust`** exclusions (checksum field, security dir pointer, certificate table) and add a fixture signed **with** `/ph` for regression tests (Linux CI via `signtool-digest` / `signtool-sip-digest`).
+1. **PE page-hash segments** — Align **contiguous verify** with **`WinVerifyTrust`** exclusions (checksum field, security dir pointer, certificate table) and add a fixture signed **with** `/ph` for regression tests (Linux CI via `signtool-portable` / `signtool-sip-digest`).
 2. **Rust PKCS#7 encode + `WIN_CERTIFICATE` embed** — Unblocks offline PE signing experiments and intersects split-digest (`/dg`, `/ds`) backlog.
 3. **Encrypted MSIX (`EappxSip*`)** — Requires Windows encrypted-package crypto or constrained FFI; not a ZIP-only digest.
 4. **VBA / `mso.dll`** — Only viable near-term via **`VBE7`** FFI or accepting permanent OS delegation.

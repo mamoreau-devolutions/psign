@@ -3,9 +3,9 @@ use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "signtool-rs",
+    name = "signtool-windows",
     version,
-    about = "Rust reimplementation of signtool.exe"
+    about = "Rust reimplementation of signtool.exe (Windows CryptoAPI / WinTrust)"
 )]
 pub struct Cli {
     #[command(flatten)]

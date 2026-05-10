@@ -44,3 +44,11 @@ windows = { version = "0.59", features = [
 [target.'cfg(windows)'.dev-dependencies]
 assert_cmd = "2"
 predicates = "3"
+
+[[bin]]
+name = "signtool-windows"
+path = "src/main.rs"
+
+[[bin]]
+name = "depgraph"
+path = "src/bin/depgraph.rs"

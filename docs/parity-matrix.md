@@ -49,7 +49,7 @@
 | Verify add-on (`--rust-sip-pe-digest-check`) | partial | After embedded WinTrust success in `src/win/verify.rs` |
 | PKCS#7 builder / WIN_CERTIFICATE embed in Rust | todo | Stubs + docs in `crates/signtool-sip-digest/src/pkcs7.rs`, `pe_embed.rs`; architecture in `docs/rust-sip-architecture.md` |
 | Tier 1b RFC3161 countersignature construction | todo | Stub `crates/signtool-sip-digest/src/timestamp.rs`; timestamp **verification** uses Win32 paths in `signtool-rs` |
-| Tier 1c PE page hashes (`/ph`) | partial | Portable **CMS + table parse + experimental contiguous verify**: `page_hashes.rs`, `signtool-digest verify-pe-page-hashes` (differs from WinTrust exclusions); strict `/ph` still `verify --verify-page-hashes` + `WinVerifyTrust` |
+| Tier 1c PE page hashes (`/ph`) | partial | Portable **CMS + table parse + experimental contiguous verify**: `page_hashes.rs`, `signtool-portable verify-pe-page-hashes` (differs from WinTrust exclusions); strict `/ph` still `verify --verify-page-hashes` + `WinVerifyTrust` |
 | Rust SIP script digest (PowerShell + WSH) | partial | `ps_script.rs`, `wsh_script.rs`, `--rust-sip script`; COM `ConvertTextToUnicode` vs UTF-8/BOM heuristic may diverge on some files |
 | Rust SIP MSI digest (OLE compound) | partial | `msi_digest.rs`, `--rust-sip msi`, `verify --rust-sip-msi-digest-check`; matches Signify `SignedMsiFile` traversal over `cfb`; PKCS#7 production/embed remains OS SIP |
 | Rust SIP WIM/ESD digest | partial | `esd_digest.rs`, `--rust-sip esd`, `verify --rust-sip-esd-digest-check`; prefix hash per `EsdSip.dll` (`GetHashDataOffset`, PKCS#7 tail at header **0xBC**); PKCS#7 production/embed remains OS SIP |
@@ -73,7 +73,7 @@ Machine-checked mapping of native switches to Rust flags lives in [`signtool-cli
 | Valid signed PE verifies (`/pa`) | `signtool verify /pa <file>` | Success exit code + trust success | done |
 | Verify with `/o <ver>` under `/pa` (embedded) | `signtool verify /pa /o … <file>` | Same exit code as rust `--os-version-check` without `--catalog`/`--catalog-search` (recent kits reject `/o` unless `/a`/`/c`/…) | done (`verify_pa_os_version_check_exit_match`) |
 | Verify `@rsp` UTF-16 LE + BOM | `signtool @rsp` vs `signtool-rs @rsp` | Rust decodes UTF-16 in `response_argv.rs`; native often misparses lines → `documented_native_utf16_rsp_gap` when native exits 1 and rust 0 | partial (intentional; native limitation) |
-| Catalog verify + `--os-version-check` | `signtool-rs verify <target> --catalog <cat> --os-version-check …` | Optional when `SIGNTOOL_RS_CATALOG_*` set; `artifact_catalog_os_version_semantic` in `run-parity-diff.ps1` | done (optional fixture) |
+| Catalog verify + `--os-version-check` | `signtool-windows verify <target> --catalog <cat> --os-version-check …` | Optional when `SIGNTOOL_RS_CATALOG_*` set; `artifact_catalog_os_version_semantic` in `run-parity-diff.ps1` | done (optional fixture) |
 | Default policy verify failure | `signtool verify <file>` | Verification error | done |
 | Sign with PFX + SHA256 | `signtool sign /f <pfx> /fd SHA256 <file>` | Signature embedded | done |
 | Timestamp existing signature | `signtool timestamp /tr <url> /td SHA256 <file>` | Timestamp countersignature | done |
@@ -83,13 +83,13 @@ Machine-checked mapping of native switches to Rust flags lives in [`signtool-cli
 | MSI `.msi` sign + `/pa` verify + description | Same as PE/ps1 pattern on user-supplied unsigned MSI | Optional env `SIGNTOOL_RS_MSI_UNSIGNED_FIXTURE` + PFX; scenarios `sign_msi_*`, `verify_msi_*`, `artifact_verify_msi_print_description_match` | done (optional fixture) |
 | WinMD `.winmd` sign + `/pa` verify + description | Native `signtool sign /fd SHA256 /f …` vs rust | CI: `pack-minimal-winmd.ps1` copies the unsigned PE as `.winmd`; optional local `SIGNTOOL_RS_WINMD_UNSIGNED_FIXTURE` + PFX; `sign_winmd_*`, `artifact_verify_winmd_print_description_match`; smoke `scripts/sip-format-smoke.ps1` | done |
 | Rust SIP PE digest gate | `signtool-rs sign … --rust-sip pe` vs native sign exit code | Optional fixtures + `scripts/rust-sip-parity-pe.ps1`; corpus `rust_sip_pe_sign_digest_gate_optional` | partial (experimental) |
-| Rust SIP verify digest add-on | `signtool-rs verify /pa --rust-sip-pe-digest-check` | Ignored test `tests/sip_rust_pe.rs` with `SIGNTOOL_RS_SIGNED_FIXTURE` | partial (experimental) |
+| Rust SIP verify digest add-on | `signtool-windows verify /pa --rust-sip-pe-digest-check` | Ignored test `tests/sip_rust_pe.rs` with `SIGNTOOL_RS_SIGNED_FIXTURE` | partial (experimental) |
 | Rust SIP script digest gate | `signtool-rs sign … --rust-sip script` on `.ps1`/`.js`/… | Optional ignored parity tests in `tests/parity_signtool.rs` when PFX + fixtures | partial (experimental) |
-| Rust SIP script verify add-on | `signtool-rs verify /pa --rust-sip-script-digest-check` | Same fixtures as above | partial (experimental) |
+| Rust SIP script verify add-on | `signtool-windows verify /pa --rust-sip-script-digest-check` | Same fixtures as above | partial (experimental) |
 | Rust SIP MSI digest gate | `signtool-rs sign … --rust-sip msi` on `.msi` | Post-sign `sip_rust::msi_digest` vs PKCS#7 after `SignerSignEx3`; optional `SIGNTOOL_RS_MSI_UNSIGNED_FIXTURE` parity | partial (experimental) |
-| Rust SIP MSI verify add-on | `signtool-rs verify /pa --rust-sip-msi-digest-check` on `.msi` | After WinTrust success, compares Rust MSI fingerprint vs indirect digest + `MsiDigitalSignatureEx` when present | partial (experimental) |
+| Rust SIP MSI verify add-on | `signtool-windows verify /pa --rust-sip-msi-digest-check` on `.msi` | After WinTrust success, compares Rust MSI fingerprint vs indirect digest + `MsiDigitalSignatureEx` when present | partial (experimental) |
 | Rust SIP WIM/ESD digest gate | `signtool-rs sign … --rust-sip esd` on `.wim`/`.esd` | Post-sign `sip_rust::esd_digest` vs PKCS#7 after `SignerSignEx3` | partial (experimental) |
-| Rust SIP WIM/ESD verify add-on | `signtool-rs verify /pa --rust-sip-esd-digest-check` | After WinTrust success on WIM/ESD, compares Rust prefix digest vs PKCS#7 indirect digest | partial (experimental) |
+| Rust SIP WIM/ESD verify add-on | `signtool-windows verify /pa --rust-sip-esd-digest-check` | After WinTrust success on WIM/ESD, compares Rust prefix digest vs PKCS#7 indirect digest | partial (experimental) |
 
 ## Artifact status
 

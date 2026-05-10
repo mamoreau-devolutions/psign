@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build -p signtool-rs --bin signtool-rs
+      - run: cargo build -p signtool-rs --bin signtool-windows
       - name: Bootstrap Devolutions test PKI + pack minimal MSIX
         shell: pwsh
         env:
@@ -33,7 +33,7 @@ jobs:
           }
           ./scripts/ci/bootstrap-devolutions-authenticode.ps1 -EmitGithubEnv
           $ws = "${{ github.workspace }}"
-          $exe = Join-Path $ws "target\debug\signtool-rs.exe"
+          $exe = Join-Path $ws "target\debug\signtool-windows.exe"
           $rt = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }
           $msix = Join-Path $rt "signtool_rs_extension_decoupled.msix"
           ./scripts/ci/pack-minimal-msix.ps1 -WorkspaceRoot $ws -PeAsExecutable $exe -OutputMsix $msix
@@ -46,7 +46,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build -p signtool-rs --bin signtool-rs
+      - run: cargo build -p signtool-rs --bin signtool-windows
       - name: Catalog verify (Rust)
         shell: pwsh
         env:
@@ -56,7 +56,7 @@ jobs:
           if (-not $env:SIGNTOOL_RS_CATALOG_TARGET -or -not $env:SIGNTOOL_RS_CATALOG_FILE) {
             throw "Set repository secrets SIGNTOOL_RS_CATALOG_TARGET and SIGNTOOL_RS_CATALOG_FILE."
           }
-          $rust = Join-Path "${{ github.workspace }}" "target\debug\signtool-rs.exe"
+          $rust = Join-Path "${{ github.workspace }}" "target\debug\signtool-windows.exe"
           & $rust verify $env:SIGNTOOL_RS_CATALOG_TARGET --catalog $env:SIGNTOOL_RS_CATALOG_FILE
           if ($LASTEXITCODE -ne 0) { throw "Catalog verify failed with exit $LASTEXITCODE" }
           & $rust verify $env:SIGNTOOL_RS_CATALOG_TARGET --catalog $env:SIGNTOOL_RS_CATALOG_FILE --os-version-check "386:10.0.26100.0"

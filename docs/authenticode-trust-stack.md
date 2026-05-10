@@ -11,7 +11,7 @@ This describes how **`crates/signtool-authenticode-trust`** composes crates for 
 | CMS Authenticode rules + X.509 chain verification | **`picky`** (`AuthenticodeSignature`, `authenticode_verifier`, `Cert::verifier`) | Validate **`messageDigest`** vs provided digest, signature over authenticated attributes, TBSCertificate signatures along **`issuer_chain`**, Basic Constraints / dates / EKU policy hooks. |
 | Trust anchors | This crate (**`anchor`**, **`authroot_cab`**, **`authroot_ctl`**) | Phase A: load **`*.crt`/`*.cer`/`*.pem`** from **`--anchor-dir`**. Phase B: CAB **`*.stl`** → PKCS#7 **`SignedData`** **`eContent`** CTL parse for **SHA-1 subject identifiers** plus PKCS#7-embedded certs. |
 | Policy knobs | **`policy::AuthenticodeTrustPolicy`** | Default **strict** code-signing EKU; CLI **`allow-loose-signing-cert`**, **`--prefer-timestamp-signing-time`** / **`--require-valid-timestamp`** (see [**Verification instant / timestamps**](#verification-instant--timestamps)), **`--as-of YYYY-MM-DD`** for **`exact_date`**. |
-| Portable CLI | **`signtool-digest`** | **`trust-verify-pe`**, **`trust-verify-cab`**, **`trust-verify-catalog`**, **`trust-verify-detached`** share anchor flags; detached uses [`pkcs7_wire::normalize_pkcs7_der_for_authenticode`](../crates/signtool-sip-digest/src/pkcs7_wire.rs). |
+| Portable CLI | **`signtool-portable`** | **`trust-verify-pe`**, **`trust-verify-cab`**, **`trust-verify-catalog`**, **`trust-verify-detached`** share anchor flags; detached uses [`pkcs7_wire::normalize_pkcs7_der_for_authenticode`](../crates/signtool-sip-digest/src/pkcs7_wire.rs). |
 
 ## Verification order (per PKCS#7 blob)
 

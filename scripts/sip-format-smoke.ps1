@@ -46,10 +46,10 @@ function Test-RsEnvPresent([string]$Name) {
 }
 
 $native = Resolve-NativeSignTool
-$rustBin = Join-Path $WorkspaceRoot "target\debug\signtool-rs.exe"
+$rustBin = Join-Path $WorkspaceRoot "target\debug\signtool-windows.exe"
 if (-not (Test-Path -LiteralPath $rustBin)) {
-    Write-Host "Building signtool-rs (debug)..."
-    & cargo build -p signtool-rs --bin signtool-rs | Out-Null
+    Write-Host "Building signtool-windows (debug)..."
+    & cargo build -p signtool-rs --bin signtool-windows | Out-Null
 }
 
 Write-Host "Native: $native"

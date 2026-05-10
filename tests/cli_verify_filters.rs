@@ -13,7 +13,7 @@ use std::path::Path;
 #[test]
 fn verify_os_version_check_parses() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "verify",
         "--policy",
         "pa",
@@ -32,7 +32,7 @@ fn verify_os_version_check_parses() {
 fn verify_os_version_check_requires_catalog_at_runtime() {
     let tmp = std::env::temp_dir().join("signtool_rs_osver_guard_probe.bin");
     fs::write(&tmp, b"x").unwrap();
-    Command::cargo_bin("signtool-rs")
+    Command::cargo_bin("signtool-windows")
         .expect("binary")
         .args([
             "verify",
@@ -51,7 +51,7 @@ fn verify_os_version_check_requires_catalog_at_runtime() {
 #[test]
 fn verify_repeatable_thumbprints_and_quiet_short_parse() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "-q",
         "verify",
         "--signer-thumbprint-sha1",
@@ -80,7 +80,7 @@ fn verify_repeatable_thumbprints_and_quiet_short_parse() {
 #[test]
 fn verify_accepts_multiple_trailing_files() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "verify",
         "--policy",
         "pa",
@@ -99,7 +99,7 @@ fn verify_accepts_multiple_trailing_files() {
 #[test]
 fn sign_accepts_multiple_trailing_files() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "sign",
         "--f",
         "a.pfx",
@@ -120,7 +120,7 @@ fn sign_accepts_multiple_trailing_files() {
 #[test]
 fn timestamp_accepts_multiple_trailing_files() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "timestamp",
         "--tr",
         "http://ts.example/rfc3161",
@@ -140,7 +140,7 @@ fn timestamp_accepts_multiple_trailing_files() {
 
 #[test]
 fn remove_accepts_multiple_trailing_files() {
-    let c = Cli::try_parse_from(["signtool-rs", "remove", "--s", "x.exe", "y.exe"]).expect("parse");
+    let c = Cli::try_parse_from(["signtool-windows", "remove", "--s", "x.exe", "y.exe"]).expect("parse");
     let SubCommand::Remove(r) = c.command else {
         panic!("expected remove");
     };
@@ -150,7 +150,7 @@ fn remove_accepts_multiple_trailing_files() {
 
 #[test]
 fn verify_detached_rejects_multiple_content_files() {
-    Command::cargo_bin("signtool-rs")
+    Command::cargo_bin("signtool-windows")
         .expect("binary available")
         .args(["verify", "--detached-pkcs7", "sig.p7s", "a.exe", "b.exe"])
         .assert()
@@ -162,7 +162,7 @@ fn verify_detached_rejects_multiple_content_files() {
 
 #[test]
 fn verify_detached_content_without_detached_errors_at_runtime() {
-    Command::cargo_bin("signtool-rs")
+    Command::cargo_bin("signtool-windows")
         .expect("binary available")
         .args(["verify", "--detached-pkcs7-content", "content.bin", "x.exe"])
         .assert()
@@ -180,7 +180,7 @@ fn verify_wrong_signer_thumbprint_fails_on_signed_pe() {
     if !fixture.exists() {
         return;
     }
-    Command::cargo_bin("signtool-rs")
+    Command::cargo_bin("signtool-windows")
         .expect("binary available")
         .args([
             "verify",
@@ -197,7 +197,7 @@ fn verify_wrong_signer_thumbprint_fails_on_signed_pe() {
 
 #[test]
 fn verify_pca_warn_flags_conflict_at_runtime() {
-    Command::cargo_bin("signtool-rs")
+    Command::cargo_bin("signtool-windows")
         .expect("binary available")
         .args(["verify", "--warn-pca-2010", "--no-warn-pca-2010", "x.exe"])
         .assert()
@@ -207,7 +207,7 @@ fn verify_pca_warn_flags_conflict_at_runtime() {
 
 #[test]
 fn sign_ph_and_nph_mutually_exclusive() {
-    Command::cargo_bin("signtool-rs")
+    Command::cargo_bin("signtool-windows")
         .expect("binary available")
         .args(["sign", "--page-hashes", "--no-page-hashes", "nope.exe"])
         .assert()
@@ -218,7 +218,7 @@ fn sign_ph_and_nph_mutually_exclusive() {
 #[test]
 fn verify_detached_p7s_alias_parses() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "verify",
         "content.bin",
         "--p7s",
@@ -240,7 +240,7 @@ fn verify_detached_p7s_alias_parses() {
 
 #[test]
 fn verify_vr_alias_sets_revocation_check() {
-    let c = Cli::try_parse_from(["signtool-rs", "verify", "--vr", "--policy", "pa", "x.exe"])
+    let c = Cli::try_parse_from(["signtool-windows", "verify", "--vr", "--policy", "pa", "x.exe"])
         .expect("parse");
     let SubCommand::Verify(v) = c.command else {
         panic!("expected verify");
@@ -251,7 +251,7 @@ fn verify_vr_alias_sets_revocation_check() {
 #[test]
 fn verify_testroot_alias_sets_allow_test_root() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "verify",
         "--testroot",
         "--policy",
@@ -267,7 +267,7 @@ fn verify_testroot_alias_sets_allow_test_root() {
 
 #[test]
 fn verify_sl_sets_flag_and_runs_embedded_path() {
-    let c = Cli::try_parse_from(["signtool-rs", "verify", "--sl", "--policy", "pa", "x.exe"])
+    let c = Cli::try_parse_from(["signtool-windows", "verify", "--sl", "--policy", "pa", "x.exe"])
         .expect("parse");
     let SubCommand::Verify(v) = c.command else {
         panic!("expected verify");
@@ -278,7 +278,7 @@ fn verify_sl_sets_flag_and_runs_embedded_path() {
 #[test]
 #[cfg(windows)]
 fn verify_sl_rejects_detached_pkcs7() {
-    let mut cmd = Command::cargo_bin("signtool-rs").unwrap();
+    let mut cmd = Command::cargo_bin("signtool-windows").unwrap();
     cmd.args([
         "verify",
         "--policy",
@@ -303,7 +303,7 @@ fn at_response_file_single_invocation() {
     )
     .expect("write rsp");
     let at = format!("@{}", rsp.display());
-    Command::cargo_bin("signtool-rs")
+    Command::cargo_bin("signtool-windows")
         .expect("binary available")
         .arg(&at)
         .assert()
@@ -313,7 +313,7 @@ fn at_response_file_single_invocation() {
 
 #[test]
 fn timestamp_force_not_implemented() {
-    Command::cargo_bin("signtool-rs")
+    Command::cargo_bin("signtool-windows")
         .expect("binary available")
         .args([
             "timestamp",
@@ -329,7 +329,7 @@ fn timestamp_force_not_implemented() {
 
 #[test]
 fn timestamp_nosealwarn_not_implemented() {
-    Command::cargo_bin("signtool-rs")
+    Command::cargo_bin("signtool-windows")
         .expect("binary available")
         .args([
             "timestamp",
@@ -345,7 +345,7 @@ fn timestamp_nosealwarn_not_implemented() {
 
 #[test]
 fn verify_tw_alias_equivalent_to_long_flag() {
-    let c = Cli::try_parse_from(["signtool-rs", "verify", "--tw", "--policy", "pa", "x.exe"])
+    let c = Cli::try_parse_from(["signtool-windows", "verify", "--tw", "--policy", "pa", "x.exe"])
         .expect("parse");
     let SubCommand::Verify(v) = c.command else {
         panic!("expected verify");
@@ -356,7 +356,7 @@ fn verify_tw_alias_equivalent_to_long_flag() {
 #[test]
 fn sign_seal_tseal_url_parses() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "sign",
         "--f",
         "c.pfx",
@@ -383,7 +383,7 @@ fn sign_seal_tseal_url_parses() {
 fn sign_tr_and_tseal_conflict() {
     assert!(
         Cli::try_parse_from([
-            "signtool-rs",
+            "signtool-windows",
             "sign",
             "--f",
             "a.pfx",
@@ -402,7 +402,7 @@ fn sign_tr_and_tseal_conflict() {
 #[test]
 fn sign_fd_and_tr_aliases_parse() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "sign",
         "--f",
         "cert.pfx",
@@ -429,7 +429,7 @@ fn sign_fd_and_tr_aliases_parse() {
 #[test]
 fn sign_auth_pairs_parse() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "sign",
         "--f",
         "a.pfx",
@@ -453,7 +453,7 @@ fn sign_auth_pairs_parse() {
 #[test]
 fn sign_certificate_template_alias_c_parses() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "sign",
         "--f",
         "a.pfx",
@@ -472,7 +472,7 @@ fn sign_certificate_template_alias_c_parses() {
 
 #[test]
 fn sign_seal_not_implemented_before_crypto() {
-    Command::cargo_bin("signtool-rs")
+    Command::cargo_bin("signtool-windows")
         .expect("binary available")
         .args([
             "sign",
@@ -490,7 +490,7 @@ fn sign_seal_not_implemented_before_crypto() {
 
 #[test]
 fn sign_certificate_template_not_implemented() {
-    Command::cargo_bin("signtool-rs")
+    Command::cargo_bin("signtool-windows")
         .expect("binary available")
         .args([
             "sign",
@@ -510,7 +510,7 @@ fn sign_certificate_template_not_implemented() {
 #[test]
 fn timestamp_native_style_aliases_parse() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "timestamp",
         "--tr",
         "http://ts.example/rfc3161",
@@ -532,7 +532,7 @@ fn timestamp_native_style_aliases_parse() {
 #[test]
 fn timestamp_tseal_url_parses() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "timestamp",
         "--tseal",
         "http://ts.example/seal",
@@ -555,7 +555,7 @@ fn timestamp_tseal_url_parses() {
 fn timestamp_tr_and_tseal_conflict() {
     assert!(
         Cli::try_parse_from([
-            "signtool-rs",
+            "signtool-windows",
             "timestamp",
             "--tr",
             "http://a",
@@ -572,7 +572,7 @@ fn timestamp_tr_and_tseal_conflict() {
 #[test]
 #[cfg(windows)]
 fn remove_strip_chain_missing_file_is_not_stub_error() {
-    Command::cargo_bin("signtool-rs")
+    Command::cargo_bin("signtool-windows")
         .expect("binary available")
         .args(["remove", "--c", "signtool_rs_remove_c_missing_xyz.exe"])
         .assert()
@@ -582,7 +582,7 @@ fn remove_strip_chain_missing_file_is_not_stub_error() {
 
 #[test]
 fn remove_requires_one_mode() {
-    Command::cargo_bin("signtool-rs")
+    Command::cargo_bin("signtool-windows")
         .expect("binary available")
         .args(["remove", "nope.exe"])
         .assert()
@@ -594,7 +594,7 @@ fn remove_requires_one_mode() {
 #[cfg(windows)]
 fn windows_slash_argv_normalizes_to_clap_verify() {
     let raw = vec![
-        OsString::from("signtool-rs"),
+        OsString::from("signtool-windows"),
         OsString::from("verify"),
         OsString::from("/pa"),
         OsString::from("/q"),
@@ -611,7 +611,7 @@ fn windows_slash_argv_normalizes_to_clap_verify() {
 
 #[test]
 fn verify_page_hashes_requires_verbose() {
-    let mut cmd = Command::cargo_bin("signtool-rs").unwrap();
+    let mut cmd = Command::cargo_bin("signtool-windows").unwrap();
     cmd.args([
         "verify",
         "--policy",
@@ -626,7 +626,7 @@ fn verify_page_hashes_requires_verbose() {
 
 #[test]
 fn verify_print_description_requires_verbose() {
-    let mut cmd = Command::cargo_bin("signtool-rs").unwrap();
+    let mut cmd = Command::cargo_bin("signtool-windows").unwrap();
     cmd.args([
         "verify",
         "--policy",
@@ -645,7 +645,7 @@ fn remove_strip_signature_rejects_powershell_script() {
     let ps1 =
         std::env::temp_dir().join(format!("signtool_rs_remove_cli_{}.ps1", std::process::id()));
     std::fs::write(&ps1, "# parity-remove-test\n").expect("write ps1");
-    let mut cmd = Command::cargo_bin("signtool-rs").unwrap();
+    let mut cmd = Command::cargo_bin("signtool-windows").unwrap();
     cmd.arg("remove").arg("--strip-signature").arg(&ps1);
     cmd.assert()
         .failure()
@@ -658,7 +658,7 @@ fn remove_strip_signature_rejects_powershell_script() {
 fn remove_strip_signature_rejects_js_script() {
     let js = std::env::temp_dir().join(format!("signtool_rs_remove_cli_{}.js", std::process::id()));
     std::fs::write(&js, "// parity-remove-test\n").expect("write js");
-    let mut cmd = Command::cargo_bin("signtool-rs").unwrap();
+    let mut cmd = Command::cargo_bin("signtool-windows").unwrap();
     cmd.arg("remove").arg("--strip-signature").arg(&js);
     cmd.assert()
         .failure()
@@ -672,7 +672,7 @@ fn remove_strip_signature_rejects_vbs_script() {
     let vbs =
         std::env::temp_dir().join(format!("signtool_rs_remove_cli_{}.vbs", std::process::id()));
     std::fs::write(&vbs, "' parity-remove-test\n").expect("write vbs");
-    let mut cmd = Command::cargo_bin("signtool-rs").unwrap();
+    let mut cmd = Command::cargo_bin("signtool-windows").unwrap();
     cmd.arg("remove").arg("--strip-signature").arg(&vbs);
     cmd.assert()
         .failure()
@@ -688,7 +688,7 @@ fn remove_strip_signature_rejects_msix_package() {
         std::process::id()
     ));
     std::fs::write(&msix, b"not-a-real-msix").expect("write msix");
-    let mut cmd = Command::cargo_bin("signtool-rs").unwrap();
+    let mut cmd = Command::cargo_bin("signtool-windows").unwrap();
     cmd.arg("remove").arg("--strip-signature").arg(&msix);
     cmd.assert()
         .failure()
@@ -704,7 +704,7 @@ fn remove_strip_signature_rejects_unknown_extension() {
         std::process::id()
     ));
     std::fs::write(&weird, b"x").expect("write junk");
-    let mut cmd = Command::cargo_bin("signtool-rs").unwrap();
+    let mut cmd = Command::cargo_bin("signtool-windows").unwrap();
     cmd.arg("remove").arg("--strip-signature").arg(&weird);
     cmd.assert()
         .failure()
@@ -718,7 +718,7 @@ fn remove_strip_signature_rejects_windows_installer_msi() {
     let msi =
         std::env::temp_dir().join(format!("signtool_rs_remove_cli_{}.msi", std::process::id()));
     std::fs::write(&msi, b"not-a-real-msi").expect("write msi");
-    let mut cmd = Command::cargo_bin("signtool-rs").unwrap();
+    let mut cmd = Command::cargo_bin("signtool-windows").unwrap();
     cmd.arg("remove").arg("--strip-signature").arg(&msi);
     cmd.assert()
         .failure()
@@ -732,7 +732,7 @@ fn remove_strip_signature_rejects_wim_image() {
     let wim =
         std::env::temp_dir().join(format!("signtool_rs_remove_cli_{}.wim", std::process::id()));
     std::fs::write(&wim, b"not-a-real-wim").expect("write wim");
-    let mut cmd = Command::cargo_bin("signtool-rs").unwrap();
+    let mut cmd = Command::cargo_bin("signtool-windows").unwrap();
     cmd.arg("remove").arg("--strip-signature").arg(&wim);
     cmd.assert()
         .failure()
@@ -750,7 +750,7 @@ fn remove_strip_signature_rejects_wsf_script() {
         r#"<?xml version="1.0"?><package><job id="t"><script>//x</script></job></package>"#,
     )
     .expect("write wsf");
-    let mut cmd = Command::cargo_bin("signtool-rs").unwrap();
+    let mut cmd = Command::cargo_bin("signtool-windows").unwrap();
     cmd.arg("remove").arg("--strip-signature").arg(&wsf);
     cmd.assert()
         .failure()
@@ -762,7 +762,7 @@ fn remove_strip_signature_rejects_wsf_script() {
 #[cfg(windows)]
 fn windows_slash_argv_normalizes_sign_sa_two_values() {
     let raw = vec![
-        OsString::from("signtool-rs"),
+        OsString::from("signtool-windows"),
         OsString::from("sign"),
         OsString::from("/f"),
         OsString::from("a.pfx"),
@@ -787,7 +787,7 @@ fn windows_slash_argv_normalizes_sign_sa_two_values() {
 #[test]
 fn sign_rust_sip_script_parses() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "sign",
         "--pfx",
         "a.pfx",
@@ -807,7 +807,7 @@ fn sign_rust_sip_script_parses() {
 #[test]
 fn sign_rust_sip_pe_parses() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "sign",
         "--pfx",
         "a.pfx",
@@ -827,7 +827,7 @@ fn sign_rust_sip_pe_parses() {
 #[test]
 fn sign_rust_sip_msi_parses() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "sign",
         "--pfx",
         "a.pfx",
@@ -847,7 +847,7 @@ fn sign_rust_sip_msi_parses() {
 #[test]
 fn sign_rust_sip_msix_parses() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "sign",
         "--pfx",
         "a.pfx",
@@ -867,7 +867,7 @@ fn sign_rust_sip_msix_parses() {
 #[test]
 fn sign_rust_sip_esd_parses() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "sign",
         "--pfx",
         "a.pfx",
@@ -887,7 +887,7 @@ fn sign_rust_sip_esd_parses() {
 #[test]
 fn sign_rust_sip_cab_parses() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "sign",
         "--pfx",
         "a.pfx",
@@ -907,7 +907,7 @@ fn sign_rust_sip_cab_parses() {
 #[test]
 fn sign_rust_sip_catalog_parses() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "sign",
         "--pfx",
         "a.pfx",
@@ -927,7 +927,7 @@ fn sign_rust_sip_catalog_parses() {
 #[test]
 fn verify_rust_sip_script_digest_check_parses() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "verify",
         "--policy",
         "pa",
@@ -944,7 +944,7 @@ fn verify_rust_sip_script_digest_check_parses() {
 #[test]
 fn verify_rust_sip_pe_digest_check_parses() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "verify",
         "--policy",
         "pa",
@@ -961,7 +961,7 @@ fn verify_rust_sip_pe_digest_check_parses() {
 #[test]
 fn verify_rust_sip_msi_digest_check_parses() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "verify",
         "--policy",
         "pa",
@@ -978,7 +978,7 @@ fn verify_rust_sip_msi_digest_check_parses() {
 #[test]
 fn verify_rust_sip_msix_digest_check_parses() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "verify",
         "--policy",
         "pa",
@@ -995,7 +995,7 @@ fn verify_rust_sip_msix_digest_check_parses() {
 #[test]
 fn verify_rust_sip_esd_digest_check_parses() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "verify",
         "--policy",
         "pa",
@@ -1012,7 +1012,7 @@ fn verify_rust_sip_esd_digest_check_parses() {
 #[test]
 fn verify_rust_sip_cab_digest_check_parses() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "verify",
         "--policy",
         "pa",
@@ -1029,7 +1029,7 @@ fn verify_rust_sip_cab_digest_check_parses() {
 #[test]
 fn verify_rust_sip_catalog_digest_check_parses() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "verify",
         "--policy",
         "pa",
@@ -1046,7 +1046,7 @@ fn verify_rust_sip_catalog_digest_check_parses() {
 #[test]
 fn verify_rust_sip_all_digest_checks_parses() {
     let c = Cli::try_parse_from([
-        "signtool-rs",
+        "signtool-windows",
         "verify",
         "--policy",
         "pa",

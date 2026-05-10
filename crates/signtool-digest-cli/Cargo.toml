@@ -5,7 +5,7 @@ edition = "2024"
 description = "Linux/macOS-friendly CLI over portable Authenticode SIP digests (signtool-sip-digest)"
 
 [[bin]]
-name = "signtool-digest"
+name = "signtool-portable"
 path = "src/main.rs"
 
 [dependencies]

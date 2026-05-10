@@ -1,7 +1,7 @@
 # Orchestrate Devolutions PKI bootstrap, derived fixtures, minimal MSIX pack, and run-parity-diff with exhaustive semantic gates.
 param(
     [string]$WorkspaceRoot,
-    [string]$UnsignedPeRel = "target\debug\signtool-rs.exe",
+    [string]$UnsignedPeRel = "target\debug\signtool-windows.exe",
     [switch]$SkipMsixParitySignReport
 )
 
@@ -15,7 +15,7 @@ Set-Location -LiteralPath $WorkspaceRoot
 
 $unsignedPe = Join-Path $WorkspaceRoot $UnsignedPeRel
 if (-not (Test-Path -LiteralPath $unsignedPe)) {
-    throw "Unsigned PE not found (build signtool-rs first): $unsignedPe"
+    throw "Unsigned PE not found (build signtool-windows first): $unsignedPe"
 }
 
 & (Join-Path $PSScriptRoot "prepare-parity-fixtures.ps1") `

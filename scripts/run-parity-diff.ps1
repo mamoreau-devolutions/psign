@@ -42,10 +42,10 @@ function Resolve-SignTool {
 
 $nativeSignTool = Resolve-SignTool
 $workspace = Split-Path -Parent $PSScriptRoot
-$rustBin = Join-Path $workspace "target\debug\signtool-rs.exe"
+$rustBin = Join-Path $workspace "target\debug\signtool-windows.exe"
 
 if (-not (Test-Path -LiteralPath $rustBin)) {
-    cargo build -p signtool-rs --bin signtool-rs | Out-Null
+    cargo build -p signtool-rs --bin signtool-windows | Out-Null
 }
 
 if ($MsixOnly) {

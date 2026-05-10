@@ -1,6 +1,6 @@
 # CI parity tiers
 
-GitHub Actions exercises differential parity between native `signtool.exe` and `signtool-rs`. Certificate material comes from the public **Devolutions Authenticode** test PKI ([`devolutions-authenticode`](https://github.com/Devolutions/devolutions-authenticode)): `authenticode-test-ca.crt` and `authenticode-test-cert.pfx` with password `CodeSign123!` (test-only; do not use in production).
+GitHub Actions exercises differential parity between native `signtool.exe` and **`signtool-windows`** (crate **`signtool-rs`**). Certificate material comes from the public **Devolutions Authenticode** test PKI ([`devolutions-authenticode`](https://github.com/Devolutions/devolutions-authenticode)): `authenticode-test-ca.crt` and `authenticode-test-cert.pfx` with password `CodeSign123!` (test-only; do not use in production).
 
 ## Tier 1 — Default workflow (`windows.yml`)
 
@@ -8,8 +8,8 @@ Runs on every push, PR, and daily schedule.
 
 1. **`scripts/ci/bootstrap-devolutions-authenticode.ps1`** — Downloads CA + PFX from raw URLs pinned to a fixed commit SHA, imports the CA into the machine (or user) trusted root, sets `SIGNTOOL_RS_TEST_PFX*` and timestamp URLs.
 2. **`scripts/ci/prepare-parity-fixtures.ps1`** — Native-signs a temp PE (`SIGNTOOL_RS_SIGNED_FIXTURE`) for timestamp scenarios; produces detached PKCS#7 via native `signtool sign /p7 …` (`SIGNTOOL_RS_DETACHED_*`).
-3. **`scripts/ci/pack-minimal-msix.ps1`** — Packs [`tests/fixtures/msix-minimal/`](../tests/fixtures/msix-minimal/AppxManifest.xml) + `noop.exe` (copy of the built `signtool-rs.exe`) into an unsigned `.msix`.
-4. **`scripts/ci/pack-minimal-winmd.ps1`** — Copies the same unsigned `signtool-rs.exe` to **`SIGNTOOL_RS_WINMD_UNSIGNED_FIXTURE`** (`.winmd` extension) so **`run-parity-diff`** exercises WinMD SIP scenarios; **`SIGNTOOL_RS_WINMD_TIMESTAMP_URL`** mirrors **`SIGNTOOL_RS_TIMESTAMP_URL`** when set after bootstrap.
+3. **`scripts/ci/pack-minimal-msix.ps1`** — Packs [`tests/fixtures/msix-minimal/`](../tests/fixtures/msix-minimal/AppxManifest.xml) + `noop.exe` (copy of the built `signtool-windows.exe`) into an unsigned `.msix`.
+4. **`scripts/ci/pack-minimal-winmd.ps1`** — Copies the same unsigned `signtool-windows.exe` to **`SIGNTOOL_RS_WINMD_UNSIGNED_FIXTURE`** (`.winmd` extension) so **`run-parity-diff`** exercises WinMD SIP scenarios; **`SIGNTOOL_RS_WINMD_TIMESTAMP_URL`** mirrors **`SIGNTOOL_RS_TIMESTAMP_URL`** when set after bootstrap.
 5. **`scripts/run-parity-diff.ps1 -FailOnSemantic -FailOnSemanticExhaustive`** — Static CLI matrix, remove scenarios, PE + script description parity, timestamp exits, detached verify, catalog path if env set, MSIX semantic blocks when env present, WinMD scenarios when the WinMD fixture env is set, etc. Exhaustive mode asserts that core PE, timestamp, MSIX package, and detached env vars are all set before running.
 6. **`scripts/msix-parity-sign.ps1 -FailOnSemantic`** — Focused MSIX sign/verify report (`parity-output/msix-parity-sign-report.json`).
 
@@ -28,7 +28,7 @@ Manual **`workflow_dispatch`** only.
 | Input | Requires secrets | Behavior |
 |-------|------------------|----------|
 | **MSIX decoupled** | `SIGNTOOL_RS_MSIX_DLIB`, `SIGNTOOL_RS_MSIX_DMDF` | Repacks minimal MSIX, runs `msix-parity-sign.ps1 -UseDecoupledDigest` (same **`documented_rust_msix_sign_ex3_gap`** vs **`semantic_mismatch`** rules as embedded MSIX when sign exits differ). If you run **`run-parity-diff.ps1`** with those env vars set, **`artifact_msix_decoupled_semantic`** uses the same classification. |
-| **Catalog verify** | `SIGNTOOL_RS_CATALOG_TARGET`, `SIGNTOOL_RS_CATALOG_FILE` | Runs `signtool-rs verify <target> --catalog <cat>`, then the same with `--os-version-check 386:10.0.26100.0`. Optional exhaustive parity records both as `artifact_catalog_*`. |
+| **Catalog verify** | `SIGNTOOL_RS_CATALOG_TARGET`, `SIGNTOOL_RS_CATALOG_FILE` | Runs `signtool-windows verify <target> --catalog <cat>`, then the same with `--os-version-check 386:10.0.26100.0`. Optional exhaustive parity records both as `artifact_catalog_*`. |
 
 ## Operator notes
 

@@ -20,14 +20,14 @@ fn verify_matches_native_exit_code_for_known_signed_binary() {
         .output()
         .expect("failed to execute native signtool");
 
-    let rust = Command::cargo_bin("signtool-rs")
+    let rust = Command::cargo_bin("signtool-windows")
         .expect("binary available")
         .arg("verify")
         .arg("--policy")
         .arg("pa")
         .arg(fixture)
         .output()
-        .expect("failed to execute signtool-rs");
+        .expect("failed to execute signtool-windows");
 
     assert_eq!(native.status.success(), rust.status.success());
 }
@@ -47,14 +47,14 @@ fn verify_default_policy_matches_native_failure() {
         .output()
         .expect("failed to execute native signtool");
 
-    let rust = Command::cargo_bin("signtool-rs")
+    let rust = Command::cargo_bin("signtool-windows")
         .expect("binary available")
         .arg("verify")
         .arg("--policy")
         .arg("default")
         .arg(fixture)
         .output()
-        .expect("failed to execute signtool-rs");
+        .expect("failed to execute signtool-windows");
 
     assert_eq!(native.status.success(), rust.status.success());
 }
@@ -92,7 +92,7 @@ fn sign_semantic_parity_creates_verifiable_signature() {
     let signed_out = std::env::temp_dir().join("signtool_rs_signed_semantic.exe");
     let _ = std::fs::copy(&unsigned, &signed_out).expect("copy unsigned fixture");
 
-    let mut rust = Command::cargo_bin("signtool-rs").expect("binary available");
+    let mut rust = Command::cargo_bin("signtool-windows").expect("binary available");
     rust.arg("sign")
         .arg("--pfx")
         .arg(&pfx)
@@ -102,7 +102,7 @@ fn sign_semantic_parity_creates_verifiable_signature() {
     if let Some(p) = pfx_password {
         rust.arg("--password").arg(p);
     }
-    let rust_out = rust.output().expect("run signtool-rs sign");
+    let rust_out = rust.output().expect("run signtool-windows sign");
     assert!(
         rust_out.status.success(),
         "{}",
@@ -136,7 +136,7 @@ fn timestamp_semantic_parity_adds_countersignature() {
     let ts_out = std::env::temp_dir().join("signtool_rs_timestamp_semantic.exe");
     let _ = std::fs::copy(&signed_fixture, &ts_out).expect("copy signed fixture");
 
-    let rust = Command::cargo_bin("signtool-rs")
+    let rust = Command::cargo_bin("signtool-windows")
         .expect("binary available")
         .arg("timestamp")
         .arg("--rfc3161-url")
@@ -145,7 +145,7 @@ fn timestamp_semantic_parity_adds_countersignature() {
         .arg("sha256")
         .arg(&ts_out)
         .output()
-        .expect("run signtool-rs timestamp");
+        .expect("run signtool-windows timestamp");
     assert!(
         rust.status.success(),
         "{}",
@@ -179,7 +179,7 @@ fn detached_semantic_parity_matches_native_integrity() {
         Some(v) => v,
         None => return,
     };
-    let rust = Command::cargo_bin("signtool-rs")
+    let rust = Command::cargo_bin("signtool-windows")
         .expect("binary available")
         .args(["verify", "--policy", "pa", "--allow-test-root"])
         .arg(&content)
@@ -205,7 +205,7 @@ fn catalog_semantic_path_executes_in_rust() {
         Some(v) => v,
         None => return,
     };
-    let rust = Command::cargo_bin("signtool-rs")
+    let rust = Command::cargo_bin("signtool-windows")
         .expect("binary available")
         .arg("verify")
         .arg(&target)
@@ -219,7 +219,7 @@ fn catalog_semantic_path_executes_in_rust() {
         String::from_utf8_lossy(&rust.stderr)
     );
 
-    let rust_os = Command::cargo_bin("signtool-rs")
+    let rust_os = Command::cargo_bin("signtool-windows")
         .expect("binary available")
         .args(["verify", "--os-version-check", "386:10.0.26100.0"])
         .arg(&target)
@@ -241,7 +241,7 @@ fn multisig_verify_path_executes_in_rust() {
         Some(v) => v,
         None => return,
     };
-    let rust = Command::cargo_bin("signtool-rs")
+    let rust = Command::cargo_bin("signtool-windows")
         .expect("binary available")
         .arg("verify")
         .arg(fixture)
@@ -262,7 +262,7 @@ fn revocation_policy_path_executes() {
         Some(v) => v,
         None => return,
     };
-    let rust = Command::cargo_bin("signtool-rs")
+    let rust = Command::cargo_bin("signtool-windows")
         .expect("binary available")
         .arg("verify")
         .arg(fixture)
@@ -293,7 +293,7 @@ fn msix_sign_with_rfc3161_timestamp_executes() {
     let out = std::env::temp_dir().join("signtool_rs_msix_semantic.msix");
     let _ = std::fs::copy(&unsigned_msix, &out).expect("copy unsigned msix");
 
-    let mut rust = Command::cargo_bin("signtool-rs").expect("binary available");
+    let mut rust = Command::cargo_bin("signtool-windows").expect("binary available");
     rust.arg("sign")
         .arg("--pfx")
         .arg(&pfx)
@@ -307,7 +307,7 @@ fn msix_sign_with_rfc3161_timestamp_executes() {
         rust.arg("--password").arg(pw);
     }
     rust.arg(&out);
-    let rust_out = rust.output().expect("run signtool-rs msix sign");
+    let rust_out = rust.output().expect("run signtool-windows msix sign");
     assert!(
         rust_out.status.success(),
         "{}",
@@ -328,7 +328,7 @@ fn msix_sign_requires_timestamp_url() {
     };
     let out = std::env::temp_dir().join("signtool_rs_msix_notimestamp.msix");
     let _ = std::fs::copy(&unsigned_msix, &out).expect("copy unsigned msix");
-    let rust = Command::cargo_bin("signtool-rs")
+    let rust = Command::cargo_bin("signtool-windows")
         .expect("binary available")
         .arg("sign")
         .arg("--pfx")
@@ -337,7 +337,7 @@ fn msix_sign_requires_timestamp_url() {
         .arg("sha256")
         .arg(&out)
         .output()
-        .expect("run signtool-rs msix sign without timestamp");
+        .expect("run signtool-windows msix sign without timestamp");
     assert!(!rust.status.success());
 }
 
@@ -368,7 +368,7 @@ fn msix_dlib_dmdf_path_executes() {
     let out = std::env::temp_dir().join("signtool_rs_msix_decoupled.msix");
     let _ = std::fs::copy(&unsigned_msix, &out).expect("copy unsigned msix");
 
-    let mut rust = Command::cargo_bin("signtool-rs").expect("binary available");
+    let mut rust = Command::cargo_bin("signtool-windows").expect("binary available");
     rust.arg("sign")
         .arg("--pfx")
         .arg(&pfx)
@@ -387,7 +387,7 @@ fn msix_dlib_dmdf_path_executes() {
         rust.arg("--password").arg(pw);
     }
     rust.arg(&out);
-    let rust_out = rust.output().expect("run signtool-rs msix dlib/dmdf sign");
+    let rust_out = rust.output().expect("run signtool-windows msix dlib/dmdf sign");
     assert!(
         rust_out.status.success(),
         "{}",
@@ -441,7 +441,7 @@ fn ps1_sign_aligns_with_native_sip_stack() {
         String::from_utf8_lossy(&native_out.stderr)
     );
 
-    let mut rust_cmd = Command::cargo_bin("signtool-rs").expect("binary available");
+    let mut rust_cmd = Command::cargo_bin("signtool-windows").expect("binary available");
     rust_cmd
         .arg("sign")
         .arg("--pfx")
@@ -534,7 +534,7 @@ fn psm1_sign_aligns_with_native_sip_stack() {
         String::from_utf8_lossy(&native_out.stderr)
     );
 
-    let mut rust_cmd = Command::cargo_bin("signtool-rs").expect("binary available");
+    let mut rust_cmd = Command::cargo_bin("signtool-windows").expect("binary available");
     rust_cmd
         .arg("sign")
         .arg("--pfx")
@@ -627,7 +627,7 @@ fn psd1_sign_aligns_with_native_sip_stack() {
         String::from_utf8_lossy(&native_out.stderr)
     );
 
-    let mut rust_cmd = Command::cargo_bin("signtool-rs").expect("binary available");
+    let mut rust_cmd = Command::cargo_bin("signtool-windows").expect("binary available");
     rust_cmd
         .arg("sign")
         .arg("--pfx")
@@ -722,7 +722,7 @@ fn msi_sign_aligns_with_native_sip_stack() {
         String::from_utf8_lossy(&native_out.stderr)
     );
 
-    let mut rust_cmd = Command::cargo_bin("signtool-rs").expect("binary available");
+    let mut rust_cmd = Command::cargo_bin("signtool-windows").expect("binary available");
     rust_cmd
         .arg("sign")
         .arg("--pfx")
@@ -824,7 +824,7 @@ fn winmd_sign_aligns_with_native_sip_stack() {
         String::from_utf8_lossy(&native_out.stderr)
     );
 
-    let mut rust_cmd = Command::cargo_bin("signtool-rs").expect("binary available");
+    let mut rust_cmd = Command::cargo_bin("signtool-windows").expect("binary available");
     rust_cmd
         .arg("sign")
         .arg("--pfx")
@@ -924,7 +924,7 @@ fn js_sign_aligns_with_native_sip_stack() {
         String::from_utf8_lossy(&native_out.stderr)
     );
 
-    let mut rust_cmd = Command::cargo_bin("signtool-rs").expect("binary available");
+    let mut rust_cmd = Command::cargo_bin("signtool-windows").expect("binary available");
     rust_cmd
         .arg("sign")
         .arg("--pfx")
@@ -1016,7 +1016,7 @@ fn vbs_sign_aligns_with_native_sip_stack() {
         String::from_utf8_lossy(&native_out.stderr)
     );
 
-    let mut rust_cmd = Command::cargo_bin("signtool-rs").expect("binary available");
+    let mut rust_cmd = Command::cargo_bin("signtool-windows").expect("binary available");
     rust_cmd
         .arg("sign")
         .arg("--pfx")
@@ -1108,7 +1108,7 @@ fn wsf_sign_aligns_with_native_sip_stack() {
         String::from_utf8_lossy(&native_out.stderr)
     );
 
-    let mut rust_cmd = Command::cargo_bin("signtool-rs").expect("binary available");
+    let mut rust_cmd = Command::cargo_bin("signtool-windows").expect("binary available");
     rust_cmd
         .arg("sign")
         .arg("--pfx")

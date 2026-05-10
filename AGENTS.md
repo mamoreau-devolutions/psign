@@ -8,8 +8,8 @@ This repository is a **Rust port** of the Windows SDK **`signtool.exe`** (Authen
 |------|------|--------|
 | Root package (Windows CLI + lib) | `Cargo.toml` (package **`signtool-rs`**) | **`windows`** crate feature deps under **`cfg(windows)`**; non-Windows builds use a stub **`main`**. |
 | Portable digest library | `crates/signtool-sip-digest` | No **`windows`** dependency; Linux-safe unit tests. |
-| Portable Authenticode trust | `crates/signtool-authenticode-trust` | Anchors + picky chain; **`signtool-digest`** **`trust-verify-pe`**, **`trust-verify-cab`**, **`trust-verify-catalog`**, **`trust-verify-detached`** — no OS trust store. |
-| Portable CLI | `crates/signtool-digest-cli` | Binary **`signtool-digest`**. |
+| Portable Authenticode trust | `crates/signtool-authenticode-trust` | Anchors + picky chain; **`signtool-portable`** **`trust-verify-pe`**, **`trust-verify-cab`**, **`trust-verify-catalog`**, **`trust-verify-detached`** — no OS trust store. |
+| Portable CLI | `crates/signtool-digest-cli` | Binary **`signtool-portable`**. |
 | Win32 implementation | `src/win/` | Verify, sign, timestamp, catalog, detached PKCS#7, etc. |
 | argv / response files | `src/native_argv.rs`, `src/response_argv.rs` | Shared with stub builds for **`cargo check`** on Unix. |
 
@@ -17,7 +17,7 @@ This repository is a **Rust port** of the Windows SDK **`signtool.exe`** (Authen
 
 ## Cargo aliases (`.cargo/config.toml`)
 
-- **`cargo windows-bin`** — build **`signtool-rs`** exe (**`-p signtool-rs --bin signtool-rs`**).
+- **`cargo windows-bin`** — build **`signtool-windows`** exe (**`-p signtool-rs --bin signtool-windows`**).
 - **`cargo digest-check`** / **`cargo digest-test`** — portable digest + trust crates (see **`.cargo/config.toml`**).
 - **`cargo unix-lib-check`** — **`signtool-rs`** library on non-Windows (stub-friendly).
 - **`cargo depgraph`** — **`depgraph`** binary (**needs `-p`** because of **`default-members`**).
@@ -45,7 +45,7 @@ On Linux/macOS, match **`ci-unix`**: fmt check, metadata **`--locked`**, clippy 
 | **`docs/rust-sip-gaps.md`** | Known limitations (MSIX sign gap, `/ph`, PKCS#7 encode, VBA, encrypted MSIX, …). |
 | **`docs/rust-sip-spec-refs.md`** | Spec links + PE page-hash / **`SignerSignEx3`** notes. |
 | **`docs/ci-parity.md`** | CI steps, **`SIGNTOOL_RS_*`** env vars, parity gates. |
-| **`docs/roadmap-authenticode-linux.md`** | Unix/portable subset and **`signtool-digest`**. |
+| **`docs/roadmap-authenticode-linux.md`** | Unix/portable subset and **`signtool-portable`**. |
 | **`docs/authenticode-trust-stack.md`** | Portable trust crate split (picky vs digest vs CMS). |
 | **`docs/authroot-linux-verify.md`** | Anchor dir + AuthRoot CAB usage on Linux. |
 | **`docs/plan-linux-authenticode-trust-verify.md`** | Technical plan (CTL, test matrix, risks). |

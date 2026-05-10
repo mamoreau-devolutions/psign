@@ -22,16 +22,16 @@ differential parity tests against the native tool where CI fixtures allow.
 cargo build
 ```
 
-At the repo root, **`cargo build`** targets **`default-members`** only (**portable digest crates**). On Windows, build the **`signtool-rs`** executable with **`cargo windows-bin`** or **`cargo build -p signtool-rs --bin signtool-rs`** (see [`.cargo/config.toml`](.cargo/config.toml)).
+At the repo root, **`cargo build`** targets **`default-members`** only (**portable digest crates**). On Windows, build the **`signtool-windows`** executable with **`cargo windows-bin`** or **`cargo build -p signtool-rs --bin signtool-windows`** (see [`.cargo/config.toml`](.cargo/config.toml)).
 
 ## Linux / portable digest tooling
 
-The full **`signtool-rs`** CLI is Windows-only (stub exits on other targets). Cross-platform pieces live in **`signtool-sip-digest`** and the **`signtool-digest`** binary (`crates/signtool-digest-cli`). They exercise the same PE-derived Authenticode digest logic used for **PE and WinMD** (CLI metadata), plus CAB, MSI, ESD/WIM, cleartext MSIX, catalog, and scripts—without **`WinVerifyTrust`**.
+The **`signtool-windows`** CLI (package **`signtool-rs`**) is Windows-only (stub exits on other targets). Cross-platform pieces live in **`signtool-sip-digest`** and the **`signtool-portable`** binary (`crates/signtool-digest-cli`). They exercise the same PE-derived Authenticode digest logic used for **PE and WinMD** (CLI metadata), plus CAB, MSI, ESD/WIM, cleartext MSIX, catalog, and scripts—without **`WinVerifyTrust`**.
 
 From the repo root (see [`docs/roadmap-authenticode-linux.md`](docs/roadmap-authenticode-linux.md)):
 
 ```sh
-cargo install --path crates/signtool-digest-cli --locked   # installs `signtool-digest`
+cargo install --path crates/signtool-digest-cli --locked   # installs `signtool-portable`
 cargo digest-test    # alias: sip-digest lib tests + digest-cli integration tests
 cargo digest-check   # alias: `cargo check` on both portable crates
 ```
@@ -80,13 +80,13 @@ The **`windows`** workflow builds the repo, bootstraps the public Devolutions te
 Local mirror of the CI orchestrator:
 
 ```powershell
-cargo build -p signtool-rs --bin signtool-rs
+cargo build -p signtool-rs --bin signtool-windows
 ./scripts/ci/run-exhaustive-parity-ci.ps1
 ```
 
 ## MSIX parity signing script
 
-Use the dedicated local parity runner to sign the same unsigned MSIX with native `signtool.exe` and `signtool-rs`, then compare verification outcomes:
+Use the dedicated local parity runner to sign the same unsigned MSIX with native `signtool.exe` and `signtool-windows`, then compare verification outcomes:
 
 ```powershell
 $env:SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE="D:\path\unsigned.msix"

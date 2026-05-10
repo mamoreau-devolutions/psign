@@ -1,10 +1,10 @@
 #[cfg(not(windows))]
 fn main() {
     eprintln!(
-        "signtool-rs requires Microsoft Windows (WinVerifyTrust, SignerSignEx3, registered CryptSIP)."
+        "signtool-windows requires Microsoft Windows (WinVerifyTrust, SignerSignEx3, registered CryptSIP)."
     );
     eprintln!(
-        "Portable Authenticode digest implementations: `cargo test -p signtool-sip-digest --lib`"
+        "Portable CLI: install `signtool-portable` (`cargo install --path crates/signtool-digest-cli --locked`) or run `cargo test -p signtool-sip-digest --lib`."
     );
     std::process::exit(1);
 }

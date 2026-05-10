@@ -37,7 +37,7 @@ Hand-rolled COFF/optional-header traversal was deferred: **`object`** + the **`a
 
 ## Linux / macOS CLI (`crates/signtool-digest-cli`)
 
-The **`signtool-digest`** binary wraps **`signtool-sip-digest`** for scripting and CI (e.g. `pe-digest`, `verify-msix`, `pe-has-page-hashes`, `pe-page-hash-info`, `verify-pe-page-hashes`, `pe-authenticode-ranges`, …). It performs **digest vs PKCS#7 indirect data** checks, **PE Authenticode digest segment listing**, and **PE page-hash tooling** (OID presence, structured parse, experimental contiguous raw-byte verification — not a full **`WinVerifyTrust`** `/ph` clone).
+The **`signtool-portable`** binary wraps **`signtool-sip-digest`** for scripting and CI (e.g. `pe-digest`, `verify-msix`, `pe-has-page-hashes`, `pe-page-hash-info`, `verify-pe-page-hashes`, `pe-authenticode-ranges`, …). It performs **digest vs PKCS#7 indirect data** checks, **PE Authenticode digest segment listing**, and **PE page-hash tooling** (OID presence, structured parse, experimental contiguous raw-byte verification — not a full **`WinVerifyTrust`** `/ph` clone).
 
 ## Win32 adapter (`src/win/sip_rust/`)
 

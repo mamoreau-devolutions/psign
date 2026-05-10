@@ -27,6 +27,9 @@ jobs:
       - name: Portable digest CLI integration test
         run: cargo test -p signtool-digest-cli --locked
 
+      - name: Cross-CLI parity (portable verify-pe vs Windows rust-sip PE digest routine)
+        run: cargo test -p signtool-rs --test cross_cli_windows --locked
+
       - name: Generate dependency artifacts
         shell: pwsh
         run: |

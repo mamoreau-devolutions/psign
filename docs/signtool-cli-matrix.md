@@ -1,6 +1,6 @@
 # SignTool CLI parity matrix
 
-This document summarizes native `signtool.exe` options vs `signtool-rs`. The **machine-readable source of truth** is [`signtool-cli-matrix.json`](signtool-cli-matrix.json) (`commands.sign`, `commands.verify`, `commands.timestamp`, `commands.catdb`, `commands.remove`, `global_options`, `invocation`, `code_sign_file_formats`).
+This document summarizes native `signtool.exe` options vs the **`signtool-windows`** CLI (Rust package **`signtool-rs`**). The **machine-readable source of truth** is [`signtool-cli-matrix.json`](signtool-cli-matrix.json) (`commands.sign`, `commands.verify`, `commands.timestamp`, `commands.catdb`, `commands.remove`, `global_options`, `invocation`, `code_sign_file_formats`).
 
 SDK help text used for cross-checking can be captured locally under **`parity-output/`** (`signtool-help-*.txt`; gitignored). The pinned kit version is recorded in this repo’s `sdk_kit` field in the JSON (currently aligned with `10.0.26100.0`).
 

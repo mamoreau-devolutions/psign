@@ -41,10 +41,10 @@ if (-not (Test-RsEnvPresent "SIGNTOOL_RS_UNSIGNED_FIXTURE") -or -not (Test-RsEnv
 }
 
 $native = Resolve-NativeSignTool
-$rustBin = Join-Path $WorkspaceRoot "target\debug\signtool-rs.exe"
+$rustBin = Join-Path $WorkspaceRoot "target\debug\signtool-windows.exe"
 if (-not (Test-Path -LiteralPath $rustBin)) {
-    Write-Host "Building signtool-rs (debug)..."
-    & cargo build -p signtool-rs --bin signtool-rs | Out-Host
+    Write-Host "Building signtool-windows (debug)..."
+    & cargo build -p signtool-rs --bin signtool-windows | Out-Host
 }
 
 $u = $env:SIGNTOOL_RS_UNSIGNED_FIXTURE

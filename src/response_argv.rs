@@ -1,6 +1,6 @@
 //! Expand native `signtool @responsefile` argument lists (see `signtool-help-root.txt`).
 //!
-//! When the executable is invoked as `signtool-rs @path`, the file is read: one argument per
+//! When the executable is invoked as `signtool-windows @path`, the file is read: one argument per
 //! line, optional blank line between command blocks (multiple invocations). Otherwise, any
 //! tail argument starting with a single `@` is treated as a response path and spliced. A
 //! leading `@@` is not a splice: one `@` is stripped so the argument can start with `@`.
@@ -179,7 +179,7 @@ fn prepend_executable(executable: &OsString, tail: Vec<String>) -> Vec<OsString>
 ///
 /// `tail` is `std::env::args_os().skip(1)` (everything after the program path).
 pub fn expand_invocations(executable: OsString, tail: Vec<OsString>) -> Result<Vec<Vec<OsString>>> {
-    // Classic: `signtool-rs @file` — multi-block response file (blank line between commands).
+    // Classic: `signtool-windows @file` — multi-block response file (blank line between commands).
     if tail.len() == 1
         && let Some(path) = is_response_path_arg(&tail[0])
     {
@@ -238,7 +238,7 @@ mod tests {
         let rsp = dir.join("signtool_rs_rsp_outer.txt");
         fs::write(&rsp, format!("verify\n@{}\nx.exe\n", inner.display())).expect("write rsp");
 
-        let exe = OsString::from("signtool-rs");
+        let exe = OsString::from("signtool-windows");
         let inv = expand_invocations(
             exe.clone(),
             vec![OsString::from(format!("@{}", rsp.display()))],
@@ -250,7 +250,7 @@ mod tests {
                 .iter()
                 .map(|s| s.to_string_lossy().to_string())
                 .collect::<Vec<_>>(),
-            vec!["signtool-rs", "verify", "/pa", "x.exe",]
+            vec!["signtool-windows", "verify", "/pa", "x.exe",]
         );
         let _ = fs::remove_file(&inner);
         let _ = fs::remove_file(&rsp);
@@ -262,7 +262,7 @@ mod tests {
         let rsp = dir.join("signtool_rs_rsp_multiblock.txt");
         fs::write(&rsp, "verify\n/pa\na.exe\n\nsign\n/fd\nSHA256\nb.exe\n").expect("write");
 
-        let exe = OsString::from("signtool-rs");
+        let exe = OsString::from("signtool-windows");
         let inv = expand_invocations(
             exe.clone(),
             vec![OsString::from(format!("@{}", rsp.display()))],
@@ -274,14 +274,14 @@ mod tests {
                 .iter()
                 .map(|s| s.to_string_lossy().to_string())
                 .collect::<Vec<_>>(),
-            vec!["signtool-rs", "verify", "/pa", "a.exe",]
+            vec!["signtool-windows", "verify", "/pa", "a.exe",]
         );
         assert_eq!(
             inv[1]
                 .iter()
                 .map(|s| s.to_string_lossy().to_string())
                 .collect::<Vec<_>>(),
-            vec!["signtool-rs", "sign", "/fd", "SHA256", "b.exe",]
+            vec!["signtool-windows", "sign", "/fd", "SHA256", "b.exe",]
         );
         let _ = fs::remove_file(&rsp);
     }
@@ -320,7 +320,7 @@ mod tests {
         )
         .expect("write rsp");
 
-        let exe = OsString::from("signtool-rs");
+        let exe = OsString::from("signtool-windows");
         let inv = expand_invocations(
             exe.clone(),
             vec![OsString::from(format!("@{}", rsp.display()))],
@@ -334,7 +334,7 @@ mod tests {
         assert_eq!(
             argv,
             vec![
-                "signtool-rs".to_string(),
+                "signtool-windows".to_string(),
                 "verify".to_string(),
                 "--policy".to_string(),
                 "pa".to_string(),
@@ -358,7 +358,7 @@ mod tests {
         )
         .expect("write rsp");
 
-        let exe = OsString::from("signtool-rs");
+        let exe = OsString::from("signtool-windows");
         let inv = expand_invocations(
             exe.clone(),
             vec![OsString::from(format!("@{}", rsp.display()))],
@@ -372,7 +372,7 @@ mod tests {
         assert_eq!(
             argv,
             vec![
-                "signtool-rs".to_string(),
+                "signtool-windows".to_string(),
                 "verify".to_string(),
                 "/pa".to_string(),
                 "x.exe".to_string(),
@@ -393,7 +393,7 @@ mod tests {
         }
         fs::write(&rsp, &raw).expect("write utf-16 rsp");
 
-        let exe = OsString::from("signtool-rs");
+        let exe = OsString::from("signtool-windows");
         let inv = expand_invocations(
             exe.clone(),
             vec![OsString::from(format!("@{}", rsp.display()))],
@@ -406,7 +406,7 @@ mod tests {
                 .map(|s| s.to_string_lossy().to_string())
                 .collect::<Vec<_>>(),
             vec![
-                "signtool-rs".to_string(),
+                "signtool-windows".to_string(),
                 "verify".to_string(),
                 "/pa".to_string(),
                 "x.exe".to_string(),
@@ -426,7 +426,7 @@ mod tests {
         }
         fs::write(&rsp, &raw).expect("write utf-16be rsp");
 
-        let exe = OsString::from("signtool-rs");
+        let exe = OsString::from("signtool-windows");
         let inv = expand_invocations(
             exe.clone(),
             vec![OsString::from(format!("@{}", rsp.display()))],
@@ -439,7 +439,7 @@ mod tests {
                 .map(|s| s.to_string_lossy().to_string())
                 .collect::<Vec<_>>(),
             vec![
-                "signtool-rs".to_string(),
+                "signtool-windows".to_string(),
                 "verify".to_string(),
                 "/pa".to_string(),
                 "y.exe".to_string(),
@@ -457,7 +457,7 @@ mod tests {
         raw.extend_from_slice(body.as_bytes());
         fs::write(&rsp, &raw).expect("write utf-8 bom rsp");
 
-        let exe = OsString::from("signtool-rs");
+        let exe = OsString::from("signtool-windows");
         let inv = expand_invocations(
             exe.clone(),
             vec![OsString::from(format!("@{}", rsp.display()))],
@@ -470,7 +470,7 @@ mod tests {
                 .map(|s| s.to_string_lossy().to_string())
                 .collect::<Vec<_>>(),
             vec![
-                "signtool-rs".to_string(),
+                "signtool-windows".to_string(),
                 "verify".to_string(),
                 "/pa".to_string(),
                 "z.exe".to_string(),
@@ -481,7 +481,7 @@ mod tests {
 
     #[test]
     fn inline_double_at_strips_one_at_for_literal() {
-        let exe = OsString::from("signtool-rs");
+        let exe = OsString::from("signtool-windows");
         let inv = expand_invocations(
             exe.clone(),
             vec![
@@ -500,7 +500,7 @@ mod tests {
         assert_eq!(
             argv,
             vec![
-                "signtool-rs".to_string(),
+                "signtool-windows".to_string(),
                 "sign".to_string(),
                 "y.exe".to_string(),
                 "--f".to_string(),
@@ -511,7 +511,7 @@ mod tests {
 
     #[test]
     fn inline_double_at_only_is_single_at_token() {
-        let exe = OsString::from("signtool-rs");
+        let exe = OsString::from("signtool-windows");
         let inv = expand_invocations(
             exe.clone(),
             vec![OsString::from("verify"), OsString::from("@@")],
@@ -524,7 +524,7 @@ mod tests {
         assert_eq!(
             argv,
             vec![
-                "signtool-rs".to_string(),
+                "signtool-windows".to_string(),
                 "verify".to_string(),
                 "@".to_string(),
             ]

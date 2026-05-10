@@ -22,7 +22,7 @@ fn signed_fixture_digest_check_after_trust() {
     let path = std::env::var_os("SIGNTOOL_RS_SIGNED_FIXTURE")
         .expect("SIGNTOOL_RS_SIGNED_FIXTURE must be set when running this ignored test");
     let path = std::path::Path::new(&path);
-    let mut verify = assert_cmd::Command::cargo_bin("signtool-rs").expect("binary");
+    let mut verify = assert_cmd::Command::cargo_bin("signtool-windows").expect("binary");
     verify.args([
         "verify",
         "--policy",
