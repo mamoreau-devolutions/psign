@@ -138,6 +138,7 @@ When filing issues, prefer **parity scenario IDs** from [`parity-matrix.md`](par
 | Windows parity | `./scripts/run-parity-diff.ps1`, `./scripts/ci/run-exhaustive-parity-ci.ps1` | Windows |
 | MSIX focus | `./scripts/msix-parity-sign.ps1` | Windows |
 | Optional KV / Artifact env tests | Ignored tests in **`tests/parity_signtool.rs`** | Windows |
+| Portable REST HTTP mocks | **`cargo test -p signtool-azure-kv-rest`** / **`cargo test -p signtool-codesigning-rest`** (mockito; no cloud) | Linux CI |
 
 ---
 
