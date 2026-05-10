@@ -24,6 +24,7 @@ fn help_lists_core_subcommands() {
     let out = std::str::from_utf8(&assert.get_output().stdout).expect("utf-8 help output");
     for needle in [
         "pe-digest",
+        "pe-checksum",
         "verify-pe",
         "trust-verify-pe",
         "trust-verify-cab",
@@ -117,6 +118,23 @@ fn tiny32_fixture() -> PathBuf {
 fn tiny64_fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/fixtures/pe-authenticode-upstream/tiny64.signed.efi")
+}
+
+#[test]
+fn pe_checksum_tiny32_reports_match_and_strict_ok() {
+    let fixture = tiny32_fixture();
+    let mut cmd = Command::cargo_bin("signtool-portable").unwrap();
+    cmd.arg("pe-checksum").arg(&fixture);
+    let assert = cmd.assert().success();
+    let out = std::str::from_utf8(&assert.get_output().stdout).expect("utf8");
+    assert!(
+        out.contains("match=yes"),
+        "expected match=yes on signed fixture, got {out:?}"
+    );
+
+    let mut strict = Command::cargo_bin("signtool-portable").unwrap();
+    strict.arg("pe-checksum").arg("--strict").arg(&fixture);
+    strict.assert().success();
 }
 
 #[test]

@@ -137,6 +137,14 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         output: Option<PathBuf>,
     },
+    /// Compare PE **`Optional Header.CheckSum`** to **`pe_compute_image_checksum`** (Windows **`CheckSumMappedFile`** style).
+    ///
+    /// Prints one line each: **`stored=0x…`**, **`computed=0x…`**, **`match=yes|no`**, **`file_bytes=N`**. **`--strict`**: exit with failure when **`match=no`** (CI / parity gate).
+    PeChecksum {
+        path: PathBuf,
+        #[arg(long)]
+        strict: bool,
+    },
     /// Require embedded PKCS#7; compare indirect digest to Rust PE recomputation for each Authenticode cert.
     VerifyPe { path: PathBuf },
     /// Verify PE Authenticode **trust**: PKCS#7 CMS validation + certificate chain to **explicit** anchors (no OS store).
@@ -699,6 +707,24 @@ fn run() -> Result<()> {
             let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
             let digest = pe_authenticode_digest(&bytes, algorithm.into())?;
             write_digest_output(encoding, &digest, output.as_deref())?;
+        }
+        Command::PeChecksum { path, strict } => {
+            let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+            let stored = pe_embed::pe_read_image_checksum(&bytes)
+                .with_context(|| format!("pe-checksum {}", path.display()))?;
+            let computed = pe_embed::pe_compute_image_checksum(&bytes)
+                .with_context(|| format!("pe-checksum {}", path.display()))?;
+            let matches = stored == computed;
+            println!("stored=0x{stored:08x}");
+            println!("computed=0x{computed:08x}");
+            println!("match={}", if matches { "yes" } else { "no" });
+            println!("file_bytes={}", bytes.len());
+            if strict && !matches {
+                return Err(anyhow!(
+                    "pe-checksum {}: stored != computed (pass without --strict to only print)",
+                    path.display()
+                ));
+            }
         }
         Command::VerifyPe { path } => {
             let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
