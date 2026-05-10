@@ -8,6 +8,7 @@ differential parity tests against the native tool where CI fixtures allow.
 
 - `verify`: WinVerifyTrust-backed implementation with policy modes (`default`, `pa`, `pg`).
 - `sign`: Rust mssign32 core (`SignerSignEx3`) with PFX/system-store cert selection, RFC3161 sign-time timestamping, and decoupled-digest bridge flow (`--dlib` or `--trusted-signing-dlib-root` + `--dmdf`) for MSIX parity and [Azure Artifact Signing / Trusted Signing](docs/migration-artifact-signing.md).
+- `inspect-signature`: JSON dump of PKCS#7 signers, timestamp OIDs, and nested signatures (`1.3.6.1.4.1.311.2.4.1`) — same parser as **`signtool-portable inspect-authenticode`** ([docs/psa-interoperability.md](docs/psa-interoperability.md)).
 - `timestamp`: Rust mssign32 core (`SignerTimeStampEx3`/`SignerTimeStampEx2`) plus AppX restrictions.
 
 ## MSIX parity notes
@@ -22,11 +23,13 @@ differential parity tests against the native tool where CI fixtures allow.
 cargo build
 ```
 
-At the repo root, **`cargo build`** targets **`default-members`** only (**portable digest crates**). On Windows, build the **`signtool-windows`** executable with **`cargo windows-bin`** or **`cargo build -p signtool-rs --bin signtool-windows`** (see [`.cargo/config.toml`](.cargo/config.toml)).
+At the repo root, **`cargo build`** targets **`default-members`** only (**portable digest crates**). On Windows, build the **`signtool-windows`** executable with **`cargo windows-bin`** or **`cargo build -p signtool-rs --bin signtool-windows`** (see [`.cargo/config.toml`](.cargo/config.toml)). Optional Cargo features: **`azure-kv-sign`** (Key Vault digest callback), **`artifact-signing-rest`** (**`artifact-signing-submit`** LRO against **`*.codesigning.azure.net`**).
 
 ## Linux / portable digest tooling
 
 The **`signtool-windows`** CLI (package **`signtool-rs`**) is Windows-only (stub exits on other targets). Cross-platform pieces live in **`signtool-sip-digest`** and the **`signtool-portable`** binary (`crates/signtool-digest-cli`). They exercise the same PE-derived Authenticode digest logic used for **PE and WinMD** (CLI metadata), plus CAB, MSI, ESD/WIM, cleartext MSIX, catalog, and scripts—without **`WinVerifyTrust`**.
+
+**Feature gaps vs native `signtool`, AzureSignTool, and Azure Artifact Signing:** [`docs/gap-analysis-signing-platforms.md`](docs/gap-analysis-signing-platforms.md).
 
 From the repo root (see [`docs/roadmap-authenticode-linux.md`](docs/roadmap-authenticode-linux.md)):
 

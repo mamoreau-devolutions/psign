@@ -2,6 +2,8 @@
 
 The primary `signtool-rs` binary is **Windows-first**: it depends on **`windows`**, **WinVerifyTrust**, **SignerSignEx3**, and OS **CryptSIP** registration. A practical Linux story is **phased**: keep Windows as the reference implementation while carving out **portable** pieces.
 
+**Cross-tool comparison (native signtool vs AzureSignTool vs Artifact Signing vs this repo):** [`gap-analysis-signing-platforms.md`](gap-analysis-signing-platforms.md).
+
 ## Phase 0 — CI and hygiene
 
 - **`ci-unix`**: `cargo fmt --check`, `cargo metadata --locked`, **`cargo clippy`** on portable digest + trust crates + **`signtool-rs` lib (`-D warnings`)**, **`cargo test -p signtool-sip-digest --lib`**, **`cargo test -p signtool-authenticode-trust --lib`**, **`cargo check -p signtool-rs`**, **`cargo test -p signtool-rs --lib`** (see `.github/workflows/ci-unix.yml`).
@@ -24,6 +26,17 @@ The primary `signtool-rs` binary is **Windows-first**: it depends on **`windows`
 
 - **Verify-only** paths that parse **Embedded PKCS#7**, **SPC_PE_IMAGE_DATA**, **indirect data**, and **RFC3161** timestamps can live behind **`ring`** / **`cms`** / **`x509-parser`** (already partially aligned via `cms` / `authenticode` crates).
 - **Signing** on Linux without a hardware CSP or Windows SIP remains **non-parity** unless integrating **OpenSSL** / **Azure Key Vault** / **pkcs11** — document as **optional backends**, not drop-in `signtool.exe` replacement.
+
+### Stretch: Linux-friendly replacements for AzureSignTool / Artifact Signing
+
+Order-of-effort sketch (each step needs tests + fixtures):
+
+1. **Portable CMS producer** — Finish **`SignedData`** assembly for **PE** (`SpcIndirectData` + **`WIN_CERTIFICATE`** embed) using existing **`pe_digest`** / stubs in [`pkcs7.rs`](../crates/signtool-sip-digest/src/pkcs7.rs) and [`pe_embed.rs`](../crates/signtool-sip-digest/src/pe_embed.rs).
+2. **Remote signing adapters on Unix** — Small **`reqwest`** clients mirroring **`azure_kv_sign.rs`** (KV `keys/sign`) and **`artifact_signing_rest.rs`** (codesigning `:sign` LRO) behind Cargo features, emitting **raw signature bytes** for step (1).
+3. **Additional embedders** — CAB, MSI streams, MSIX ZIP manipulation (hardest: **`AppxSipCreateIndirectData`**-equivalent APPX blob + publisher binding rules).
+4. **RFC3161 request/sign** — Replace stub [`timestamp.rs`](../crates/signtool-sip-digest/src/timestamp.rs) for post-sign or nested countersignatures.
+
+Until Phase 2 completes, **verify-first Linux CI** remains the supported story; **production signing** stays on **`signtool-windows`** (or native **`signtool.exe`**).
 
 ## Phase 3 — Container formats that are OS-agnostic
 
@@ -52,4 +65,4 @@ Already aligned in Rust for **cleartext** subjects:
 
 ## Summary
 
-Short term: **Unix CI for fmt + lockfile** + document this split. Medium term: **extract digest library + Linux `cargo test`** for parity-heavy code. Long term: optional **verify-focused** CLI on Linux; **sign** remains Windows-first or provider-specific.
+Short term: **Unix CI for fmt + lockfile** + document this split. Medium term: **extract digest library + Linux `cargo test`** for parity-heavy code. Long term: optional **verify-focused** CLI on Linux (done); **sign** remains Windows-first until **Phase 2 stretch** (portable PKCS#7 + embed + optional KV/REST signers on Unix) lands behind explicit milestones.
