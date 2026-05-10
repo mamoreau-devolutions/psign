@@ -5,6 +5,7 @@
 
 use anyhow::{Context, Result, anyhow};
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use serde::Deserialize;
 use signtool_authenticode_trust::{
     AuthenticodeTrustPolicy, TrustVerifyPeOptions, TrustVerifyPeReport,
     parse_verification_date_ymd, trust_verify_cab_bytes, trust_verify_catalog_bytes,
@@ -173,6 +174,13 @@ enum Command {
     VerifyCatalog { path: PathBuf },
     /// Script signed file (PowerShell-class or WSH): compare PKCS#7 indirect digest to Rust heuristic strip/hash.
     VerifyScript { path: PathBuf },
+    /// Validate JSON metadata shape for Microsoft Artifact Signing (`Endpoint`, `CodeSigningAccountName`, `CertificateProfileName`; optional `ExcludeCredentials` string array). No network / no signing.
+    ///
+    /// Reads **`--path`** or stdin when omitted (use `-` for stdin explicitly).
+    ArtifactSigningMetadataCheck {
+        #[arg(long, value_name = "PATH")]
+        path: Option<PathBuf>,
+    },
     /// Print lowercase hex CAB Authenticode digest **without** requiring PKCS#7 (unsigned / structural check).
     ///
     /// Algorithm must match what will be used at signing time (default SHA-256).
@@ -204,6 +212,66 @@ impl From<HashAlg> for PeAuthenticodeHashKind {
 
 fn hex_lower(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(non_snake_case)]
+struct ArtifactSigningMetadataDoc {
+    Endpoint: String,
+    CodeSigningAccountName: String,
+    CertificateProfileName: String,
+    #[serde(default)]
+    ExcludeCredentials: Option<Vec<String>>,
+}
+
+fn read_json_input(path: Option<&Path>) -> Result<Vec<u8>> {
+    use std::io::Read;
+    match path {
+        None => {
+            let mut buf = Vec::new();
+            std::io::stdin()
+                .read_to_end(&mut buf)
+                .context("read JSON from stdin")?;
+            Ok(buf)
+        }
+        Some(p) if p.as_os_str() == "-" => {
+            let mut buf = Vec::new();
+            std::io::stdin()
+                .read_to_end(&mut buf)
+                .context("read JSON from stdin")?;
+            Ok(buf)
+        }
+        Some(p) => std::fs::read(p).with_context(|| format!("read {}", p.display())),
+    }
+}
+
+fn run_artifact_signing_metadata_check(path: Option<PathBuf>) -> Result<()> {
+    let raw = read_json_input(path.as_deref())?;
+    if raw.is_empty() {
+        return Err(anyhow!("metadata JSON is empty"));
+    }
+    let doc: ArtifactSigningMetadataDoc = serde_json::from_slice(&raw)
+        .context("parse Artifact Signing metadata JSON")?;
+    if doc.Endpoint.trim().is_empty() {
+        return Err(anyhow!("Endpoint must be a non-empty string"));
+    }
+    if doc.CodeSigningAccountName.trim().is_empty() {
+        return Err(anyhow!("CodeSigningAccountName must be a non-empty string"));
+    }
+    if doc.CertificateProfileName.trim().is_empty() {
+        return Err(anyhow!("CertificateProfileName must be a non-empty string"));
+    }
+    if let Some(exc) = &doc.ExcludeCredentials {
+        for (i, s) in exc.iter().enumerate() {
+            if s.trim().is_empty() {
+                return Err(anyhow!(
+                    "ExcludeCredentials[{i}] must be a non-empty string"
+                ));
+            }
+        }
+    }
+    println!("artifact-signing-metadata-check: ok");
+    Ok(())
 }
 
 fn script_ext_from_path(path: &Path) -> Result<&str> {
@@ -349,6 +417,9 @@ fn run() -> Result<()> {
             let ext = script_ext_from_path(&path)?;
             verify_script_digest_consistency(&raw, ext)
                 .with_context(|| format!("verify-script {}", path.display()))?;
+        }
+        Command::ArtifactSigningMetadataCheck { path } => {
+            run_artifact_signing_metadata_check(path)?;
         }
         Command::CabDigest { path, algorithm } => {
             let data = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;

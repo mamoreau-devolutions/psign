@@ -23,8 +23,19 @@ pub fn is_appx_family(path: &std::path::Path) -> bool {
 }
 
 pub fn validate_sign_constraints(args: &SignArgs) -> Result<()> {
-    if args.dlib.is_some() ^ args.dmdf.is_some() {
-        return Err(anyhow!("--dlib and --dmdf must be provided together"));
+    validate_sign_constraints_paths(args, args.files.iter().map(|p| p.as_path()))
+}
+
+pub fn validate_sign_constraints_paths<'a>(
+    args: &SignArgs,
+    paths: impl IntoIterator<Item = &'a std::path::Path>,
+) -> Result<()> {
+    let decoupled_digest = (args.dlib.is_some() || args.trusted_signing_dlib_root.is_some())
+        && args.dmdf.is_some();
+    if (args.dlib.is_some() || args.trusted_signing_dlib_root.is_some()) != args.dmdf.is_some() {
+        return Err(anyhow!(
+            "--dmdf must be provided together with either --dlib or --trusted-signing-dlib-root"
+        ));
     }
     if args.timestamp_digest.is_some()
         && args.timestamp_url.is_none()
@@ -40,7 +51,7 @@ pub fn validate_sign_constraints(args: &SignArgs) -> Result<()> {
         ));
     }
 
-    for path in &args.files {
+    for path in paths.into_iter() {
         let is_appx = is_appx_family(path);
         if is_appx && args.timestamp_url.is_none() && args.seal_timestamp_url.is_none() {
             return Err(anyhow!(
@@ -52,9 +63,9 @@ pub fn validate_sign_constraints(args: &SignArgs) -> Result<()> {
                 "AppX/MSIX signing does not support append-signature mode in this implementation"
             ));
         }
-        if is_appx && args.page_hashes && !(args.dlib.is_some() && args.dmdf.is_some()) {
+        if is_appx && args.page_hashes && !decoupled_digest {
             return Err(anyhow!(
-                "AppX/MSIX page hashes require decoupled digest inputs (--dlib and --dmdf)"
+                "AppX/MSIX page hashes require decoupled digest inputs (--dlib or --trusted-signing-dlib-root, with --dmdf)"
             ));
         }
     }

@@ -34,6 +34,7 @@ fn help_lists_core_subcommands() {
         "verify-msix",
         "verify-catalog",
         "verify-script",
+        "artifact-signing-metadata-check",
     ] {
         assert!(
             out.contains(needle),
@@ -176,4 +177,36 @@ fn pe_authenticode_ranges_prints_start_end_lines_on_tiny_fixture() {
             "unexpected line: {line:?}"
         );
     }
+}
+
+#[test]
+fn artifact_signing_metadata_check_accepts_valid_json_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("meta.json");
+    std::fs::write(
+        &path,
+        r#"{"Endpoint":"https://example.test/rpcsign","CodeSigningAccountName":"acct","CertificateProfileName":"prof","ExcludeCredentials":["ManagedIdentityCredential"]}"#,
+    )
+    .unwrap();
+    let mut cmd = Command::cargo_bin("signtool-portable").unwrap();
+    cmd.args(["artifact-signing-metadata-check", "--path"])
+        .arg(&path);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("artifact-signing-metadata-check: ok"));
+}
+
+#[test]
+fn artifact_signing_metadata_check_rejects_empty_profile_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("bad.json");
+    std::fs::write(
+        &path,
+        r#"{"Endpoint":"https://example.test/rpcsign","CodeSigningAccountName":"acct","CertificateProfileName":"  "}"#,
+    )
+    .unwrap();
+    let mut cmd = Command::cargo_bin("signtool-portable").unwrap();
+    cmd.args(["artifact-signing-metadata-check", "--path"])
+        .arg(&path);
+    cmd.assert().failure();
 }

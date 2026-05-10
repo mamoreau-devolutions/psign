@@ -1,6 +1,5 @@
 use crate::cli::{DigestAlgorithm, GlobalOpts, SignArgs};
 use crate::win::code_sign_format;
-use crate::win::sealing::validate_sign_constraints;
 use anyhow::{Context, Result, anyhow};
 use std::ffi::CString;
 use std::iter::once;
@@ -16,7 +15,8 @@ use windows::Win32::Security::Cryptography::{
     CERT_FIND_FLAGS, CERT_FIND_HASH, CERT_FIND_ISSUER_STR_W, CERT_FIND_SUBJECT_STR_W,
     CERT_KEY_PROV_INFO_PROP_ID, CERT_NAME_ISSUER_FLAG, CERT_NAME_SIMPLE_DISPLAY_TYPE,
     CERT_OPEN_STORE_FLAGS, CERT_QUERY_ENCODING_TYPE, CERT_SIGN_HASH_CNG_ALG_PROP_ID,
-    CERT_STORE_ADD_REPLACE_EXISTING, CERT_STORE_PROV_SYSTEM_W, CERT_SYSTEM_STORE_CURRENT_USER,
+    CERT_STORE_ADD_REPLACE_EXISTING, CERT_STORE_PROV_MEMORY, CERT_STORE_PROV_SYSTEM_W,
+    CERT_SYSTEM_STORE_CURRENT_USER,
     CERT_SYSTEM_STORE_LOCAL_MACHINE, CRYPT_ATTRIBUTES, CRYPT_INTEGER_BLOB,
     CertAddCertificateContextToStore, CertCloseStore, CertCreateCertificateContext,
     CertDuplicateCertificateContext, CertEnumCertificatesInStore, CertFindCertificateInStore,
@@ -149,7 +149,7 @@ unsafe fn release_appx_sip_com_object(p: *mut core::ffi::c_void) {
     }
 }
 
-struct CertStore(HCERTSTORE);
+pub(crate) struct CertStore(pub(crate) HCERTSTORE);
 
 impl Drop for CertStore {
     fn drop(&mut self) {
@@ -162,7 +162,7 @@ impl Drop for CertStore {
     }
 }
 
-struct CertContext(*mut CERT_CONTEXT);
+pub(crate) struct CertContext(pub(crate) *mut CERT_CONTEXT);
 
 impl Drop for CertContext {
     fn drop(&mut self) {
@@ -214,7 +214,7 @@ fn to_wide(value: &str) -> Vec<u16> {
         .collect()
 }
 
-fn encoding() -> CERT_QUERY_ENCODING_TYPE {
+pub(crate) fn encoding() -> CERT_QUERY_ENCODING_TYPE {
     CERT_QUERY_ENCODING_TYPE(0x0001_0001)
 }
 
@@ -238,8 +238,29 @@ fn digest_oid(d: DigestAlgorithm) -> &'static str {
     }
 }
 
+/// Path to `Azure.CodeSigning.Dlib.dll` under an extracted **Microsoft.ArtifactSigning.Client**-style layout.
+pub(crate) fn artifact_signing_dlib_path(root: &std::path::Path) -> std::path::PathBuf {
+    let arch = if cfg!(target_pointer_width = "64") {
+        "x64"
+    } else {
+        "x86"
+    };
+    root.join("bin").join(arch).join("Azure.CodeSigning.Dlib.dll")
+}
+
+/// Effective decoupled digest DLL path: explicit `--dlib` or derived from `--trusted-signing-dlib-root`.
+pub(crate) fn resolved_decoupled_dlib_path(args: &SignArgs) -> Option<std::path::PathBuf> {
+    if let Some(p) = &args.dlib {
+        return Some(p.clone());
+    }
+    args.trusted_signing_dlib_root
+        .as_ref()
+        .map(|p| artifact_signing_dlib_path(p))
+}
+
 fn load_decoupled_digest_info(
-    args: &SignArgs,
+    dlib: &std::path::Path,
+    dmdf: &std::path::Path,
 ) -> Result<(
     HMODULE,
     SIGNER_DIGEST_SIGN_INFO,
@@ -247,14 +268,6 @@ fn load_decoupled_digest_info(
     Vec<u8>,
     &'static str,
 )> {
-    let dlib = args
-        .dlib
-        .as_ref()
-        .ok_or_else(|| anyhow!("--dlib required for decoupled digest mode"))?;
-    let dmdf = args
-        .dmdf
-        .as_ref()
-        .ok_or_else(|| anyhow!("--dmdf required for decoupled digest mode"))?;
     let metadata =
         std::fs::read(dmdf).with_context(|| format!("failed to read dmdf '{}'", dmdf.display()))?;
     if metadata.is_empty() {
@@ -266,9 +279,20 @@ fn load_decoupled_digest_info(
         pbData: metadata_owned.as_mut_ptr(),
     };
     let dlib_w = to_wide(&dlib.display().to_string());
+    let arch = if cfg!(target_pointer_width = "64") {
+        "x64"
+    } else {
+        "x86"
+    };
     // SAFETY: library path pointer is valid and NUL terminated.
     let module = unsafe { LoadLibraryW(PCWSTR(dlib_w.as_ptr())) }
-        .map_err(|e| anyhow!("LoadLibraryW('{}') failed: {e}", dlib.display()))?;
+        .map_err(|e| {
+            anyhow!(
+                "LoadLibraryW('{}') failed: {e}. \
+If using Azure Artifact Signing: install .NET 8, deploy the full NuGet `bin\\{arch}` directory (all dependent DLLs), and use the {arch} `Azure.CodeSigning.Dlib.dll` with a {arch} signtool-windows build.",
+                dlib.display()
+            )
+        })?;
 
     fn resolve_proc<T>(module: HMODULE, name: &str) -> Option<T> {
         let c = CString::new(name).ok()?;
@@ -371,7 +395,23 @@ fn load_store(args: &SignArgs) -> Result<CertStore> {
     load_store_from_system(args)
 }
 
-fn adopt_cert(ctx: *mut CERT_CONTEXT) -> Result<CertContext> {
+#[cfg_attr(not(feature = "azure-kv-sign"), allow(dead_code))]
+pub(crate) fn open_memory_cert_store() -> Result<CertStore> {
+    // SAFETY: `CERT_STORE_PROV_MEMORY` with null para opens an empty in-memory certificate store.
+    let store = unsafe {
+        CertOpenStore(
+            CERT_STORE_PROV_MEMORY,
+            encoding(),
+            Some(HCRYPTPROV_LEGACY(0)),
+            CERT_OPEN_STORE_FLAGS(0),
+            None,
+        )
+    }
+    .map_err(|e| anyhow!("CertOpenStore(MEMORY) failed: {e}"))?;
+    Ok(CertStore(store))
+}
+
+pub(crate) fn adopt_cert(ctx: *mut CERT_CONTEXT) -> Result<CertContext> {
     if ctx.is_null() {
         return Err(anyhow!("certificate selection returned null context"));
     }
@@ -397,7 +437,7 @@ fn parse_sha1_hex(input: &str) -> Result<[u8; 20]> {
     Ok(out)
 }
 
-fn merge_additional_cert_file(store: HCERTSTORE, path: &std::path::Path) -> Result<()> {
+pub(crate) fn merge_additional_cert_file(store: HCERTSTORE, path: &std::path::Path) -> Result<()> {
     let bytes = std::fs::read(path)
         .with_context(|| format!("failed to read additional cert '{}'", path.display()))?;
     // SAFETY: bytes are DER/serialized certificate bytes.
@@ -421,7 +461,7 @@ fn merge_additional_cert_file(store: HCERTSTORE, path: &std::path::Path) -> Resu
     Ok(())
 }
 
-fn infer_digest_for_cert(cert: *const CERT_CONTEXT) -> Result<DigestAlgorithm> {
+pub(crate) fn infer_digest_for_cert(cert: *const CERT_CONTEXT) -> Result<DigestAlgorithm> {
     let mut cb = 0u32;
     let _ = unsafe {
         CertGetCertificateContextProperty(cert, CERT_SIGN_HASH_CNG_ALG_PROP_ID, None, &mut cb)
@@ -492,7 +532,7 @@ fn issuer_simple_contains(cert: *const CERT_CONTEXT, needle: &str) -> Result<boo
         .contains(&needle.to_ascii_lowercase()))
 }
 
-fn validate_cert_constraints(cert: *const CERT_CONTEXT, args: &SignArgs) -> Result<()> {
+pub(crate) fn validate_cert_constraints(cert: *const CERT_CONTEXT, args: &SignArgs) -> Result<()> {
     if let Some(want) = &args.eku_oid {
         let usages = cert_usage_strings(cert)?;
         let ok = usages
@@ -765,31 +805,21 @@ fn auto_signer_provider_scratch(
     }))
 }
 
-pub fn sign_with_mssign32(
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn authenticode_sign_embedded(
     args: &SignArgs,
     target: &std::path::Path,
     global: &GlobalOpts,
+    store: HCERTSTORE,
+    cert: &CertContext,
+    resolved_digest: DigestAlgorithm,
+    provider_ptr: Option<*const SIGNER_PROVIDER_INFO>,
+    digest_ptr: Option<*const SIGNER_DIGEST_SIGN_INFO>,
+    mode_report: &'static str,
+    store_report_name: &str,
+    free_library_target: Option<HMODULE>,
+    decoupled_report: Option<(&'static str, usize)>,
 ) -> Result<String> {
-    log_sign_format(target, global);
-    validate_sign_constraints(args)?;
-    let decoupled = args.dlib.is_some() && args.dmdf.is_some();
-    if args.page_hashes && !decoupled {
-        return Err(anyhow!(
-            "--page-hashes requires --dlib and --dmdf in this implementation"
-        ));
-    }
-
-    let store_wrap = load_store(args)?;
-    if let Some(ac) = &args.additional_cert {
-        merge_additional_cert_file(store_wrap.0, ac)?;
-    }
-    let cert = find_cert(store_wrap.0, args)?;
-    let auto_provider_scratch = auto_signer_provider_scratch(cert.0 as *const CERT_CONTEXT)?;
-    let resolved_digest = match args.digest {
-        DigestAlgorithm::CertHash => infer_digest_for_cert(cert.0 as *const CERT_CONTEXT)?,
-        other => other,
-    };
-
     let msix_family = matches!(
         code_sign_format::detect(target),
         code_sign_format::CodeSignFormat::MsixFamily
@@ -827,7 +857,7 @@ pub fn sign_with_mssign32(
         cbSize: size_of::<SIGNER_CERT_STORE_INFO>() as u32,
         pSigningCert: cert.0 as *const CERT_CONTEXT,
         dwCertPolicy: SIGNER_CERT_POLICY_CHAIN,
-        hCertStore: store_wrap.0,
+        hCertStore: store,
     };
     let signer_cert = SIGNER_CERT {
         cbSize: size_of::<SIGNER_CERT>() as u32,
@@ -874,35 +904,6 @@ pub fn sign_with_mssign32(
         psUnauthenticated: std::ptr::null_mut(),
     };
 
-    let provider_name_w;
-    let key_container_w;
-    let mut provider = SIGNER_PROVIDER_INFO::default();
-    let provider_ptr = if args.csp.is_some() || args.key_container.is_some() {
-        provider_name_w = to_wide(args.csp.as_deref().unwrap_or_default());
-        key_container_w = to_wide(args.key_container.as_deref().unwrap_or_default());
-        provider.cbSize = size_of::<SIGNER_PROVIDER_INFO>() as u32;
-        provider.pwszProviderName = if args.csp.is_some() {
-            PCWSTR(provider_name_w.as_ptr())
-        } else {
-            PCWSTR::null()
-        };
-        provider.dwProviderType = 0;
-        provider.dwKeySpec = AT_SIGNATURE.0;
-        provider.dwPvkChoice = windows::Win32::Security::Cryptography::PVK_TYPE_KEYCONTAINER;
-        provider.Anonymous = SIGNER_PROVIDER_INFO_0 {
-            pwszKeyContainer: if args.key_container.is_some() {
-                PWSTR(key_container_w.as_ptr() as *mut _)
-            } else {
-                PWSTR::null()
-            },
-        };
-        Some(&provider as *const SIGNER_PROVIDER_INFO)
-    } else if let Some(ref ap) = auto_provider_scratch {
-        Some(&ap.inner as *const SIGNER_PROVIDER_INFO)
-    } else {
-        None
-    };
-
     let mut flags = SIGNER_SIGN_FLAGS(0);
     if args.append_signature {
         flags |= SIG_APPEND;
@@ -946,19 +947,6 @@ pub fn sign_with_mssign32(
         }
     };
 
-    let mut decoupled_runtime: Option<(
-        HMODULE,
-        SIGNER_DIGEST_SIGN_INFO,
-        CRYPT_INTEGER_BLOB,
-        Vec<u8>,
-        &'static str,
-    )> = None;
-    if decoupled {
-        decoupled_runtime = Some(load_decoupled_digest_info(args)?);
-    }
-    let digest_ptr = decoupled_runtime
-        .as_ref()
-        .map(|(_, digest_info, _, _, _)| digest_info as *const SIGNER_DIGEST_SIGN_INFO);
     let _page_hash_guard = SignToolPageHashesEnvGuard::install(args.no_page_hashes);
 
     // Cleartext MSIX/Appx **`CryptSIPPutSignedDataMsg`** always runs **`AppxSipClientData::Initialize`**, which
@@ -1050,10 +1038,10 @@ pub fn sign_with_mssign32(
             )
         }
     };
-    if let Some((module, _, _, _, _)) = &decoupled_runtime {
+    if let Some(module) = free_library_target {
         // SAFETY: module loaded by LoadLibraryW in this call path.
         unsafe {
-            let _ = FreeLibrary(*module);
+            let _ = FreeLibrary(module);
         }
     }
 
@@ -1070,14 +1058,7 @@ pub fn sign_with_mssign32(
         .unwrap_or_else(|_| "<unavailable>".to_string());
     let mut report = String::new();
     report.push_str("Successfully signed\n");
-    report.push_str(&format!(
-        "mode={}\n",
-        if decoupled {
-            "decoupled-rust-core"
-        } else {
-            "embedded-rust-core"
-        }
-    ));
+    report.push_str(&format!("mode={mode_report}\n"));
     report.push_str(&format!("file={}\n", target.display()));
     report.push_str(&format!("digest={}\n", resolved_digest.as_signtool_name()));
     report.push_str(&format!(
@@ -1085,7 +1066,7 @@ pub fn sign_with_mssign32(
         ts_digest_for_report.as_signtool_name()
     ));
     report.push_str(&format!("thumbprint={thumb}\n"));
-    report.push_str(&format!("store={}\n", args.store_name));
+    report.push_str(&format!("store={store_report_name}\n"));
     report.push_str(&format!(
         "store_scope={}\n",
         if args.machine_store {
@@ -1094,9 +1075,9 @@ pub fn sign_with_mssign32(
             "user"
         }
     ));
-    if let Some((_, _, _, metadata, export_name)) = &decoupled_runtime {
+    if let Some((export_name, dmdf_len)) = decoupled_report {
         report.push_str(&format!("decoupled_export={export_name}\n"));
-        report.push_str(&format!("dmdf_bytes={}\n", metadata.len()));
+        report.push_str(&format!("dmdf_bytes={dmdf_len}\n"));
     }
     if let Some(url) = &args.timestamp_url {
         report.push_str(&format!("timestamp_url={url}\n"));
@@ -1107,4 +1088,102 @@ pub fn sign_with_mssign32(
         report.push_str(&format!("legacy_timestamp_url={url}\n"));
     }
     Ok(report)
+}
+
+pub fn sign_with_mssign32(
+    args: &SignArgs,
+    target: &std::path::Path,
+    global: &GlobalOpts,
+) -> Result<String> {
+    log_sign_format(target, global);
+    crate::win::sealing::validate_sign_constraints_paths(args, std::iter::once(target))?;
+    let decoupled = resolved_decoupled_dlib_path(args).is_some() && args.dmdf.is_some();
+    if args.page_hashes && !decoupled {
+        return Err(anyhow!(
+            "--page-hashes requires --dlib or --trusted-signing-dlib-root and --dmdf in this implementation"
+        ));
+    }
+
+    let store_wrap = load_store(args)?;
+    for ac in &args.additional_certs {
+        merge_additional_cert_file(store_wrap.0, ac)?;
+    }
+    let cert = find_cert(store_wrap.0, args)?;
+    let auto_provider_scratch = auto_signer_provider_scratch(cert.0 as *const CERT_CONTEXT)?;
+    let resolved_digest = match args.digest {
+        DigestAlgorithm::CertHash => infer_digest_for_cert(cert.0 as *const CERT_CONTEXT)?,
+        other => other,
+    };
+
+    let provider_name_w;
+    let key_container_w;
+    let mut provider = SIGNER_PROVIDER_INFO::default();
+    let provider_ptr = if args.csp.is_some() || args.key_container.is_some() {
+        provider_name_w = to_wide(args.csp.as_deref().unwrap_or_default());
+        key_container_w = to_wide(args.key_container.as_deref().unwrap_or_default());
+        provider.cbSize = size_of::<SIGNER_PROVIDER_INFO>() as u32;
+        provider.pwszProviderName = if args.csp.is_some() {
+            PCWSTR(provider_name_w.as_ptr())
+        } else {
+            PCWSTR::null()
+        };
+        provider.dwProviderType = 0;
+        provider.dwKeySpec = AT_SIGNATURE.0;
+        provider.dwPvkChoice = windows::Win32::Security::Cryptography::PVK_TYPE_KEYCONTAINER;
+        provider.Anonymous = SIGNER_PROVIDER_INFO_0 {
+            pwszKeyContainer: if args.key_container.is_some() {
+                PWSTR(key_container_w.as_ptr() as *mut _)
+            } else {
+                PWSTR::null()
+            },
+        };
+        Some(&provider as *const SIGNER_PROVIDER_INFO)
+    } else if let Some(ref ap) = auto_provider_scratch {
+        Some(&ap.inner as *const SIGNER_PROVIDER_INFO)
+    } else {
+        None
+    };
+
+    let mut decoupled_runtime: Option<(
+        HMODULE,
+        SIGNER_DIGEST_SIGN_INFO,
+        CRYPT_INTEGER_BLOB,
+        Vec<u8>,
+        &'static str,
+    )> = None;
+    if decoupled {
+        let dlib = resolved_decoupled_dlib_path(args)
+            .ok_or_else(|| anyhow!("internal error: decoupled mode without dlib path"))?;
+        let dmdf = args
+            .dmdf
+            .as_ref()
+            .ok_or_else(|| anyhow!("internal error: decoupled mode without --dmdf"))?;
+        decoupled_runtime = Some(load_decoupled_digest_info(&dlib, dmdf)?);
+    }
+    let digest_ptr = decoupled_runtime
+        .as_ref()
+        .map(|(_, digest_info, _, _, _)| digest_info as *const SIGNER_DIGEST_SIGN_INFO);
+    let free_library_target = decoupled_runtime.as_ref().map(|(m, _, _, _, _)| *m);
+    let decoupled_report = decoupled_runtime
+        .as_ref()
+        .map(|(_, _, _, metadata, export_name)| (*export_name, metadata.len()));
+
+    authenticode_sign_embedded(
+        args,
+        target,
+        global,
+        store_wrap.0,
+        &cert,
+        resolved_digest,
+        provider_ptr,
+        digest_ptr,
+        if decoupled {
+            "decoupled-rust-core"
+        } else {
+            "embedded-rust-core"
+        },
+        &args.store_name,
+        free_library_target,
+        decoupled_report,
+    )
 }

@@ -214,11 +214,19 @@ pub fn expand_invocations(executable: OsString, tail: Vec<OsString>) -> Result<V
     Ok(vec![out])
 }
 
-/// Combine exit codes like a batch: any hard failure wins; else any warning.
+/// Combine exit codes like a batch: any hard failure wins; else Azure HRESULT-style outcomes; else any warning.
 pub fn combine_batch_exit_codes(acc: i32, next: i32) -> i32 {
+    use crate::{AZURE_SIGN_EXIT_ALL_FAILED, AZURE_SIGN_EXIT_PARTIAL_SUCCESS};
     if acc == 1 || next == 1 {
-        1
-    } else if acc == 2 || next == 2 {
+        return 1;
+    }
+    if acc == AZURE_SIGN_EXIT_ALL_FAILED || next == AZURE_SIGN_EXIT_ALL_FAILED {
+        return AZURE_SIGN_EXIT_ALL_FAILED;
+    }
+    if acc == AZURE_SIGN_EXIT_PARTIAL_SUCCESS || next == AZURE_SIGN_EXIT_PARTIAL_SUCCESS {
+        return AZURE_SIGN_EXIT_PARTIAL_SUCCESS;
+    }
+    if acc == 2 || next == 2 {
         2
     } else {
         0
@@ -288,11 +296,24 @@ mod tests {
 
     #[test]
     fn combine_codes() {
+        use crate::{AZURE_SIGN_EXIT_ALL_FAILED, AZURE_SIGN_EXIT_PARTIAL_SUCCESS};
         assert_eq!(combine_batch_exit_codes(0, 2), 2);
         assert_eq!(combine_batch_exit_codes(2, 0), 2);
         assert_eq!(combine_batch_exit_codes(2, 1), 1);
         assert_eq!(combine_batch_exit_codes(0, 1), 1);
         assert_eq!(combine_batch_exit_codes(0, 0), 0);
+        assert_eq!(
+            combine_batch_exit_codes(0, AZURE_SIGN_EXIT_PARTIAL_SUCCESS),
+            AZURE_SIGN_EXIT_PARTIAL_SUCCESS
+        );
+        assert_eq!(
+            combine_batch_exit_codes(AZURE_SIGN_EXIT_PARTIAL_SUCCESS, AZURE_SIGN_EXIT_ALL_FAILED),
+            AZURE_SIGN_EXIT_ALL_FAILED
+        );
+        assert_eq!(
+            combine_batch_exit_codes(AZURE_SIGN_EXIT_PARTIAL_SUCCESS, 1),
+            1
+        );
     }
 
     #[test]

@@ -78,6 +78,17 @@ pub enum RustSipBackend {
     Off,
 }
 
+/// Exit-code scheme for batch `sign` (AzureSignTool uses HRESULT-style values when enabled).
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+pub enum SignExitCodes {
+    /// Classic signtool-windows semantics (`0` ok, `1` error, `2` warning).
+    #[value(name = "signtool")]
+    Signtool,
+    /// AzureSignTool-style HRESULT batch codes (`0`, `0x20000001` partial success, `0xA0000002` all failed).
+    #[value(name = "azuresigntool", alias = "azure")]
+    Azuresigntool,
+}
+
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 pub enum DigestAlgorithm {
     Sha1,
@@ -287,6 +298,15 @@ pub struct SignArgs {
     /// Decoupled digest metadata file (native `/dmdf`).
     #[arg(long, visible_alias = "dmdf")]
     pub dmdf: Option<PathBuf>,
+    /// Extracted Microsoft Artifact Signing NuGet root: resolves to `bin\x64\Azure.CodeSigning.Dlib.dll` or `bin\x86\...` for this binary's architecture.
+    ///
+    /// Mutually exclusive with `--dlib`.
+    #[arg(
+        long = "trusted-signing-dlib-root",
+        visible_alias = "artifact-signing-dlib-root",
+        conflicts_with = "dlib"
+    )]
+    pub trusted_signing_dlib_root: Option<PathBuf>,
     /// Digest algorithm for signing (native `/fd`).
     #[arg(long, visible_alias = "fd", value_enum, default_value_t = DigestAlgorithm::Sha256)]
     pub digest: DigestAlgorithm,
@@ -320,9 +340,9 @@ pub struct SignArgs {
     /// Authenticode description URL (native `/du`).
     #[arg(long, visible_alias = "du")]
     pub description_url: Option<String>,
-    /// Additional certificate file to include in the signature (native `/ac`).
-    #[arg(long, visible_alias = "ac")]
-    pub additional_cert: Option<PathBuf>,
+    /// Additional certificate files to include in the signature (native `/ac`; repeatable).
+    #[arg(long, visible_alias = "ac", action = clap::ArgAction::Append)]
+    pub additional_certs: Vec<PathBuf>,
     /// Root certificate subject substring the signing cert must chain to (native `/r`).
     #[arg(long, visible_alias = "r")]
     pub root_subject_name: Option<String>,
@@ -391,6 +411,47 @@ pub struct SignArgs {
     /// Experimental Rust SIP behavior (`pe` / `script` / `msi` / `esd` / `msix` / `cab` = post-sign digest consistency check). Override with env `SIGNTOOL_RS_RUST_SIP` when unset; use `off` to ignore the env var.
     #[arg(long = "rust-sip", value_enum)]
     pub rust_sip: Option<RustSipBackend>,
+    /// Azure Key Vault URL (`AzureSignTool` `--azure-key-vault-url` / `-kvu`). Requires `--features azure-kv-sign`.
+    #[arg(long = "azure-key-vault-url", visible_alias = "kvu")]
+    pub azure_key_vault_url: Option<String>,
+    /// Key Vault signing certificate name (`-kvc`).
+    #[arg(long = "azure-key-vault-certificate", visible_alias = "kvc")]
+    pub azure_key_vault_certificate: Option<String>,
+    /// Optional certificate version (`-kvcv`).
+    #[arg(
+        long = "azure-key-vault-certificate-version",
+        visible_alias = "kvcv"
+    )]
+    pub azure_key_vault_certificate_version: Option<String>,
+    #[arg(long = "azure-key-vault-client-id", visible_alias = "kvi")]
+    pub azure_key_vault_client_id: Option<String>,
+    #[arg(long = "azure-key-vault-client-secret", visible_alias = "kvs")]
+    pub azure_key_vault_client_secret: Option<String>,
+    #[arg(long = "azure-key-vault-tenant-id", visible_alias = "kvt")]
+    pub azure_key_vault_tenant_id: Option<String>,
+    #[arg(long = "azure-key-vault-accesstoken", visible_alias = "kva")]
+    pub azure_key_vault_access_token: Option<String>,
+    /// Managed identity / `DefaultAzureCredential`-style acquisition via IMDS (`-kvm`).
+    #[arg(long = "azure-key-vault-managed-identity", visible_alias = "kvm")]
+    pub azure_key_vault_managed_identity: bool,
+    /// OAuth authority host prefix (`-au`), e.g. `https://login.microsoftonline.com`.
+    #[arg(long = "azure-authority", visible_alias = "au")]
+    pub azure_authority: Option<String>,
+    /// Optional text file listing extra inputs to sign, one path per line (`-ifl`).
+    #[arg(long = "input-file-list", visible_alias = "ifl")]
+    pub sign_input_file_list: Option<PathBuf>,
+    /// Continue signing remaining files when one fails (`-coe`).
+    #[arg(long = "continue-on-error", visible_alias = "coe")]
+    pub continue_on_error: bool,
+    /// Skip files that already appear signed (PE certificate directory); AzureSignTool `-s` — native `/s` remains the certificate store name short flag.
+    #[arg(long = "skip-signed")]
+    pub skip_signed: bool,
+    /// Cap concurrent signing threads for multi-file batches (`-mdop`). `1` forces sequential signing.
+    #[arg(long = "max-degree-of-parallelism", visible_alias = "mdop")]
+    pub max_degree_parallelism: Option<usize>,
+    /// Batch exit-code scheme; overrides env when set. Env: `SIGNTOOL_RS_EXIT_CODES=azure|signtool`.
+    #[arg(long = "exit-codes", value_enum)]
+    pub exit_codes: Option<SignExitCodes>,
     /// File(s) to sign (native trailing `<filename(s)>`).
     #[arg(required = true)]
     pub files: Vec<PathBuf>,

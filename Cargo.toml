@@ -19,6 +19,11 @@ version = "0.1.0"
 edition = "2024"
 description = "Rust port of the Windows SDK signtool.exe (Authenticode sign/verify/timestamp) with portable digest helpers."
 
+[features]
+default = []
+## Azure Key Vault signing (`AuthenticatorDigestSign` callback + REST); enables Azure-shaped CLI flags on `sign`.
+azure-kv-sign = ["dep:base64", "dep:reqwest", "dep:url"]
+
 [dependencies]
 signtool-sip-digest = { path = "crates/signtool-sip-digest" }
 anyhow = "1"
@@ -29,6 +34,11 @@ sha2 = "0.10"
 goblin = "0.9"
 
 [target.'cfg(windows)'.dependencies]
+base64 = { version = "0.22", optional = true }
+glob = "0.3"
+rayon = "1.10"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
+url = { version = "2", optional = true }
 uuid = "1"
 windows = { version = "0.59", features = [
     "Win32_Foundation",
@@ -39,6 +49,7 @@ windows = { version = "0.59", features = [
     "Win32_Security_WinTrust",
     "Win32_System_Diagnostics_Debug",
     "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
 ] }
 
 [target.'cfg(windows)'.dev-dependencies]
@@ -48,6 +59,10 @@ predicates = "3"
 [[bin]]
 name = "signtool-windows"
 path = "src/main.rs"
+
+[[bin]]
+name = "azure-sign-tool-compat"
+path = "src/bin/azure_sign_tool_compat.rs"
 
 [[bin]]
 name = "depgraph"

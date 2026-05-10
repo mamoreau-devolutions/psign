@@ -7,7 +7,7 @@ differential parity tests against the native tool where CI fixtures allow.
 ## Current command coverage
 
 - `verify`: WinVerifyTrust-backed implementation with policy modes (`default`, `pa`, `pg`).
-- `sign`: Rust mssign32 core (`SignerSignEx3`) with PFX/system-store cert selection, RFC3161 sign-time timestamping, and decoupled-digest bridge flow (`--dlib` + `--dmdf`) for MSIX parity.
+- `sign`: Rust mssign32 core (`SignerSignEx3`) with PFX/system-store cert selection, RFC3161 sign-time timestamping, and decoupled-digest bridge flow (`--dlib` or `--trusted-signing-dlib-root` + `--dmdf`) for MSIX parity and [Azure Artifact Signing / Trusted Signing](docs/migration-artifact-signing.md).
 - `timestamp`: Rust mssign32 core (`SignerTimeStampEx3`/`SignerTimeStampEx2`) plus AppX restrictions.
 
 ## MSIX parity notes

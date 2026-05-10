@@ -395,6 +395,66 @@ fn msix_dlib_dmdf_path_executes() {
     );
 }
 
+#[test]
+#[ignore = "requires SIGNTOOL_RS_ARTIFACT_SIGNING_UNSIGNED_PE,SIGNTOOL_RS_ARTIFACT_SIGNING_METADATA,SIGNTOOL_RS_ARTIFACT_SIGNING_TIMESTAMP_URL,SIGNTOOL_RS_ARTIFACT_SIGNING_TEST_PFX and SIGNTOOL_RS_ARTIFACT_SIGNING_DLIB or SIGNTOOL_RS_ARTIFACT_SIGNING_DLIB_ROOT"]
+fn artifact_signing_decoupled_pe_executes() {
+    let unsigned_pe = match env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_UNSIGNED_PE") {
+        Some(v) => v,
+        None => return,
+    };
+    let metadata = match env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_METADATA") {
+        Some(v) => v,
+        None => return,
+    };
+    let tsa = match env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_TIMESTAMP_URL") {
+        Some(v) => v,
+        None => return,
+    };
+    let pfx = match env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_TEST_PFX") {
+        Some(v) => v,
+        None => return,
+    };
+    let dlib = env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_DLIB");
+    let dlib_root = env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_DLIB_ROOT");
+    if dlib.is_none() && dlib_root.is_none() {
+        return;
+    }
+    let pfx_password = env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_TEST_PFX_PASSWORD");
+    let out = std::env::temp_dir().join("signtool_rs_artifact_signing_decoupled.exe");
+    let _ = std::fs::copy(&unsigned_pe, &out).expect("copy unsigned pe");
+
+    let mut rust = Command::cargo_bin("signtool-windows").expect("binary available");
+    rust.arg("sign")
+        .arg("--pfx")
+        .arg(&pfx)
+        .arg("--digest")
+        .arg("sha256")
+        .arg("--timestamp-url")
+        .arg(&tsa)
+        .arg("--timestamp-digest")
+        .arg("sha256")
+        .arg("--dmdf")
+        .arg(&metadata)
+        .arg("--auto-select");
+    if let Some(ref path) = dlib {
+        rust.arg("--dlib").arg(path);
+    } else if let Some(ref root) = dlib_root {
+        rust.arg("--trusted-signing-dlib-root").arg(root);
+    }
+    if let Some(pw) = pfx_password {
+        rust.arg("--password").arg(pw);
+    }
+    rust.arg(&out);
+    let rust_out = rust
+        .output()
+        .expect("run signtool-windows artifact signing decoupled sign");
+    assert!(
+        rust_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rust_out.stderr)
+    );
+}
+
 /// PowerShell `.ps1`: same Windows SIP stack as native (`SignerSignEx3`). Bytes may differ (PKCS#7
 /// encoding); native `verify /pa` must accept the Rust-signed file.
 #[test]

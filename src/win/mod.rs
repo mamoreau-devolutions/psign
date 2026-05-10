@@ -1,3 +1,5 @@
+#[cfg(feature = "azure-kv-sign")]
+pub mod azure_kv_sign;
 pub mod catdb;
 pub mod cert_props;
 pub mod code_sign_format;
