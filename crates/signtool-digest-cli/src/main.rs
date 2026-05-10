@@ -190,6 +190,12 @@ enum Command {
         #[arg(long)]
         include_image_value_der_hex: bool,
     },
+    /// Write the **first** embedded Authenticode PKCS#7 (**raw DER**) to stdout or **`--output`** (multi-signed: first certificate-table entry only).
+    ExtractPePkcs7 {
+        path: PathBuf,
+        #[arg(long, value_name = "PATH")]
+        output: Option<PathBuf>,
+    },
     /// CAB with embedded PKCS#7: compare indirect digest to Rust CAB hash.
     VerifyCab { path: PathBuf },
     /// Signed MSI: compare PKCS#7 indirect digest to Rust OLE fingerprint (and extended stream if present).
@@ -802,6 +808,23 @@ fn run() -> Result<()> {
                 );
             }
             println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Command::ExtractPePkcs7 { path, output } => {
+            use std::io::Write;
+            let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+            let der = verify_pe::pe_first_pkcs7_signed_data_der(&bytes).with_context(|| {
+                format!(
+                    "extract-pe-pkcs7 {} (need embedded Authenticode PKCS#7)",
+                    path.display()
+                )
+            })?;
+            match output.as_ref() {
+                Some(p) => std::fs::write(p, &der)
+                    .with_context(|| format!("write PKCS#7 to {}", p.display()))?,
+                None => std::io::stdout()
+                    .write_all(&der)
+                    .context("write PKCS#7 to stdout")?,
+            }
         }
         Command::VerifyCab { path } => {
             verify_cab_digest_consistency(&path)

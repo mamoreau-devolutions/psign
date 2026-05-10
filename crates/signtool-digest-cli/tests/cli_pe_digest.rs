@@ -43,6 +43,7 @@ fn help_lists_core_subcommands() {
         "artifact-signing-metadata-check",
         "inspect-authenticode",
         "inspect-pe-spc-indirect",
+        "extract-pe-pkcs7",
     ] {
         assert!(
             out.contains(needle),
@@ -224,6 +225,38 @@ fn inspect_authenticode_pe_outputs_json_with_signers() {
         pkcs7.get("nested_signatures").is_some(),
         "nested_signatures field should be present"
     );
+}
+
+#[test]
+fn extract_pe_pkcs7_stdout_matches_verify_pe_helper() {
+    let pe = std::fs::read(tiny32_fixture()).expect("read tiny32");
+    let expected = signtool_sip_digest::verify_pe::pe_first_pkcs7_signed_data_der(&pe)
+        .expect("library extract");
+    let mut cmd = Command::cargo_bin("signtool-portable").unwrap();
+    cmd.arg("extract-pe-pkcs7").arg(tiny32_fixture());
+    let assert = cmd.assert().success();
+    assert_eq!(
+        assert.get_output().stdout.as_slice(),
+        expected.as_slice(),
+        "CLI stdout PKCS#7 must match verify_pe::pe_first_pkcs7_signed_data_der"
+    );
+}
+
+#[test]
+fn extract_pe_pkcs7_output_file_matches_verify_pe_helper() {
+    let pe = std::fs::read(tiny32_fixture()).expect("read tiny32");
+    let expected = signtool_sip_digest::verify_pe::pe_first_pkcs7_signed_data_der(&pe)
+        .expect("library extract");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out_path = dir.path().join("embedded.p7");
+    let mut cmd = Command::cargo_bin("signtool-portable").unwrap();
+    cmd.arg("extract-pe-pkcs7")
+        .arg(tiny32_fixture())
+        .arg("--output")
+        .arg(&out_path);
+    cmd.assert().success();
+    let written = std::fs::read(&out_path).expect("read output");
+    assert_eq!(written.as_slice(), expected.as_slice());
 }
 
 #[test]
