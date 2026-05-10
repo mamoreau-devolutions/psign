@@ -39,7 +39,7 @@ cargo digest-test    # alias: sip-digest lib tests + digest-cli integration test
 cargo digest-check   # alias: `cargo check` on both portable crates
 ```
 
-Unix CI (`ci-unix`) runs **`cargo fmt`**, strict **`clippy -D warnings`** on those crates plus the **`signtool-rs` library**, and the digest CLI tests.
+Unix CI (`ci-unix`) runs **`cargo fmt`**, strict **`clippy -D warnings`** on those crates plus the **`signtool-rs` library**, and the digest CLI tests. Local mirror (bash): **`scripts/linux-portable-validation.sh`** from the repo root.
 
 ## Generate binary manifest and dependency graph
 
