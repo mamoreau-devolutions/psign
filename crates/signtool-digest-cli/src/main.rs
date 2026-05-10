@@ -34,6 +34,7 @@ use signtool_sip_digest::page_hashes::{self, PageHashAttrKind};
 use signtool_sip_digest::pe_digest::{
     PeAuthenticodeHashKind, pe_authenticode_digest, pe_authenticode_digest_file_ranges,
 };
+use signtool_sip_digest::pkcs7;
 use signtool_sip_digest::verify_pe;
 use signtool_sip_digest::verify_script_digest_consistency;
 use std::ffi::OsStr;
@@ -180,6 +181,15 @@ enum Command {
     ///
     /// One line per range: `start=N end=M` (half-open end). Useful on Linux for tooling / future page-hash alignment vs `WinTrust`.
     PeAuthenticodeRanges { path: PathBuf },
+    /// Decode **`SpcIndirectDataContent`** from the first embedded Authenticode PKCS#7 (**JSON** to stdout).
+    ///
+    /// Intended for Linux-side inspection and PKCS#7 rebuild experiments (Rust **`pkcs7`** module in **`signtool-sip-digest`**); does **not** sign or embed signatures.
+    InspectPeSpcIndirect {
+        path: PathBuf,
+        /// Include lowercase hex of **`image_data.value`** DER (**`SpcPeImageData`**) — output can be large.
+        #[arg(long)]
+        include_image_value_der_hex: bool,
+    },
     /// CAB with embedded PKCS#7: compare indirect digest to Rust CAB hash.
     VerifyCab { path: PathBuf },
     /// Signed MSI: compare PKCS#7 indirect digest to Rust OLE fingerprint (and extended stream if present).
@@ -754,6 +764,44 @@ fn run() -> Result<()> {
             for r in ranges {
                 println!("start={} end={}", r.start, r.end);
             }
+        }
+        Command::InspectPeSpcIndirect {
+            path,
+            include_image_value_der_hex,
+        } => {
+            let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+            let indirect = pkcs7::parse_pe_pkcs7_spc_indirect_data(&bytes).with_context(|| {
+                format!(
+                    "inspect-pe-spc-indirect {} (need embedded Authenticode PKCS#7)",
+                    path.display()
+                )
+            })?;
+            let kind = PeAuthenticodeHashKind::from_digest_byte_len(
+                indirect.message_digest.digest.as_bytes().len(),
+            )
+            .with_context(|| format!("inspect-pe-spc-indirect {}", path.display()))?;
+            let sip = pe_authenticode_digest(&bytes, kind)
+                .with_context(|| format!("inspect-pe-spc-indirect {}", path.display()))?;
+            let indirect_der_len =
+                pkcs7::encode_spc_indirect_data_der(&indirect).map(|v| v.len())?;
+            let digest_oid = indirect.message_digest.digest_algorithm.oid.to_string();
+            let matches = sip.as_slice() == indirect.message_digest.digest.as_bytes();
+            let mut report = serde_json::json!({
+                "image_data_value_type_oid": indirect.data.value_type.to_string(),
+                "digest_algorithm_oid": digest_oid,
+                "message_digest_hex": hex_lower(indirect.message_digest.digest.as_bytes()),
+                "message_digest_byte_len": indirect.message_digest.digest.as_bytes().len(),
+                "spc_indirect_der_byte_len": indirect_der_len,
+                "pe_image_digest_hex": hex_lower(&sip),
+                "message_digest_matches_pe_image_digest": matches,
+            });
+            if include_image_value_der_hex {
+                report.as_object_mut().expect("json object").insert(
+                    "image_data_value_der_hex".to_string(),
+                    serde_json::Value::String(hex_lower(indirect.data.value.value())),
+                );
+            }
+            println!("{}", serde_json::to_string_pretty(&report)?);
         }
         Command::VerifyCab { path } => {
             verify_cab_digest_consistency(&path)

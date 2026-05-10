@@ -190,10 +190,10 @@ fn decode_nested_pkcs7_payload(payload: &[u8]) -> Result<Vec<u8>> {
     if decode_signed_data(payload).is_ok() {
         return Ok(payload.to_vec());
     }
-    if let Some(inner) = peel_octet_string_outer(payload) {
-        if decode_signed_data(inner).is_ok() {
-            return Ok(inner.to_vec());
-        }
+    if let Some(inner) = peel_octet_string_outer(payload)
+        && decode_signed_data(inner).is_ok()
+    {
+        return Ok(inner.to_vec());
     }
     Err(anyhow!(
         "nested payload is not a decodable SignedData ContentInfo"

@@ -42,6 +42,7 @@ fn help_lists_core_subcommands() {
         "pe-authenticode-ranges",
         "artifact-signing-metadata-check",
         "inspect-authenticode",
+        "inspect-pe-spc-indirect",
     ] {
         assert!(
             out.contains(needle),
@@ -222,6 +223,28 @@ fn inspect_authenticode_pe_outputs_json_with_signers() {
     assert!(
         pkcs7.get("nested_signatures").is_some(),
         "nested_signatures field should be present"
+    );
+}
+
+#[test]
+fn inspect_pe_spc_indirect_matches_sip_digest_on_tiny_fixture() {
+    let mut cmd = Command::cargo_bin("signtool-portable").unwrap();
+    cmd.arg("inspect-pe-spc-indirect").arg(tiny32_fixture());
+    let assert = cmd.assert().success();
+    let out = std::str::from_utf8(&assert.get_output().stdout).expect("utf8");
+    let v: Value = serde_json::from_str(out.trim()).expect("inspect-pe-spc-indirect JSON");
+    assert_eq!(
+        v.get("message_digest_matches_pe_image_digest")
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        v.get("image_data_value_type_oid").and_then(Value::as_str),
+        Some("1.3.6.1.4.1.311.2.1.15")
+    );
+    assert_eq!(
+        v.get("digest_algorithm_oid").and_then(Value::as_str),
+        Some("2.16.840.1.101.3.4.2.1")
     );
 }
 
