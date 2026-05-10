@@ -14,11 +14,14 @@ cargo metadata --locked --format-version 1 >/dev/null
 
 echo "== clippy portable crates =="
 cargo clippy -p signtool-sip-digest -p signtool-digest-cli -p signtool-authenticode-trust \
-  -p signtool-codesigning-rest \
+  -p signtool-codesigning-rest -p signtool-azure-kv-rest \
   --all-targets --locked -- -D warnings
 
 echo "== clippy digest-cli (artifact-signing-rest) =="
 cargo clippy -p signtool-digest-cli --all-targets --features artifact-signing-rest --locked -- -D warnings
+
+echo "== clippy digest-cli (azure-kv-sign-portable) =="
+cargo clippy -p signtool-digest-cli --all-targets --features azure-kv-sign-portable --locked -- -D warnings
 
 echo "== clippy signtool-rs lib (stub on Unix) =="
 cargo clippy -p signtool-rs --lib --locked -- -D warnings
@@ -32,11 +35,17 @@ cargo test -p signtool-authenticode-trust --lib --locked
 echo "== unit tests: codesigning-rest =="
 cargo test -p signtool-codesigning-rest --lib --locked
 
+echo "== unit tests: azure-kv-rest =="
+cargo test -p signtool-azure-kv-rest --lib --locked
+
 echo "== integration: signtool-portable (digest-cli) =="
 cargo test -p signtool-digest-cli --locked
 
 echo "== integration: signtool-portable (artifact-signing-rest) =="
 cargo test -p signtool-digest-cli --features artifact-signing-rest --locked
+
+echo "== integration: signtool-portable (azure-kv-sign-portable) =="
+cargo test -p signtool-digest-cli --features azure-kv-sign-portable --locked
 
 echo "== signtool-rs library tests (argv / response files) =="
 cargo test -p signtool-rs --lib --locked

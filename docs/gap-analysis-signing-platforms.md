@@ -34,7 +34,7 @@ Legend: **Sign** = produce/embed Authenticode; **WT verify** = `WinVerifyTrust`-
 | Goal | Today | Gap |
 |------|--------|-----|
 | **Drop-in Linux replacement for `signtool.exe` sign/verify** | Not supported | Signing and WinTrust-backed verify require Windows CryptAPI/SIP (`SignerSignEx3`, `WinVerifyTrust`). |
-| **Drop-in Linux replacement for AzureSignTool** | Not supported | Key Vault signing is implemented only in **`signtool-windows`** (`--azure-key-vault-*`, feature **`azure-kv-sign`**). Embedding signatures still uses **`SignerSignEx3`** + OS SIP. |
+| **Drop-in Linux replacement for AzureSignTool** | Partial | **`azure-key-vault-sign-digest`** on **`signtool-portable`** (**`--features azure-kv-sign-portable`**) performs the Key Vault **`keys/sign`** step (**digest file → signature**). **Embedding** Authenticode still requires **`signtool-windows`** (`SignerSignEx3`). Full **`sign`** with KV callback remains Windows (**`--features azure-kv-sign`**). |
 | **Drop-in Linux replacement for Artifact Signing (dlib / REST)** | Partial | **`artifact-signing-submit`** (**`--features artifact-signing-rest`**) runs on **Linux/macOS** via **`signtool-portable`** or on Windows via **`signtool-windows`** — same **`:sign`** LRO (**hash → JSON**). **Embedding** PKCS#7 still requires **`SignerSignEx3`** + dlib or future portable CMS/embed. **`signtool-portable`** validates **`--dmdf`** JSON without network. |
 | **Linux verify + digest parity for many Authenticode formats** | Supported | **`signtool-portable`** covers PE, CAB, MSI, ESD/WIM, cleartext MSIX, catalog, scripts; **`trust-verify-*`** adds anchor-based CMS trust (see [`authenticode-trust-stack.md`](authenticode-trust-stack.md)). |
 | **Maximum Authenticode subject formats** | Windows signs all SIP-registered types Rust can digest-check | **Encrypted MSIX**, **VBA/mso**, **extension SIP DLLs**, **standalone `.p7x`** subject handling — see [`rust-sip-gaps.md`](rust-sip-gaps.md). |
@@ -71,11 +71,11 @@ Legend: **Sign** = produce/embed Authenticode; **WT verify** = `WinVerifyTrust`-
 
 | AzureSignTool concept | `signtool-windows` | `signtool-portable` |
 |-----------------------|-------------------|---------------------|
-| KV URL, cert name, auth (MI / SP / token) | Yes (`--features azure-kv-sign`) | **No** — no network signing |
+| KV URL, cert name, auth (MI / SP / token) | Yes (`--features azure-kv-sign`) | **`azure-key-vault-sign-digest`** (`--features azure-kv-sign-portable`) — digest file only |
 | Batch / parallelism / exit HRESULTs | Mapped (`--input-file-list`, `--exit-codes azuresigntool`, …) | N/A |
-| ECDSA keys | Supported on KV path (alg derived from cert) | N/A |
+| ECDSA keys | Supported on KV path (alg derived from cert) | Same JWS algs (**ES256**/…) inferred from certificate **`cer`** |
 
-**Gap:** All embedding still **Windows + SIP**. There is **no** Linux pipeline that takes KV signatures and writes Authenticode into binaries without new Rust encode/embed work.
+**Gap:** Embedding PKCS#7 into subjects is still **Windows + SIP**. Portable KV signs an **opaque digest blob**; wiring signature bytes into **`SignedData`** + **`WIN_CERTIFICATE`** (etc.) remains future work.
 
 Details: [`migration-azuresigntool.md`](migration-azuresigntool.md).
 

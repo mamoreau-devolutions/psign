@@ -79,6 +79,19 @@ fn pe_digest_raw_output_file_matches_known_sha256_tiny32() {
     assert_eq!(raw, decode_hex_lower(expected_hex));
 }
 
+#[cfg(feature = "azure-kv-sign-portable")]
+#[test]
+fn help_lists_azure_key_vault_sign_digest_when_feature_enabled() {
+    let mut cmd = Command::cargo_bin("signtool-portable").unwrap();
+    cmd.arg("--help");
+    let assert = cmd.assert().success();
+    let out = std::str::from_utf8(&assert.get_output().stdout).expect("utf-8 help");
+    assert!(
+        out.contains("azure-key-vault-sign-digest"),
+        "help should list azure-key-vault-sign-digest when built with azure-kv-sign-portable"
+    );
+}
+
 #[cfg(feature = "artifact-signing-rest")]
 #[test]
 fn help_lists_artifact_signing_submit_when_feature_enabled() {

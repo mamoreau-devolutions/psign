@@ -4,6 +4,8 @@
 //! for formats implemented in `signtool-sip-digest`. This does **not** replace full `signtool-rs` verify.
 
 use anyhow::{Context, Result, anyhow};
+#[cfg(feature = "azure-kv-sign-portable")]
+use base64::Engine as _;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::Deserialize;
 use signtool_authenticode_trust::{
@@ -11,6 +13,11 @@ use signtool_authenticode_trust::{
     inspect_authenticode_pkcs7_der, inspect_pe_authenticode, parse_verification_date_ymd,
     trust_verify_cab_bytes, trust_verify_catalog_bytes, trust_verify_detached_bytes,
     trust_verify_pe_bytes,
+};
+#[cfg(feature = "azure-kv-sign-portable")]
+use signtool_azure_kv_rest::{
+    KvAuthParams, KvHashAlg, acquire_kv_access_token, fetch_kv_certificate,
+    kv_sign_digest_from_certificate,
 };
 #[cfg(feature = "artifact-signing-rest")]
 use signtool_codesigning_rest::{
@@ -204,6 +211,12 @@ enum Command {
     ArtifactSigningSubmit {
         #[command(flatten)]
         args: ArtifactSigningSubmitPortableArgs,
+    },
+    /// Azure Key Vault **`keys/sign`** over a **precomputed digest file** (RSA PKCS#1 or ECDSA). Requires **`--features azure-kv-sign-portable`**. Does **not** embed Authenticode — use **`signtool-windows`** for that.
+    #[cfg(feature = "azure-kv-sign-portable")]
+    AzureKeyVaultSignDigest {
+        #[command(flatten)]
+        args: AzureKvSignDigestPortableArgs,
     },
     /// Print CAB Authenticode digest **without** requiring PKCS#7 (unsigned / structural check).
     ///
@@ -413,6 +426,148 @@ fn run_portable_artifact_signing_submit(args: ArtifactSigningSubmitPortableArgs)
         }
     })?;
     println!("{}", serde_json::to_string_pretty(&v)?);
+    Ok(())
+}
+
+#[cfg(feature = "azure-kv-sign-portable")]
+#[derive(Args, Debug, Clone)]
+struct AzureKvSignDigestPortableArgs {
+    #[arg(long = "azure-key-vault-url", visible_alias = "kvu")]
+    vault_url: String,
+    #[arg(long = "azure-key-vault-certificate", visible_alias = "kvc")]
+    certificate: String,
+    #[arg(long = "azure-key-vault-certificate-version", visible_alias = "kvcv")]
+    certificate_version: Option<String>,
+    #[arg(long)]
+    digest_file: PathBuf,
+    #[arg(long, value_enum, default_value_t = KvPortableHashAlg::Sha256)]
+    digest_algorithm: KvPortableHashAlg,
+    #[arg(long = "azure-key-vault-accesstoken")]
+    azure_key_vault_access_token: Option<String>,
+    #[arg(long = "azure-key-vault-managed-identity")]
+    azure_key_vault_managed_identity: bool,
+    #[arg(long = "azure-key-vault-tenant-id")]
+    azure_key_vault_tenant_id: Option<String>,
+    #[arg(long = "azure-key-vault-client-id")]
+    azure_key_vault_client_id: Option<String>,
+    #[arg(long = "azure-key-vault-client-secret")]
+    azure_key_vault_client_secret: Option<String>,
+    #[arg(long = "azure-authority")]
+    azure_authority: Option<String>,
+    /// Write raw signature bytes to this path. If omitted, prints **standard base64** (one line, no PEM).
+    #[arg(long, value_name = "PATH")]
+    signature_output: Option<PathBuf>,
+}
+
+#[cfg(feature = "azure-kv-sign-portable")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum KvPortableHashAlg {
+    Sha256,
+    Sha384,
+    Sha512,
+}
+
+#[cfg(feature = "azure-kv-sign-portable")]
+impl From<KvPortableHashAlg> for KvHashAlg {
+    fn from(value: KvPortableHashAlg) -> Self {
+        match value {
+            KvPortableHashAlg::Sha256 => KvHashAlg::Sha256,
+            KvPortableHashAlg::Sha384 => KvHashAlg::Sha384,
+            KvPortableHashAlg::Sha512 => KvHashAlg::Sha512,
+        }
+    }
+}
+
+#[cfg(feature = "azure-kv-sign-portable")]
+fn validate_kv_portable_auth(args: &AzureKvSignDigestPortableArgs) -> Result<()> {
+    let has_sp = args
+        .azure_key_vault_client_secret
+        .as_ref()
+        .map(|s| !s.trim().is_empty())
+        == Some(true);
+    let has_tenant = args
+        .azure_key_vault_tenant_id
+        .as_ref()
+        .map(|s| !s.trim().is_empty())
+        == Some(true);
+    let has_client = args
+        .azure_key_vault_client_id
+        .as_ref()
+        .map(|s| !s.trim().is_empty())
+        == Some(true);
+    let has_token = args
+        .azure_key_vault_access_token
+        .as_ref()
+        .map(|s| !s.trim().is_empty())
+        == Some(true);
+
+    let sp_count = has_sp as u8 + has_tenant as u8 + has_client as u8;
+    if sp_count != 0 && sp_count != 3 {
+        return Err(anyhow!(
+            "Azure AD client credentials require all of --azure-key-vault-client-id, --azure-key-vault-client-secret, and --azure-key-vault-tenant-id"
+        ));
+    }
+
+    if has_token && (args.azure_key_vault_managed_identity || sp_count == 3) {
+        return Err(anyhow!(
+            "use either --azure-key-vault-accesstoken or managed identity / client credentials, not multiple"
+        ));
+    }
+    if args.azure_key_vault_managed_identity && (has_token || sp_count == 3) {
+        return Err(anyhow!(
+            "--azure-key-vault-managed-identity cannot be combined with access tokens or client secrets"
+        ));
+    }
+    if !has_token && !args.azure_key_vault_managed_identity && sp_count != 3 {
+        return Err(anyhow!(
+            "choose authentication: --azure-key-vault-accesstoken, --azure-key-vault-managed-identity, or client id/secret/tenant"
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "azure-kv-sign-portable")]
+fn run_portable_azure_kv_sign_digest(args: AzureKvSignDigestPortableArgs) -> Result<()> {
+    use std::time::Duration;
+    validate_kv_portable_auth(&args)?;
+    let digest = std::fs::read(&args.digest_file)
+        .with_context(|| format!("read digest file {}", args.digest_file.display()))?;
+    if digest.is_empty() {
+        return Err(anyhow!("digest file is empty"));
+    }
+    let http = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(300))
+        .build()
+        .map_err(|e| anyhow!("HTTP client: {e}"))?;
+    let auth = KvAuthParams {
+        access_token: args.azure_key_vault_access_token.as_deref(),
+        managed_identity: args.azure_key_vault_managed_identity,
+        tenant_id: args.azure_key_vault_tenant_id.as_deref(),
+        client_id: args.azure_key_vault_client_id.as_deref(),
+        client_secret: args.azure_key_vault_client_secret.as_deref(),
+        authority: args.azure_authority.as_deref(),
+    };
+    let token = acquire_kv_access_token(&auth)?;
+    let cert = fetch_kv_certificate(
+        &http,
+        args.vault_url.trim(),
+        args.certificate.trim(),
+        args.certificate_version
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty()),
+        &token,
+    )?;
+    let hash = KvHashAlg::from(args.digest_algorithm);
+    let sig = kv_sign_digest_from_certificate(&http, &token, &cert, hash, &digest)?;
+    if let Some(path) = args.signature_output {
+        std::fs::write(&path, &sig).with_context(|| format!("write {}", path.display()))?;
+    } else {
+        println!(
+            "{}",
+            base64::engine::general_purpose::STANDARD.encode(sig.as_slice())
+        );
+    }
     Ok(())
 }
 
@@ -643,6 +798,10 @@ fn run() -> Result<()> {
         #[cfg(feature = "artifact-signing-rest")]
         Command::ArtifactSigningSubmit { args } => {
             run_portable_artifact_signing_submit(args)?;
+        }
+        #[cfg(feature = "azure-kv-sign-portable")]
+        Command::AzureKeyVaultSignDigest { args } => {
+            run_portable_azure_kv_sign_digest(args)?;
         }
         Command::CabDigest {
             path,

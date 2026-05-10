@@ -4,6 +4,7 @@ members = [
     "crates/signtool-digest-cli",
     "crates/signtool-authenticode-trust",
     "crates/signtool-codesigning-rest",
+    "crates/signtool-azure-kv-rest",
 ]
 # Bare `cargo build` / `cargo test` at the repo root builds portable crates only (Linux/macOS friendly).
 # Use `-p signtool-rs` or `cargo build --workspace` for the full workspace including the Windows binary crate.
@@ -12,6 +13,7 @@ default-members = [
     "crates/signtool-digest-cli",
     "crates/signtool-authenticode-trust",
     "crates/signtool-codesigning-rest",
+    "crates/signtool-azure-kv-rest",
 ]
 resolver = "2"
 
@@ -24,7 +26,7 @@ description = "Rust port of the Windows SDK signtool.exe (Authenticode sign/veri
 [features]
 default = []
 ## Azure Key Vault signing (`AuthenticatorDigestSign` callback + REST); enables Azure-shaped CLI flags on `sign`.
-azure-kv-sign = ["dep:base64", "dep:reqwest", "dep:url"]
+azure-kv-sign = ["dep:signtool-azure-kv-rest", "dep:reqwest"]
 ## Azure Artifact Signing / Trusted Signing **data-plane** hash signing (REST LRO); experimental helper command `artifact-signing-submit`.
 artifact-signing-rest = ["dep:signtool-codesigning-rest"]
 
@@ -40,12 +42,11 @@ goblin = "0.9"
 
 [target.'cfg(windows)'.dependencies]
 x509-cert = "0.2.5"
-base64 = { version = "0.22", optional = true }
 glob = "0.3"
 rayon = "1.10"
+signtool-azure-kv-rest = { path = "crates/signtool-azure-kv-rest", optional = true }
 signtool-codesigning-rest = { path = "crates/signtool-codesigning-rest", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
-url = { version = "2", optional = true }
 uuid = "1"
 windows = { version = "0.59", features = [
     "Win32_Foundation",

@@ -43,9 +43,9 @@ Optional debug: **`SIGNTOOL_PORTABLE_DEBUG=1`**.
 
 Details: [`migration-artifact-signing.md`](migration-artifact-signing.md).
 
-## 3. AzureSignTool equivalent on Linux
+## 3. AzureSignTool — Key Vault digest sign on Linux
 
-**Not supported end-to-end.** Key Vault **`keys/sign`** is wired only in **`signtool-windows`** (`--features azure-kv-sign`). Plan: Windows job for sign+embed; Linux job for **`trust-verify-*`** / **`verify-*`**.
+**Partial.** Use **`pe-digest` / `cab-digest`** (**`--encoding raw`**) plus **`azure-key-vault-sign-digest`** with **`--features azure-kv-sign-portable`** for the **`keys/sign`** HTTP step (see [`migration-azuresigntool.md`](migration-azuresigntool.md)). **Embed** PKCS#7 on Windows with **`signtool-windows`** (`--features azure-kv-sign`) or native **`signtool.exe`**.
 
 Details: [`migration-azuresigntool.md`](migration-azuresigntool.md).
 

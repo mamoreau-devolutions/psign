@@ -8,6 +8,8 @@ description = "Linux/macOS-friendly CLI over portable Authenticode SIP digests (
 default = []
 ## Azure Code Signing `:sign` LRO on Linux/macOS (same API as `signtool-windows artifact-signing-submit`).
 artifact-signing-rest = ["dep:signtool-codesigning-rest"]
+## Azure Key Vault `keys/sign` on Linux/macOS (digest file → signature bytes / base64); embedding still requires Windows.
+azure-kv-sign-portable = ["dep:signtool-azure-kv-rest", "dep:base64", "dep:reqwest"]
 
 [[bin]]
 name = "signtool-portable"
@@ -21,6 +23,9 @@ serde_json = "1"
 signtool-authenticode-trust = { path = "../signtool-authenticode-trust" }
 signtool-sip-digest = { path = "../signtool-sip-digest" }
 signtool-codesigning-rest = { path = "../signtool-codesigning-rest", optional = true }
+signtool-azure-kv-rest = { path = "../signtool-azure-kv-rest", optional = true }
+base64 = { version = "0.22", optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
 
 [dev-dependencies]
 assert_cmd = "2"

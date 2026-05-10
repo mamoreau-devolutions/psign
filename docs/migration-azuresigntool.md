@@ -1,6 +1,6 @@
 # Migrating from AzureSignTool
 
-This project can replace **AzureSignTool** for Windows signing when built with **`--features azure-kv-sign`**. **`signtool-portable`** remains the cross-platform companion for digest checks and PE/catalog verification — it does not perform Key Vault signing.
+This project can replace **AzureSignTool** for Windows signing when built with **`--features azure-kv-sign`**. **`signtool-portable`** covers digest checks, verification, and (with **`--features azure-kv-sign-portable`**) the Key Vault **`keys/sign`** step on **digest files** — not full **`sign`** / embed (that stays **`signtool-windows`**).
 
 **Azure Artifact Signing (Trusted Signing)** via Microsoft’s decoupled **`Azure.CodeSigning.Dlib.dll`** is **not** the Key Vault path: use **`--dlib`** / **`--trusted-signing-dlib-root`** with **`--dmdf`** only (never mixed with **`--azure-key-vault-url`**). See [`migration-artifact-signing.md`](migration-artifact-signing.md). PowerShell OpenAuthenticode overlap (inspect JSON, REST submit, EKU prefix selection) is summarized in [`psa-interoperability.md`](psa-interoperability.md).
 
@@ -72,6 +72,21 @@ Enable the same behavior with:
 The helper binary **`azure-sign-tool-compat`** sets the environment default to Azure HRESULT semantics before running the same CLI entry point.
 
 Default **`signtool`** exit codes remain **`0` / `1` / `2`**.
+
+### Linux / CI: Key Vault **`keys/sign`** on a raw digest
+
+Build **`signtool-portable`** with **`--features azure-kv-sign-portable`**. Produce **`digest.bin`** with **`pe-digest`** / **`cab-digest`** (**`--encoding raw`**), then:
+
+```bash
+signtool-portable azure-key-vault-sign-digest \
+  --azure-key-vault-url https://myvault.vault.azure.net \
+  --azure-key-vault-certificate my-cert \
+  --digest-file digest.bin \
+  --digest-algorithm sha256 \
+  --azure-key-vault-managed-identity
+```
+
+Stdout prints **standard base64** signature bytes (no PEM). **`--signature-output PATH`** writes **raw** signature. **ECDSA** certificates use **ES256** / **ES384** / **ES512** automatically (same as **`signtool-windows`** KV path). Embedding into a PE/CAB still requires Windows **`SignerSignEx3`** (this repo) or future portable PKCS#7.
 
 ## Verification with **`signtool-portable`**
 

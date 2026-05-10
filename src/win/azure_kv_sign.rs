@@ -6,12 +6,14 @@ use crate::win::sign_core::{
     adopt_cert, authenticode_sign_embedded, encoding, infer_digest_for_cert,
     merge_additional_cert_file, open_memory_cert_store, validate_cert_constraints,
 };
-use anyhow::{Context as _, Result, anyhow};
-use base64::Engine as _;
-use serde::Deserialize;
+use anyhow::{Result, anyhow};
+use signtool_azure_kv_rest::{
+    KvAuthParams, KvHashAlg, KvPublicKeyKind, acquire_kv_access_token, fetch_kv_certificate,
+    kv_decode_cer_b64, kv_jws_alg, kv_public_key_kind_from_cer_der, kv_sign_digest,
+    kv_sign_url_from_kid,
+};
 use std::cell::RefCell;
 use std::mem::size_of;
-use url::Url;
 use windows::Win32::Foundation::{E_FAIL, S_OK};
 use windows::Win32::Security::Cryptography::ALG_ID;
 use windows::Win32::Security::Cryptography::{
@@ -21,238 +23,40 @@ use windows::Win32::Security::Cryptography::{
 };
 use windows::Win32::System::Memory::{LMEM_FIXED, LocalAlloc};
 use windows::core::HRESULT;
-use x509_cert::der::Decode;
 
 thread_local! {
     static KV_HTTP: RefCell<Option<KvCallbackState>> = const { RefCell::new(None) };
-}
-
-#[derive(Clone, Copy)]
-enum KvCertKeyKind {
-    Rsa,
-    Ec,
 }
 
 struct KvCallbackState {
     client: reqwest::blocking::Client,
     token: String,
     sign_url: String,
-    key_kind: KvCertKeyKind,
+    key_kind: KvPublicKeyKind,
 }
 
-#[derive(Deserialize)]
-struct KeyVaultCertificate {
-    kid: String,
-    cer: String,
+fn auth_params_from_sign_args(args: &SignArgs) -> KvAuthParams<'_> {
+    KvAuthParams {
+        access_token: args.azure_key_vault_access_token.as_deref(),
+        managed_identity: args.azure_key_vault_managed_identity,
+        tenant_id: args.azure_key_vault_tenant_id.as_deref(),
+        client_id: args.azure_key_vault_client_id.as_deref(),
+        client_secret: args.azure_key_vault_client_secret.as_deref(),
+        authority: args.azure_authority.as_deref(),
+    }
 }
 
-#[derive(Deserialize)]
-struct KeyVaultSignResponse {
-    value: String,
-}
-
-fn normalize_vault_base(url: &str) -> Result<String> {
-    let u = url.trim();
-    if u.is_empty() {
-        return Err(anyhow!("--azure-key-vault-url must not be empty"));
-    }
-    Ok(u.trim_end_matches('/').to_string())
-}
-
-fn acquire_access_token(args: &SignArgs) -> Result<String> {
-    if let Some(tok) = args.azure_key_vault_access_token.as_ref().map(|s| s.trim()) {
-        if tok.is_empty() {
-            return Err(anyhow!("--azure-key-vault-accesstoken must not be empty"));
-        }
-        return Ok(tok.to_string());
-    }
-    if args.azure_key_vault_managed_identity {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
-            .build()
-            .map_err(|e| anyhow!("HTTP client: {e}"))?;
-        let rsp = client
-            .get("http://169.254.169.254/metadata/identity/oauth2/token")
-            .query(&[
-                ("api-version", "2018-02-01"),
-                ("resource", "https://vault.azure.net"),
-            ])
-            .header("Metadata", "true")
-            .send()
-            .context("managed identity token request (IMDS)")?;
-        if !rsp.status().is_success() {
-            return Err(anyhow!(
-                "managed identity token HTTP {}: {}",
-                rsp.status(),
-                rsp.text().unwrap_or_default()
-            ));
-        }
-        #[derive(Deserialize)]
-        struct MiJson {
-            access_token: String,
-        }
-        let j: MiJson = rsp.json().context("managed identity token JSON")?;
-        return Ok(j.access_token);
-    }
-
-    let tenant = args
-        .azure_key_vault_tenant_id
-        .as_deref()
-        .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| {
-            anyhow!("Azure Key Vault client credentials require --azure-key-vault-tenant-id (-kvt)")
-        })?;
-    let client_id = args
-        .azure_key_vault_client_id
-        .as_deref()
-        .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| {
-            anyhow!("Azure Key Vault client credentials require --azure-key-vault-client-id (-kvi)")
-        })?;
-    let secret = args
-        .azure_key_vault_client_secret
-        .as_deref()
-        .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| {
-            anyhow!(
-                "Azure Key Vault client credentials require --azure-key-vault-client-secret (-kvs)"
-            )
-        })?;
-
-    let authority = args
-        .azure_authority
-        .as_deref()
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or("https://login.microsoftonline.com");
-    let token_url = format!("{authority}/{tenant}/oauth2/v2.0/token");
-
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-        .map_err(|e| anyhow!("HTTP client: {e}"))?;
-    let rsp = client
-        .post(token_url)
-        .form(&[
-            ("client_id", client_id),
-            ("client_secret", secret),
-            ("scope", "https://vault.azure.net/.default"),
-            ("grant_type", "client_credentials"),
-        ])
-        .send()
-        .context("Azure AD token request")?;
-    if !rsp.status().is_success() {
-        return Err(anyhow!(
-            "Azure AD token HTTP {}: {}",
-            rsp.status(),
-            rsp.text().unwrap_or_default()
-        ));
-    }
-    #[derive(Deserialize)]
-    struct TokenJson {
-        access_token: String,
-    }
-    let j: TokenJson = rsp.json().context("Azure AD token JSON")?;
-    Ok(j.access_token)
-}
-
-fn fetch_certificate(
-    args: &SignArgs,
-    token: &str,
-    http: &reqwest::blocking::Client,
-) -> Result<KeyVaultCertificate> {
-    let base = normalize_vault_base(
-        args.azure_key_vault_url
-            .as_deref()
-            .ok_or_else(|| anyhow!("internal: missing vault URL"))?,
-    )?;
-    let cert_name = args
-        .azure_key_vault_certificate
-        .as_deref()
-        .filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| anyhow!("--azure-key-vault-certificate (-kvc) is required"))?;
-
-    let mut url = Url::parse(&base).map_err(|e| anyhow!("invalid --azure-key-vault-url: {e}"))?;
-    url.path_segments_mut()
-        .map_err(|_| anyhow!("--azure-key-vault-url must be a hierarchical https URL"))?
-        .push("certificates")
-        .push(cert_name.trim());
-    if let Some(v) = args
-        .azure_key_vault_certificate_version
-        .as_deref()
-        .filter(|s| !s.trim().is_empty())
-    {
-        url.path_segments_mut()
-            .map_err(|_| anyhow!("vault URL cannot be a base"))?
-            .push(v.trim());
-    }
-    url.query_pairs_mut().append_pair("api-version", "7.4");
-
-    let rsp = http
-        .get(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .context("Key Vault GET certificate")?;
-    if !rsp.status().is_success() {
-        return Err(anyhow!(
-            "Key Vault certificate HTTP {}: {}",
-            rsp.status(),
-            rsp.text().unwrap_or_default()
-        ));
-    }
-    rsp.json().context("Key Vault certificate JSON")
-}
-
-fn kv_rsa_alg(alg_id: ALG_ID) -> Result<&'static str> {
-    if alg_id == CALG_SHA_256 {
-        Ok("RS256")
-    } else if alg_id == CALG_SHA_384 {
-        Ok("RS384")
-    } else if alg_id == CALG_SHA_512 {
-        Ok("RS512")
+fn algid_to_kv_hash(algid: ALG_ID) -> Result<KvHashAlg> {
+    if algid == CALG_SHA_256 {
+        Ok(KvHashAlg::Sha256)
+    } else if algid == CALG_SHA_384 {
+        Ok(KvHashAlg::Sha384)
+    } else if algid == CALG_SHA_512 {
+        Ok(KvHashAlg::Sha512)
     } else {
         Err(anyhow!(
-            "unsupported digest algorithm for Azure Key Vault PKCS#1 signing (try SHA256/384/512)"
+            "unsupported digest algorithm for Azure Key Vault signing (try SHA256/384/512)"
         ))
-    }
-}
-
-fn kv_ecdsa_alg(alg_id: ALG_ID) -> Result<String> {
-    if alg_id == CALG_SHA_256 {
-        Ok("ES256".to_string())
-    } else if alg_id == CALG_SHA_384 {
-        Ok("ES384".to_string())
-    } else if alg_id == CALG_SHA_512 {
-        Ok("ES512".to_string())
-    } else {
-        Err(anyhow!(
-            "unsupported digest algorithm for Azure Key Vault ECDSA signing (try SHA256/384/512)"
-        ))
-    }
-}
-
-fn kv_cert_key_kind(cer_der: &[u8]) -> Result<KvCertKeyKind> {
-    let cert = x509_cert::Certificate::from_der(cer_der)
-        .map_err(|e| anyhow!("Azure Key Vault certificate DER (public key): {e}"))?;
-    match cert
-        .tbs_certificate
-        .subject_public_key_info
-        .algorithm
-        .oid
-        .to_string()
-        .as_str()
-    {
-        "1.2.840.113549.1.1.1" => Ok(KvCertKeyKind::Rsa),
-        "1.2.840.10045.2.1" => Ok(KvCertKeyKind::Ec),
-        other => Err(anyhow!(
-            "Azure Key Vault signing is not implemented for certificate public key OID {other}"
-        )),
-    }
-}
-
-fn kv_signature_alg(kind: KvCertKeyKind, algid_hash: ALG_ID) -> Result<String> {
-    match kind {
-        KvCertKeyKind::Rsa => kv_rsa_alg(algid_hash).map(|s| s.to_string()),
-        KvCertKeyKind::Ec => kv_ecdsa_alg(algid_hash),
     }
 }
 
@@ -276,32 +80,21 @@ unsafe extern "system" fn azure_kv_digest_callback(
                 "Azure KV signing thread-local state was not installed"
             ));
         };
-        let alg = match kv_signature_alg(state.key_kind, algid_hash) {
+        let hash = match algid_to_kv_hash(algid_hash) {
+            Ok(h) => h,
+            Err(_) => return Err(anyhow!("unsupported digest / key kind for KV")),
+        };
+        let alg = match kv_jws_alg(state.key_kind, hash) {
             Ok(a) => a,
             Err(_) => return Err(anyhow!("unsupported digest / key kind for KV")),
         };
-        let body = serde_json::json!({
-            "alg": alg,
-            "value": base64::engine::general_purpose::STANDARD.encode(digest),
-        });
-        let rsp = state
-            .client
-            .post(&state.sign_url)
-            .header("Authorization", format!("Bearer {}", state.token))
-            .json(&body)
-            .send()
-            .context("Key Vault POST sign")?;
-        if !rsp.status().is_success() {
-            return Err(anyhow!(
-                "Key Vault sign HTTP {}: {}",
-                rsp.status(),
-                rsp.text().unwrap_or_default()
-            ));
-        }
-        let parsed: KeyVaultSignResponse = rsp.json().context("Key Vault sign JSON")?;
-        base64::engine::general_purpose::STANDARD
-            .decode(parsed.value.trim())
-            .context("signature base64 decode")
+        kv_sign_digest(
+            &state.client,
+            &state.token,
+            &state.sign_url,
+            alg.as_str(),
+            digest,
+        )
     });
 
     let sig = match outcome {
@@ -444,22 +237,31 @@ pub(crate) fn sign_with_azure_key_vault(
         .timeout(std::time::Duration::from_secs(300))
         .build()
         .map_err(|e| anyhow!("HTTP client: {e}"))?;
-    let token = acquire_access_token(args)?;
-    let cert = fetch_certificate(args, &token, &http)?;
+    let token = acquire_kv_access_token(&auth_params_from_sign_args(args))?;
+    let vault_base = args
+        .azure_key_vault_url
+        .as_deref()
+        .ok_or_else(|| anyhow!("internal: missing vault URL"))?;
+    let cert_name = args
+        .azure_key_vault_certificate
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| anyhow!("--azure-key-vault-certificate (-kvc) is required"))?;
+    let cert = fetch_kv_certificate(
+        &http,
+        vault_base,
+        cert_name,
+        args.azure_key_vault_certificate_version
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty()),
+        &token,
+    )?;
 
-    let mut sign_url =
-        Url::parse(cert.kid.trim()).map_err(|e| anyhow!("invalid certificate kid URL: {e}"))?;
-    sign_url
-        .path_segments_mut()
-        .map_err(|_| anyhow!("kid URL cannot be a base"))?
-        .pop_if_empty()
-        .push("sign");
-    sign_url.query_pairs_mut().append_pair("api-version", "7.4");
+    let sign_url = kv_sign_url_from_kid(cert.kid.trim())?;
 
-    let cer_der = base64::engine::general_purpose::STANDARD
-        .decode(cert.cer.trim())
-        .context("decode certificate cer (base64)")?;
-    let key_kind = kv_cert_key_kind(&cer_der)?;
+    let cer_der = kv_decode_cer_b64(cert.cer.trim())?;
+    let key_kind = kv_public_key_kind_from_cer_der(&cer_der)?;
 
     let store = open_memory_cert_store()?;
     // SAFETY: `cer_der` is valid DER for the duration of import.
@@ -518,7 +320,7 @@ pub(crate) fn sign_with_azure_key_vault(
         *slot.borrow_mut() = Some(KvCallbackState {
             client: http,
             token,
-            sign_url: sign_url.to_string(),
+            sign_url,
             key_kind,
         });
     });
