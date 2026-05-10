@@ -7,17 +7,31 @@
 //! [`crate::cab_digest`] (MSCF CAB layout), [`crate::msi_digest`] (OLE compound), [`crate::msix_digest`] (APPX AX\* blob under OID **`1.3.6.1.4.1.311.2.1.30`**), etc. Encoding those payloads into PKCS#7 is the missing producer piece; [`crate::pe_embed`] can append **`WIN_CERTIFICATE`** rows once PKCS#7 DER exists.
 //!
 //! **Milestone:** The **`authenticode`** crate publishes ASN.1 structs (`SpcIndirectDataContent`, `DigestInfo`, …) with `der` **Decode**/**Encode**.
-//! [`parse_pe_pkcs7_spc_indirect_data_at`] / [`parse_pe_pkcs7_spc_indirect_data`] and [`spc_indirect_data_replace_message_digest`] support **Linux-side digest substitution** before a future **`SignedData`** signer assembles countersignatures / PKCS#9 attributes. **`WIN_CERTIFICATE`** embedding remains [`crate::pe_embed`].
+//! [`parse_pe_pkcs7_spc_indirect_data_at`] / [`parse_pe_pkcs7_spc_indirect_data`] and [`spc_indirect_data_replace_message_digest`] support **Linux-side digest substitution** before a future **`SignedData`** signer assembles countersignatures / PKCS#9 attributes. [`cms_digest_encapsulated_econtent_bytes`] and [`signer_info_pkcs9_message_digest_octets`] pin **RFC 5652 §5.4** **`eContent`** hashing to PKCS#9 **`messageDigest`** on fixtures (RustCrypto **`cms` SignerInfoBuilder** semantics). **`WIN_CERTIFICATE`** embedding remains [`crate::pe_embed`].
 
 use anyhow::{Result, anyhow};
 use authenticode::{DigestInfo, SpcIndirectDataContent};
 use cms::content_info::ContentInfo;
-use cms::signed_data::SignedData;
+use cms::signed_data::{SignedData, SignerInfo};
 use der::asn1::{Any, ObjectIdentifier, OctetString};
 use der::{Decode, Encode, Reader, SliceReader};
+use digest::Digest as _;
 
 /// CMS **`signedData`** content type OID (`id-signedData`).
 const ID_SIGNED_DATA_OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.7.2");
+
+/// **`SignerInfo.digestAlgorithm`** / **`DigestInfo.digestAlgorithm`** SHA-1 OID.
+const DIGEST_OID_SHA1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.14.3.2.26");
+/// SHA-256 OID (**`id-sha256`**).
+const DIGEST_OID_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.1");
+/// SHA-384 OID (**`id-sha384`**).
+const DIGEST_OID_SHA384: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.2");
+/// SHA-512 OID (**`id-sha512`**).
+const DIGEST_OID_SHA512: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.3");
+
+/// PKCS#9 **`messageDigest`** authenticated-attribute type OID.
+pub const PKCS9_MESSAGE_DIGEST_OID: ObjectIdentifier =
+    ObjectIdentifier::new_unwrap("1.2.840.113549.1.9.4");
 
 /// CMS **`data`** content type OID (`id-data`).
 pub const PKCS7_ID_DATA_OID: &str = "1.2.840.113549.1.7.1";
@@ -126,6 +140,72 @@ pub fn encode_spc_indirect_data_der(indirect: &SpcIndirectDataContent) -> Result
     Ok(out)
 }
 
+/// Digest **`SignedData.encapContentInfo.eContent`** octets using **`digest_alg_oid`** (**`SignerInfo.digestAlgorithm.oid`**).
+///
+/// Matches RustCrypto **`cms`** **`SignerInfoBuilder`** (**RFC 5652** §5.4): hash only **`eContent` [`Any::value`]**
+/// (no outer tag/length).
+pub fn cms_digest_encapsulated_econtent_bytes(
+    digest_alg_oid: &ObjectIdentifier,
+    econtent: &Any,
+) -> Result<Vec<u8>> {
+    let payload = econtent.value();
+    if digest_alg_oid == &DIGEST_OID_SHA256 {
+        return Ok(sha2::Sha256::digest(payload).to_vec());
+    }
+    if digest_alg_oid == &DIGEST_OID_SHA1 {
+        return Ok(sha1::Sha1::digest(payload).to_vec());
+    }
+    if digest_alg_oid == &DIGEST_OID_SHA384 {
+        return Ok(sha2::Sha384::digest(payload).to_vec());
+    }
+    if digest_alg_oid == &DIGEST_OID_SHA512 {
+        return Ok(sha2::Sha512::digest(payload).to_vec());
+    }
+    Err(anyhow!(
+        "unsupported digest OID for CMS encap hash: {}",
+        digest_alg_oid
+    ))
+}
+
+/// Same as [`cms_digest_encapsulated_econtent_bytes`] using the **first** **`SignerInfo`** digest algorithm.
+///
+/// Fails when there is no **`SignerInfo`** or **`encapContentInfo.eContent`**.
+pub fn cms_digest_encapsulated_econtent_bytes_from_signed_data(sd: &SignedData) -> Result<Vec<u8>> {
+    let si = sd
+        .signer_infos
+        .0
+        .as_slice()
+        .first()
+        .ok_or_else(|| anyhow!("SignedData has no SignerInfo"))?;
+    let encap = sd
+        .encap_content_info
+        .econtent
+        .as_ref()
+        .ok_or_else(|| anyhow!("SignedData missing encapContentInfo eContent"))?;
+    cms_digest_encapsulated_econtent_bytes(&si.digest_alg.oid, encap)
+}
+
+/// PKCS#9 **`messageDigest`** value (**raw digest octets**) from **`SignerInfo`** authenticated attributes.
+pub fn signer_info_pkcs9_message_digest_octets(si: &SignerInfo) -> Result<Vec<u8>> {
+    let attrs = si
+        .signed_attrs
+        .as_ref()
+        .ok_or_else(|| anyhow!("SignerInfo has no authenticated attributes"))?;
+    for attr in attrs.iter() {
+        if attr.oid == PKCS9_MESSAGE_DIGEST_OID {
+            let any = attr
+                .values
+                .get(0)
+                .ok_or_else(|| anyhow!("messageDigest attribute has empty SET"))?;
+            let oct = any
+                .decode_as::<OctetString>()
+                .map_err(|e| anyhow!("messageDigest attribute OCTET STRING: {e}"))?;
+            return Ok(oct.as_bytes().to_vec());
+        }
+    }
+    Err(anyhow!("PKCS#9 messageDigest attribute not found"))
+}
+
 /// Replace **`SignedData.encapContentInfo.eContent`** with **`indirect`** while keeping **`digestAlgorithms`**, **`certificates`**, **`crls`**, and **`signerInfos`** unchanged.
 ///
 /// **`template`** must already use **`eContentType`** **`authenticode::SPC_INDIRECT_DATA_OBJID`** (Authenticode **`SpcIndirectDataContent`**).
@@ -162,6 +242,33 @@ mod tests {
     fn signed_data_oid_matches_rfc_display_form() {
         assert!(PKCS7_ID_SIGNED_DATA_OID.ends_with(".7.2"));
         assert!(PKCS7_ID_DATA_OID.ends_with(".7.1"));
+    }
+
+    fn assert_cms_encap_digest_matches_pkcs9(pe_bytes: &[u8]) {
+        let pkcs7 = crate::verify_pe::pe_nth_pkcs7_signed_data_der(pe_bytes, 0).expect("pkcs7");
+        let sd = parse_pkcs7_signed_data_der(&pkcs7).expect("SignedData");
+        let si = sd.signer_infos.0.as_slice().first().expect("SignerInfo");
+        let computed =
+            cms_digest_encapsulated_econtent_bytes_from_signed_data(&sd).expect("encap digest");
+        let embedded = signer_info_pkcs9_message_digest_octets(si).expect("pkcs9 md");
+        assert_eq!(
+            computed, embedded,
+            "CMS eContent hash must match PKCS#9 messageDigest attribute"
+        );
+    }
+
+    #[test]
+    fn cms_encap_digest_matches_pkcs9_message_digest_on_tiny32_fixture() {
+        let pe_bytes =
+            include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi");
+        assert_cms_encap_digest_matches_pkcs9(pe_bytes);
+    }
+
+    #[test]
+    fn cms_encap_digest_matches_pkcs9_message_digest_on_tiny64_fixture() {
+        let pe_bytes =
+            include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny64.signed.efi");
+        assert_cms_encap_digest_matches_pkcs9(pe_bytes);
     }
 
     fn assert_spc_round_trip_and_digest_matches_sip(pe_bytes: &[u8]) {
