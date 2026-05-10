@@ -190,12 +190,17 @@ enum Command {
         #[arg(long)]
         include_image_value_der_hex: bool,
     },
-    /// Write the **first** embedded Authenticode PKCS#7 (**raw DER**) to stdout or **`--output`** (multi-signed: first certificate-table entry only).
+    /// Write an embedded Authenticode PKCS#7 (**raw DER**) to stdout or **`--output`** (certificate-table order; default **`--index`** **`0`**).
     ExtractPePkcs7 {
         path: PathBuf,
+        /// **`WIN_CERT_TYPE_PKCS_SIGNED_DATA`** row index (**`0`** = first).
+        #[arg(long, default_value_t = 0)]
+        index: usize,
         #[arg(long, value_name = "PATH")]
         output: Option<PathBuf>,
     },
+    /// List **`WIN_CERT_TYPE_PKCS_SIGNED_DATA`** PKCS#7 rows in the PE certificate table (**`pkcs7_entries=N`** then **`index=i byte_len=L`** per line).
+    ListPePkcs7 { path: PathBuf },
     /// CAB with embedded PKCS#7: compare indirect digest to Rust CAB hash.
     VerifyCab { path: PathBuf },
     /// Signed MSI: compare PKCS#7 indirect digest to Rust OLE fingerprint (and extended stream if present).
@@ -809,21 +814,35 @@ fn run() -> Result<()> {
             }
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
-        Command::ExtractPePkcs7 { path, output } => {
+        Command::ExtractPePkcs7 {
+            path,
+            index,
+            output,
+        } => {
             use std::io::Write;
             let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
-            let der = verify_pe::pe_first_pkcs7_signed_data_der(&bytes).with_context(|| {
-                format!(
-                    "extract-pe-pkcs7 {} (need embedded Authenticode PKCS#7)",
-                    path.display()
-                )
-            })?;
+            let der =
+                verify_pe::pe_nth_pkcs7_signed_data_der(&bytes, index).with_context(|| {
+                    format!(
+                        "extract-pe-pkcs7 {} --index {index} (need PKCS#7 row at this index)",
+                        path.display()
+                    )
+                })?;
             match output.as_ref() {
                 Some(p) => std::fs::write(p, &der)
                     .with_context(|| format!("write PKCS#7 to {}", p.display()))?,
                 None => std::io::stdout()
                     .write_all(&der)
                     .context("write PKCS#7 to stdout")?,
+            }
+        }
+        Command::ListPePkcs7 { path } => {
+            let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+            let lens = verify_pe::pe_pkcs7_signed_data_byte_lens(&bytes)
+                .with_context(|| format!("list-pe-pkcs7 {}", path.display()))?;
+            println!("pkcs7_entries={}", lens.len());
+            for (i, len) in lens.iter().enumerate() {
+                println!("index={i} byte_len={len}");
             }
         }
         Command::VerifyCab { path } => {

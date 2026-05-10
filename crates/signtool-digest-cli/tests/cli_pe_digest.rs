@@ -44,6 +44,7 @@ fn help_lists_core_subcommands() {
         "inspect-authenticode",
         "inspect-pe-spc-indirect",
         "extract-pe-pkcs7",
+        "list-pe-pkcs7",
     ] {
         assert!(
             out.contains(needle),
@@ -257,6 +258,32 @@ fn extract_pe_pkcs7_output_file_matches_verify_pe_helper() {
     cmd.assert().success();
     let written = std::fs::read(&out_path).expect("read output");
     assert_eq!(written.as_slice(), expected.as_slice());
+}
+
+#[test]
+fn list_pe_pkcs7_reports_single_entry_on_tiny_fixture() {
+    let mut cmd = Command::cargo_bin("signtool-portable").unwrap();
+    cmd.arg("list-pe-pkcs7").arg(tiny32_fixture());
+    let assert = cmd.assert().success();
+    let out = std::str::from_utf8(&assert.get_output().stdout).expect("utf8");
+    assert!(
+        out.contains("pkcs7_entries=1"),
+        "expected pkcs7_entries=1, got {out:?}"
+    );
+    assert!(
+        out.contains("index=0 byte_len="),
+        "expected index=0 line, got {out:?}"
+    );
+}
+
+#[test]
+fn extract_pe_pkcs7_index_out_of_range_fails() {
+    let mut cmd = Command::cargo_bin("signtool-portable").unwrap();
+    cmd.arg("extract-pe-pkcs7")
+        .arg(tiny32_fixture())
+        .arg("--index")
+        .arg("1");
+    cmd.assert().failure();
 }
 
 #[test]
