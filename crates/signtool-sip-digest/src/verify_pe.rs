@@ -100,10 +100,10 @@ pub fn for_each_pe_pkcs7_signed_data(
     Ok(pkcs7_count)
 }
 
-/// PKCS#7 **`SignedData`** bytes from the **first** **`WIN_CERT_TYPE_PKCS_SIGNED_DATA`** attribute certificate (PE certificate-table order).
+/// PKCS#7 **`SignedData`** bytes from the **`index`**-th **`WIN_CERT_TYPE_PKCS_SIGNED_DATA`** attribute certificate (**`0`** = first), certificate-table order.
 ///
-/// For multi-signed PEs, use [`for_each_pe_pkcs7_signed_data`] to visit every blob.
-pub fn pe_first_pkcs7_signed_data_der(pe_image: &[u8]) -> Result<Vec<u8>> {
+/// For errors when **`index`** is out of range, see [`pe_pkcs7_signed_data_entry_count`].
+pub fn pe_nth_pkcs7_signed_data_der(pe_image: &[u8], index: usize) -> Result<Vec<u8>> {
     let parsed = ParsedPe::parse(pe_image)?;
     let pe = parsed.as_pe_trait();
     let Some(iter) = AttributeCertificateIterator::new(pe)
@@ -111,15 +111,54 @@ pub fn pe_first_pkcs7_signed_data_der(pe_image: &[u8]) -> Result<Vec<u8>> {
     else {
         return Err(anyhow!("PE has no certificate table"));
     };
+    let mut skip = index;
     for entry in iter {
         let attr = entry.map_err(|e| anyhow!("attribute certificate entry invalid: {e}"))?;
         if attr.certificate_type == WIN_CERT_TYPE_PKCS_SIGNED_DATA {
-            return Ok(attr.data.to_vec());
+            if skip == 0 {
+                return Ok(attr.data.to_vec());
+            }
+            skip -= 1;
         }
     }
     Err(anyhow!(
-        "no PKCS#7 Authenticode entries found in certificate table"
+        "no PKCS#7 Authenticode entry at index {index} (fewer PKCS#7 rows in certificate table)"
     ))
+}
+
+/// PKCS#7 **`SignedData`** bytes from the **first** **`WIN_CERT_TYPE_PKCS_SIGNED_DATA`** attribute certificate (same as **`index`** **`0`**).
+///
+/// For multi-signed PEs, use [`pe_nth_pkcs7_signed_data_der`] or [`for_each_pe_pkcs7_signed_data`].
+pub fn pe_first_pkcs7_signed_data_der(pe_image: &[u8]) -> Result<Vec<u8>> {
+    pe_nth_pkcs7_signed_data_der(pe_image, 0)
+}
+
+/// Byte length of each **`WIN_CERT_TYPE_PKCS_SIGNED_DATA`** blob in certificate-table order (**`extract-pe-pkcs7 --index i`** matches **`i`** here).
+///
+/// Fails when there is **no** certificate table.
+pub fn pe_pkcs7_signed_data_byte_lens(pe_image: &[u8]) -> Result<Vec<usize>> {
+    let parsed = ParsedPe::parse(pe_image)?;
+    let pe = parsed.as_pe_trait();
+    let Some(iter) = AttributeCertificateIterator::new(pe)
+        .map_err(|e| anyhow!("certificate table invalid: {e}"))?
+    else {
+        return Err(anyhow!("PE has no certificate table"));
+    };
+    let mut lens = Vec::new();
+    for entry in iter {
+        let attr = entry.map_err(|e| anyhow!("attribute certificate entry invalid: {e}"))?;
+        if attr.certificate_type == WIN_CERT_TYPE_PKCS_SIGNED_DATA {
+            lens.push(attr.data.len());
+        }
+    }
+    Ok(lens)
+}
+
+/// Count of **`WIN_CERT_TYPE_PKCS_SIGNED_DATA`** rows in the PE certificate table (**`0`** if there is a table but no PKCS#7 entries).
+///
+/// Fails when there is **no** certificate table.
+pub fn pe_pkcs7_signed_data_entry_count(pe_image: &[u8]) -> Result<usize> {
+    Ok(pe_pkcs7_signed_data_byte_lens(pe_image)?.len())
 }
 
 #[cfg(test)]
@@ -136,5 +175,34 @@ mod pe_first_pkcs7_tests {
             "expected non-trivial PKCS#7 payload on signed fixture"
         );
         assert_eq!(der.first().copied(), Some(0x30));
+    }
+
+    #[test]
+    fn nth_zero_matches_first_on_tiny_fixture() {
+        let bytes =
+            include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi");
+        let a = pe_first_pkcs7_signed_data_der(bytes).unwrap();
+        let b = pe_nth_pkcs7_signed_data_der(bytes, 0).unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn entry_count_is_one_on_tiny_fixture() {
+        let bytes =
+            include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi");
+        assert_eq!(pe_pkcs7_signed_data_entry_count(bytes).unwrap(), 1);
+        let lens = pe_pkcs7_signed_data_byte_lens(bytes).unwrap();
+        assert_eq!(lens.len(), 1);
+        assert_eq!(
+            lens[0],
+            pe_first_pkcs7_signed_data_der(bytes).unwrap().len()
+        );
+    }
+
+    #[test]
+    fn second_pkcs7_index_errors_on_single_signed_fixture() {
+        let bytes =
+            include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi");
+        assert!(pe_nth_pkcs7_signed_data_der(bytes, 1).is_err());
     }
 }
