@@ -229,8 +229,12 @@ mod tests {
     use crate::pkcs7::{
         encode_pkcs7_content_info_signed_data_der, parse_pe_pkcs7_spc_indirect_data,
         parse_pe_pkcs7_spc_indirect_data_at, parse_pkcs7_signed_data_der,
+        signed_data_replace_encapsulated_spc_indirect, spc_indirect_data_replace_message_digest,
     };
-    use crate::verify_pe::{pe_nth_pkcs7_signed_data_der, pe_pkcs7_signed_data_entry_count};
+    use crate::verify_pe::{
+        pe_nth_pkcs7_signed_data_der, pe_pkcs7_signed_data_entry_count,
+        verify_pe_authenticode_digest_consistency,
+    };
 
     #[test]
     fn win_certificate_wrap_length_is_multiple_of_eight() {
@@ -297,6 +301,35 @@ mod tests {
         assert_eq!(
             chk,
             u32::from_le_bytes(out[off..off + 4].try_into().unwrap())
+        );
+    }
+
+    #[test]
+    fn append_pkcs7_with_flipped_indirect_triggers_verify_pe_digest_mismatch() {
+        let pe_bytes =
+            include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi")
+                .as_slice();
+        verify_pe_authenticode_digest_consistency(pe_bytes).expect("fixture consistent");
+
+        let pkcs7 = pe_nth_pkcs7_signed_data_der(pe_bytes, 0).expect("pkcs7");
+        let sd = parse_pkcs7_signed_data_der(&pkcs7).expect("SignedData");
+        let indirect = parse_pe_pkcs7_spc_indirect_data(pe_bytes).expect("indirect");
+        let mut flipped_digest = indirect.message_digest.digest.as_bytes().to_vec();
+        flipped_digest[0] ^= 0xff;
+        let flipped =
+            spc_indirect_data_replace_message_digest(&indirect, &flipped_digest).expect("flip");
+        let sd_bad =
+            signed_data_replace_encapsulated_spc_indirect(&sd, &flipped).expect("mut encap");
+        let blob = encode_pkcs7_content_info_signed_data_der(&sd_bad).expect("encode PKCS#7");
+
+        let out =
+            pe_append_authenticode_pkcs7_certificate(pe_bytes.to_vec(), blob.as_slice()).expect(
+                "append PKCS#7 whose indirect digest does not match PE image",
+            );
+        let err = verify_pe_authenticode_digest_consistency(&out).expect_err("digest gate");
+        assert!(
+            err.to_string().contains("mismatch"),
+            "expected SIP mismatch message, got {err:?}"
         );
     }
 

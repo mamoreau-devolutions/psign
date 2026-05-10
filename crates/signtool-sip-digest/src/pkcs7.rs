@@ -14,7 +14,7 @@ use authenticode::{DigestInfo, SpcIndirectDataContent};
 use cms::content_info::ContentInfo;
 use cms::signed_data::SignedData;
 use der::asn1::{Any, ObjectIdentifier, OctetString};
-use der::{Decode, Encode, SliceReader};
+use der::{Decode, Encode, Reader, SliceReader};
 
 /// CMS **`signedData`** content type OID (`id-signedData`).
 const ID_SIGNED_DATA_OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.7.2");
@@ -126,6 +126,32 @@ pub fn encode_spc_indirect_data_der(indirect: &SpcIndirectDataContent) -> Result
     Ok(out)
 }
 
+/// Replace **`SignedData.encapContentInfo.eContent`** with **`indirect`** while keeping **`digestAlgorithms`**, **`certificates`**, **`crls`**, and **`signerInfos`** unchanged.
+///
+/// **`template`** must already use **`eContentType`** **`authenticode::SPC_INDIRECT_DATA_OBJID`** (Authenticode **`SpcIndirectDataContent`**).
+///
+/// **Cryptographic note:** Swapping the indirect payload **invalidates** the existing **`SignerInfo`** signature (PKCS#9 **`messageDigest`** / **`contentType`** attrs no longer match **`encryptedDigest`**). Use for **tests**, **`verify-pe`** negative cases, or pipelines that also rebuild **`SignerInfo`** and signature octets (remote signing).
+pub fn signed_data_replace_encapsulated_spc_indirect(
+    template: &SignedData,
+    indirect: &SpcIndirectDataContent,
+) -> Result<SignedData> {
+    if template.encap_content_info.econtent_type != authenticode::SPC_INDIRECT_DATA_OBJID {
+        return Err(anyhow!(
+            "SignedData encap content type is not SPC_INDIRECT_DATA (got {})",
+            template.encap_content_info.econtent_type
+        ));
+    }
+    let der = encode_spc_indirect_data_der(indirect)?;
+    let mut rd =
+        SliceReader::new(der.as_slice()).map_err(|e| anyhow!("indirect DER reader: {e}"))?;
+    let econtent = Any::decode(&mut rd).map_err(|e| anyhow!("SpcIndirectData as CMS Any: {e}"))?;
+    rd.finish(())
+        .map_err(|e| anyhow!("trailing octets after SpcIndirectDataContent DER: {e}"))?;
+    let mut out = template.clone();
+    out.encap_content_info.econtent = Some(econtent);
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,6 +245,47 @@ mod tests {
             .decode_as::<SignedData>()
             .expect("SignedData2");
         assert_eq!(sd, sd2);
+    }
+
+    #[test]
+    fn signed_data_replace_encap_round_trips_identical_indirect_through_pkcs7() {
+        let pe_bytes =
+            include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi");
+        let pkcs7 = crate::verify_pe::pe_nth_pkcs7_signed_data_der(pe_bytes, 0).expect("pkcs7");
+        let sd = parse_pkcs7_signed_data_der(&pkcs7).expect("SignedData");
+        let indirect = parse_pe_pkcs7_spc_indirect_data(pe_bytes).expect("indirect");
+        let sd2 =
+            signed_data_replace_encapsulated_spc_indirect(&sd, &indirect).expect("replace encap");
+        assert_eq!(sd, sd2);
+        let out = encode_pkcs7_content_info_signed_data_der(&sd2).expect("encode outer");
+        let sd3 = parse_pkcs7_signed_data_der(&out).expect("re-parse");
+        assert_eq!(sd, sd3);
+    }
+
+    #[test]
+    fn signed_data_replace_encap_preserves_flipped_digest_through_pkcs7_reencode() {
+        let pe_bytes =
+            include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi");
+        let pkcs7 = crate::verify_pe::pe_nth_pkcs7_signed_data_der(pe_bytes, 0).expect("pkcs7");
+        let sd = parse_pkcs7_signed_data_der(&pkcs7).expect("SignedData");
+        let indirect = parse_pe_pkcs7_spc_indirect_data(pe_bytes).expect("indirect");
+        let mut flipped_digest = indirect.message_digest.digest.as_bytes().to_vec();
+        flipped_digest[0] ^= 0xff;
+        let flipped =
+            spc_indirect_data_replace_message_digest(&indirect, &flipped_digest).expect("flip");
+        let sd_m =
+            signed_data_replace_encapsulated_spc_indirect(&sd, &flipped).expect("mut encap");
+        let pkcs7_out = encode_pkcs7_content_info_signed_data_der(&sd_m).expect("encode");
+        let sd_r = parse_pkcs7_signed_data_der(&pkcs7_out).expect("parse mutated");
+        let encap = sd_r
+            .encap_content_info
+            .econtent
+            .as_ref()
+            .expect("econtent");
+        let got = encap
+            .decode_as::<SpcIndirectDataContent>()
+            .expect("indirect decode");
+        assert_eq!(got, flipped);
     }
 
     #[test]
