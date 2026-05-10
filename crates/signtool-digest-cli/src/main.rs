@@ -181,11 +181,14 @@ enum Command {
     ///
     /// One line per range: `start=N end=M` (half-open end). Useful on Linux for tooling / future page-hash alignment vs `WinTrust`.
     PeAuthenticodeRanges { path: PathBuf },
-    /// Decode **`SpcIndirectDataContent`** from the first embedded Authenticode PKCS#7 (**JSON** to stdout).
+    /// Decode **`SpcIndirectDataContent`** from an embedded Authenticode PKCS#7 (**JSON** to stdout; certificate-table order; default **`--index`** **`0`**).
     ///
     /// Intended for Linux-side inspection and PKCS#7 rebuild experiments (Rust **`pkcs7`** module in **`signtool-sip-digest`**); does **not** sign or embed signatures.
     InspectPeSpcIndirect {
         path: PathBuf,
+        /// **`WIN_CERT_TYPE_PKCS_SIGNED_DATA`** row index (**`0`** = first; same order as **`extract-pe-pkcs7`** / **`list-pe-pkcs7`**).
+        #[arg(long, default_value_t = 0)]
+        index: usize,
         /// Include lowercase hex of **`image_data.value`** DER (**`SpcPeImageData`**) — output can be large.
         #[arg(long)]
         include_image_value_der_hex: bool,
@@ -778,15 +781,17 @@ fn run() -> Result<()> {
         }
         Command::InspectPeSpcIndirect {
             path,
+            index,
             include_image_value_der_hex,
         } => {
             let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
-            let indirect = pkcs7::parse_pe_pkcs7_spc_indirect_data(&bytes).with_context(|| {
-                format!(
-                    "inspect-pe-spc-indirect {} (need embedded Authenticode PKCS#7)",
-                    path.display()
-                )
-            })?;
+            let indirect = pkcs7::parse_pe_pkcs7_spc_indirect_data_at(&bytes, index)
+                .with_context(|| {
+                    format!(
+                        "inspect-pe-spc-indirect {} --index {index} (need PKCS#7 row and SpcIndirectData)",
+                        path.display()
+                    )
+                })?;
             let kind = PeAuthenticodeHashKind::from_digest_byte_len(
                 indirect.message_digest.digest.as_bytes().len(),
             )

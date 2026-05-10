@@ -65,6 +65,6 @@ Compare HTTP shapes and JSON models to [`crates/signtool-codesigning-rest`](../c
 
 ## Relating reversing work to Linux signing
 
-Neither **`signtool.exe`** nor **`mssign32.dll`** runs on Linux. Reversing clarifies **what** must be reproduced (CMS fields, SIP indirect data, PE certificate directory layout). Portable work stays in **`signtool-sip-digest`** (digests + future PKCS#7 encode in [`pkcs7.rs`](../crates/signtool-sip-digest/src/pkcs7.rs), [`pe_embed.rs`](../crates/signtool-sip-digest/src/pe_embed.rs)).
+Neither **`signtool.exe`** nor **`mssign32.dll`** runs on Linux. Reversing clarifies **what** must be reproduced (CMS fields, SIP indirect data, PE certificate directory layout). When tracing **`ImageAddCertificate`** / attribute-directory walks in **`imagehlp`**, note **certificate-table iteration order**: **`signtool-portable`** **`list-pe-pkcs7`**, **`extract-pe-pkcs7 --index`**, and **`inspect-pe-spc-indirect --index`** all use the same sequential **`WIN_CERT_TYPE_PKCS_SIGNED_DATA`** row index (not arbitrary Win32 attribute-table indices). Portable work stays in **`signtool-sip-digest`** (digests + future PKCS#7 encode in [`pkcs7.rs`](../crates/signtool-sip-digest/src/pkcs7.rs), [`pe_embed.rs`](../crates/signtool-sip-digest/src/pe_embed.rs)).
 
 See also [`gap-analysis-signing-platforms.md`](gap-analysis-signing-platforms.md).

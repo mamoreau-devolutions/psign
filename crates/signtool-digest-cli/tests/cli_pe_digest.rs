@@ -309,6 +309,33 @@ fn inspect_pe_spc_indirect_matches_sip_digest_on_tiny_fixture() {
 }
 
 #[test]
+fn inspect_pe_spc_indirect_explicit_index_zero_matches_default() {
+    let mut cmd = Command::cargo_bin("signtool-portable").unwrap();
+    cmd.arg("inspect-pe-spc-indirect")
+        .arg(tiny32_fixture())
+        .arg("--index")
+        .arg("0");
+    let assert = cmd.assert().success();
+    let out = std::str::from_utf8(&assert.get_output().stdout).expect("utf8");
+    let v: Value = serde_json::from_str(out.trim()).expect("inspect JSON");
+    assert_eq!(
+        v.get("message_digest_matches_pe_image_digest")
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+}
+
+#[test]
+fn inspect_pe_spc_indirect_index_out_of_range_fails() {
+    let mut cmd = Command::cargo_bin("signtool-portable").unwrap();
+    cmd.arg("inspect-pe-spc-indirect")
+        .arg(tiny32_fixture())
+        .arg("--index")
+        .arg("1");
+    cmd.assert().failure();
+}
+
+#[test]
 fn verify_pe_pkcs7_indirect_digest_matches_on_tiny64_fixture() {
     let mut cmd = Command::cargo_bin("signtool-portable").unwrap();
     cmd.arg("verify-pe").arg(tiny64_fixture());

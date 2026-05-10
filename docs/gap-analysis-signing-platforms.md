@@ -108,7 +108,7 @@ Details: [`migration-azuresigntool.md`](migration-azuresigntool.md).
 
 **Formats with portable digest + PKCS#7 consistency (and optional trust):**
 
-- PE / WinMD-style CLI metadata
+- PE / WinMD-style CLI metadata (multi-signed PEs: **`list-pe-pkcs7`**, **`extract-pe-pkcs7 --index`**, **`inspect-pe-spc-indirect --index`** share the same certificate-table PKCS#7 row order)
 - CAB
 - MSI (OLE Signify layout)
 - ESD / WIM prefix
