@@ -26,6 +26,18 @@ Then open **`parity-output\idb-targets\signtool.exe`** (or the copied DLLs) in I
 
 Cross-check findings with [`windows-signing-components.md`](windows-signing-components.md) and [`rust-sip-spec-refs.md`](rust-sip-spec-refs.md).
 
+### Portable CMS parity — what to xref when closing Linux signing gaps
+
+Use this when **`pkcs7.rs`** / **`pe_embed.rs`** need to match Win32 field ordering or optional CMS attributes. Cross-reference gap IDs in [`rust-sip-gaps.md`](rust-sip-gaps.md) and [`parity-matrix.md`](parity-matrix.md).
+
+| Gap / milestone | IDA starting points (writable copies) |
+|-----------------|----------------------------------------|
+| PKCS#7 **`SignedData`** encode (outer **`ContentInfo`**) | **`CryptMsgOpenToEncode`**, **`CryptMsgUpdate`**, **`CryptMsgControl`**, **`CryptMsgClose`** — **`crypt32.dll`** (compare message types **`CMSG_SIGNED`**); often reached under **`SignerSignEx3`** in **`mssign32.dll`** |
+| SIP indirect data (**`SPC_INDIRECT_DATA`**) | **`mssign32.dll`**, **`WINTRUST.dll`** (**`WVTAsn1SpcIndirectData*`** helpers); PE subject bytes vs **`SpcPeImageData`** |
+| PE cert directory / **`WIN_CERTIFICATE`** | **`ImageAddCertificate`**, **`ImageEnumerateCertificates`**, **`ImageRemoveCertificate`** — **`imagehlp.dll`** or **`KernelBase`** forwarding |
+| RFC3161 countersignature bytes | **`SignerTimeStampEx3`**, **`CryptMsgControl`** with timestamp CTL OIDs — **`mssign32.dll`** / **`crypt32.dll`** |
+| Decoupled digest (**Artifact / `--dlib`**) | **`Azure.CodeSigning.Dlib.dll`** exports + **`SignerSignEx3`** **`SIGNER_DIGEST_SIGN_INFO`** in **`mssign32.dll`** |
+
 **Artifact Signing dlib:**
 
 ```powershell

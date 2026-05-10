@@ -41,7 +41,7 @@ Legend: **Sign** = produce/embed Authenticode; **WT verify** = `WinVerifyTrust`-
 
 **Practical Linux path today:** Use **`signtool-portable`** for **digest computation**, **Key Vault `keys/sign`** on digest files (**`azure-key-vault-sign-digest`** with **`--features azure-kv-sign-portable`**), **`:sign` REST** (**`artifact-signing-submit`** with **`--features artifact-signing-rest`**), **inspect**, and **verify/trust** across supported formats. **Embed** Authenticode (PKCS#7 into the subject) still requires **`signtool-windows`** / **`SignerSignEx3`** (or native **`signtool.exe`**) until portable CMS+embed lands. Cookbook: [`linux-signing-pipelines.md`](linux-signing-pipelines.md).
 
-**Long-term Linux signing** (if required): implement portable **CMS `SignedData` production** + **format-specific embedding** (PE `WIN_CERTIFICATE`, CAB PKCS#7 placement, MSI digital signature streams, MSIX `ContentTypes` / manifest glue, etc.) and combine with **remote signing** (KV REST, Artifact Signing `:sign` LRO). [`pkcs7.rs`](crates/signtool-sip-digest/src/pkcs7.rs) holds parse/replace helpers; [`pe_embed.rs`](crates/signtool-sip-digest/src/pe_embed.rs) can **wrap PKCS#7**, **append** attribute-certificate rows, and **recompute the PE image `CheckSum`** (experimental — **no** full CMS sign pipeline).
+**Long-term Linux signing** (if required): implement portable **CMS `SignerInfo` production** (inside **`SignedData`**) + **format-specific embedding** (PE `WIN_CERTIFICATE`, CAB PKCS#7 placement, MSI digital signature streams, MSIX `ContentTypes` / manifest glue, etc.) and combine with **remote signing** (KV REST, Artifact Signing `:sign` LRO). [`pkcs7.rs`](crates/signtool-sip-digest/src/pkcs7.rs) holds parse/replace helpers and **`encode_pkcs7_content_info_signed_data_der`** ( **`SignedData` → PKCS#7 outer DER** once structure is populated); [`pe_embed.rs`](crates/signtool-sip-digest/src/pe_embed.rs) can **wrap PKCS#7**, **append** attribute-certificate rows, and **recompute the PE image `CheckSum`** (experimental — **no** full CMS sign pipeline yet).
 
 ---
 
@@ -116,7 +116,7 @@ Details: [`migration-azuresigntool.md`](migration-azuresigntool.md).
 - Catalog `.cat` (CMS digest consistency; not full CTL membership / `CryptCATAdmin` policy)
 - PowerShell-class scripts, WSH `.js`/`.vbs`/`.wsf` (heuristic strip/hash — may diverge from COM Unicode conversion edge cases)
 
-**Not full Authenticode lifecycle:** No **`sign`** / **`timestamp`** / **`remove`** verbs, no **`--dlib`** decoupled DLL path, and no embedding **SignedData** into subjects on Linux (see PKCS#7 stubs in **`signtool-sip-digest`**).
+**Not full Authenticode lifecycle:** No **`sign`** / **`timestamp`** / **`remove`** verbs, no **`--dlib`** decoupled DLL path, and no embedding a **new** **SignedData** into subjects on Linux (parse/replace indirect data, **`ContentInfo`** re-encode from **`SignedData`**, and **`WIN_CERTIFICATE`** append/wrap exist — see **`signtool-sip-digest`**).
 
 ---
 
