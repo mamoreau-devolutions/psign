@@ -32,7 +32,7 @@ Use this when **`pkcs7.rs`** / **`pe_embed.rs`** need to match Win32 field order
 
 | Gap / milestone | IDA starting points (writable copies) |
 |-----------------|----------------------------------------|
-| PKCS#7 **`SignedData`** encode (outer **`ContentInfo`**) | **`CryptMsgOpenToEncode`**, **`CryptMsgUpdate`**, **`CryptMsgControl`**, **`CryptMsgClose`** — **`crypt32.dll`** (compare message types **`CMSG_SIGNED`**); often reached under **`SignerSignEx3`** in **`mssign32.dll`** |
+| PKCS#7 **`SignedData`** encode (outer **`ContentInfo`**) | **`CryptMsgOpenToEncode`**, **`CryptMsgUpdate`**, **`CryptMsgControl`**, **`CryptMsgClose`** — **`crypt32.dll`** (compare message types **`CMSG_SIGNED`**); often reached under **`SignerSignEx3`** in **`mssign32.dll`**. Authenticated-attribute digest follows **RFC 5652** §5.4 (**`SET OF Attribute`** encoding without outer **`[0]`** tag when hashing — portable analogue **`signer_info_signed_attributes_sequence_der`**) |
 | SIP indirect data (**`SPC_INDIRECT_DATA`**) | **`mssign32.dll`**, **`WINTRUST.dll`** (**`WVTAsn1SpcIndirectData*`** helpers); PE subject bytes vs **`SpcPeImageData`** |
 | PE cert directory / **`WIN_CERTIFICATE`** | **`ImageAddCertificate`**, **`ImageEnumerateCertificates`**, **`ImageRemoveCertificate`** — **`imagehlp.dll`** or **`KernelBase`** forwarding |
 | RFC3161 countersignature bytes | **`SignerTimeStampEx3`**, **`CryptMsgControl`** with timestamp CTL OIDs — **`mssign32.dll`** / **`crypt32.dll`** |

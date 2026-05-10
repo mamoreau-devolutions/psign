@@ -7,7 +7,7 @@
 //! [`crate::cab_digest`] (MSCF CAB layout), [`crate::msi_digest`] (OLE compound), [`crate::msix_digest`] (APPX AX\* blob under OID **`1.3.6.1.4.1.311.2.1.30`**), etc. Encoding those payloads into PKCS#7 is the missing producer piece; [`crate::pe_embed`] can append **`WIN_CERTIFICATE`** rows once PKCS#7 DER exists.
 //!
 //! **Milestone:** The **`authenticode`** crate publishes ASN.1 structs (`SpcIndirectDataContent`, `DigestInfo`, …) with `der` **Decode**/**Encode**.
-//! [`parse_pe_pkcs7_spc_indirect_data_at`] / [`parse_pe_pkcs7_spc_indirect_data`] and [`spc_indirect_data_replace_message_digest`] support **Linux-side digest substitution** before a future **`SignedData`** signer assembles countersignatures / PKCS#9 attributes. [`cms_digest_encapsulated_econtent_bytes`] and [`signer_info_pkcs9_message_digest_octets`] pin **RFC 5652 §5.4** **`eContent`** hashing to PKCS#9 **`messageDigest`** on fixtures (RustCrypto **`cms` SignerInfoBuilder** semantics). **`WIN_CERTIFICATE`** embedding remains [`crate::pe_embed`].
+//! [`parse_pe_pkcs7_spc_indirect_data_at`] / [`parse_pe_pkcs7_spc_indirect_data`] and [`spc_indirect_data_replace_message_digest`] support **Linux-side digest substitution** before a future **`SignedData`** signer assembles countersignatures / PKCS#9 attributes. [`cms_digest_encapsulated_econtent_bytes`] and [`signer_info_pkcs9_message_digest_octets`] pin **RFC 5652 §5.4** **`eContent`** hashing to PKCS#9 **`messageDigest`** on fixtures (RustCrypto **`cms` SignerInfoBuilder** semantics). [`signer_info_signed_attributes_sequence_der`] yields the **`SET OF Attribute`** octets for §5.4 authenticated-attribute signing. **`WIN_CERTIFICATE`** embedding remains [`crate::pe_embed`].
 
 use anyhow::{Result, anyhow};
 use authenticode::{DigestInfo, SpcIndirectDataContent};
@@ -206,6 +206,24 @@ pub fn signer_info_pkcs9_message_digest_octets(si: &SignerInfo) -> Result<Vec<u8
     Err(anyhow!("PKCS#9 messageDigest attribute not found"))
 }
 
+/// DER **`SET OF Attribute`** for **`SignerInfo.signedAttrs`** (**inner value only** — **no** **`[0]` IMPLICIT** wrapper).
+///
+/// **RFC 5652** §5.4: when authenticated attributes are present, signature generation digests this **`SET`**
+/// (with PKCS#1 / ECDSA rules layered on top), not the outer **`SignerInfo`** tagging. Exporting these octets
+/// supports portable pipelines that must match **`CryptMsgOpenToEncode`** / **`cms::SignerInfoBuilder`** behavior
+/// before submitting a digest to **KV `keys/sign`** or Artifact **`:sign`**.
+pub fn signer_info_signed_attributes_sequence_der(si: &SignerInfo) -> Result<Vec<u8>> {
+    let attrs = si
+        .signed_attrs
+        .as_ref()
+        .ok_or_else(|| anyhow!("SignerInfo has no authenticated attributes"))?;
+    let mut out = Vec::new();
+    attrs
+        .encode_to_vec(&mut out)
+        .map_err(|e| anyhow!("encode authenticated attributes SET OF Attribute: {e}"))?;
+    Ok(out)
+}
+
 /// Replace **`SignedData.encapContentInfo.eContent`** with **`indirect`** while keeping **`digestAlgorithms`**, **`certificates`**, **`crls`**, and **`signerInfos`** unchanged.
 ///
 /// **`template`** must already use **`eContentType`** **`authenticode::SPC_INDIRECT_DATA_OBJID`** (Authenticode **`SpcIndirectDataContent`**).
@@ -236,6 +254,7 @@ pub fn signed_data_replace_encapsulated_spc_indirect(
 mod tests {
     use super::*;
     use authenticode::SpcIndirectDataContent;
+    use cms::signed_data::SignedAttributes;
     use der::Decode;
 
     #[test]
@@ -269,6 +288,33 @@ mod tests {
         let pe_bytes =
             include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny64.signed.efi");
         assert_cms_encap_digest_matches_pkcs9(pe_bytes);
+    }
+
+    #[test]
+    fn signer_info_signed_attrs_sequence_der_round_trips_on_tiny_fixtures() {
+        for pe_bytes in [
+            include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi").as_slice(),
+            include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny64.signed.efi").as_slice(),
+        ] {
+            let pkcs7 = crate::verify_pe::pe_nth_pkcs7_signed_data_der(pe_bytes, 0).expect("pkcs7");
+            let sd = parse_pkcs7_signed_data_der(&pkcs7).expect("SignedData");
+            let si = sd.signer_infos.0.as_slice().first().expect("SignerInfo");
+            let der = signer_info_signed_attributes_sequence_der(si).expect("attrs DER");
+            assert_eq!(
+                der.first().copied(),
+                Some(der::Tag::Set.into()),
+                "authenticated attributes encode as ASN.1 SET"
+            );
+            let mut rd = SliceReader::new(der.as_slice()).expect("reader");
+            let back = SignedAttributes::decode(&mut rd).expect("decode SignedAttributes");
+            rd.finish(())
+                .expect("no trailing bytes after SET OF Attribute");
+            assert_eq!(
+                si.signed_attrs.as_ref().expect("signed_attrs"),
+                &back,
+                "SET OF Attribute DER round-trip"
+            );
+        }
     }
 
     // Encap-only swap: PKCS#9 messageDigest in SignerInfo stays stale until attrs + signature rebuild.
