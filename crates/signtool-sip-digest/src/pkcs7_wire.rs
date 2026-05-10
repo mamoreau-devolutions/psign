@@ -68,6 +68,21 @@ fn pkcs7_content_info_signed_data(signed_data_der: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Total byte length of a definite-length DER TLV whose tag is **`data[0]`** (used for PKCS#7 **`SEQUENCE`** / **`0x30`**).
+pub fn der_tlv_total_len_from_start(data: &[u8]) -> Option<usize> {
+    if data.first().copied()? != 0x30 {
+        return None;
+    }
+    let (content_len, hdr) = parse_der_definite_length(&data[1..])?;
+    Some(1 + hdr + content_len)
+}
+
+/// PKCS#7 **`ContentInfo`** bytes at the start of **`data`**, trimming trailing octets (e.g. **`WIN_CERTIFICATE`** 8-byte alignment padding).
+pub fn pkcs7_outer_sequence_prefix(data: &[u8]) -> Option<&[u8]> {
+    let n = der_tlv_total_len_from_start(data)?;
+    data.get(..n)
+}
+
 /// Normalize detached PKCS#7 blobs: bare `SignedData` sequences are wrapped as PKCS#7 `ContentInfo`.
 pub fn normalize_pkcs7_der_for_authenticode(sig_blob: &[u8]) -> Cow<'_, [u8]> {
     let Some(inner) = tlv_outer_sequence_payload(sig_blob) else {
