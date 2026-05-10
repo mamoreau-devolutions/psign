@@ -43,7 +43,7 @@ jobs:
         run: cargo test -p signtool-codesigning-rest --lib --locked
 
       - name: Azure KV REST crate tests (no Win32)
-        run: cargo test -p signtool-azure-kv-rest --lib --locked
+        run: cargo test -p signtool-azure-kv-rest --locked
 
       - name: Portable digest CLI (integration smoke)
         run: cargo test -p signtool-digest-cli --locked
