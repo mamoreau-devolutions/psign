@@ -21,8 +21,11 @@ jobs:
       - name: Cargo.lock consistency
         run: cargo metadata --locked --format-version 1 > /dev/null
 
-      - name: clippy (portable digest + trust crates)
-        run: cargo clippy -p signtool-sip-digest -p signtool-digest-cli -p signtool-authenticode-trust --all-targets --locked -- -D warnings
+      - name: clippy (portable digest + trust + codesigning REST crates)
+        run: cargo clippy -p signtool-sip-digest -p signtool-digest-cli -p signtool-authenticode-trust -p signtool-codesigning-rest --all-targets --locked -- -D warnings
+
+      - name: clippy (digest-cli with artifact-signing-rest)
+        run: cargo clippy -p signtool-digest-cli --all-targets --features artifact-signing-rest --locked -- -D warnings
 
       - name: clippy (signtool-rs portable lib)
         run: cargo clippy -p signtool-rs --lib --locked -- -D warnings
@@ -33,8 +36,14 @@ jobs:
       - name: Authenticode trust crate tests (no Win32)
         run: cargo test -p signtool-authenticode-trust --lib --locked
 
+      - name: Codesigning REST crate tests (no Win32)
+        run: cargo test -p signtool-codesigning-rest --lib --locked
+
       - name: Portable digest CLI (integration smoke)
         run: cargo test -p signtool-digest-cli --locked
+
+      - name: Portable digest CLI (artifact-signing-rest subcommand)
+        run: cargo test -p signtool-digest-cli --features artifact-signing-rest --locked
 
       - name: Check signtool-rs stub binary + portable lib
         run: cargo check -p signtool-rs --bins --lib --locked

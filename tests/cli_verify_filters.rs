@@ -140,7 +140,8 @@ fn timestamp_accepts_multiple_trailing_files() {
 
 #[test]
 fn remove_accepts_multiple_trailing_files() {
-    let c = Cli::try_parse_from(["signtool-windows", "remove", "--s", "x.exe", "y.exe"]).expect("parse");
+    let c = Cli::try_parse_from(["signtool-windows", "remove", "--s", "x.exe", "y.exe"])
+        .expect("parse");
     let SubCommand::Remove(r) = c.command else {
         panic!("expected remove");
     };
@@ -240,8 +241,15 @@ fn verify_detached_p7s_alias_parses() {
 
 #[test]
 fn verify_vr_alias_sets_revocation_check() {
-    let c = Cli::try_parse_from(["signtool-windows", "verify", "--vr", "--policy", "pa", "x.exe"])
-        .expect("parse");
+    let c = Cli::try_parse_from([
+        "signtool-windows",
+        "verify",
+        "--vr",
+        "--policy",
+        "pa",
+        "x.exe",
+    ])
+    .expect("parse");
     let SubCommand::Verify(v) = c.command else {
         panic!("expected verify");
     };
@@ -267,8 +275,15 @@ fn verify_testroot_alias_sets_allow_test_root() {
 
 #[test]
 fn verify_sl_sets_flag_and_runs_embedded_path() {
-    let c = Cli::try_parse_from(["signtool-windows", "verify", "--sl", "--policy", "pa", "x.exe"])
-        .expect("parse");
+    let c = Cli::try_parse_from([
+        "signtool-windows",
+        "verify",
+        "--sl",
+        "--policy",
+        "pa",
+        "x.exe",
+    ])
+    .expect("parse");
     let SubCommand::Verify(v) = c.command else {
         panic!("expected verify");
     };
@@ -345,8 +360,15 @@ fn timestamp_nosealwarn_not_implemented() {
 
 #[test]
 fn verify_tw_alias_equivalent_to_long_flag() {
-    let c = Cli::try_parse_from(["signtool-windows", "verify", "--tw", "--policy", "pa", "x.exe"])
-        .expect("parse");
+    let c = Cli::try_parse_from([
+        "signtool-windows",
+        "verify",
+        "--tw",
+        "--policy",
+        "pa",
+        "x.exe",
+    ])
+    .expect("parse");
     let SubCommand::Verify(v) = c.command else {
         panic!("expected verify");
     };

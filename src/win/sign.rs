@@ -3,9 +3,7 @@ use crate::win::code_sign_format::CodeSignFormat;
 use crate::win::sealing::validate_sign_constraints_paths;
 use crate::win::sign_core::sign_with_mssign32;
 use crate::win::sign_digest_pipeline::reject_split_digest_flags;
-use crate::{
-    AZURE_SIGN_EXIT_ALL_FAILED, AZURE_SIGN_EXIT_PARTIAL_SUCCESS, CommandOutput,
-};
+use crate::{AZURE_SIGN_EXIT_ALL_FAILED, AZURE_SIGN_EXIT_PARTIAL_SUCCESS, CommandOutput};
 use anyhow::{Context as _, Result, anyhow};
 use glob::glob;
 use rayon::ThreadPoolBuilder;
@@ -192,7 +190,11 @@ fn resolved_sign_exit_codes(args: &SignArgs) -> SignExitCodes {
     }
 }
 
-fn expand_glob_pattern(pattern: &str, out: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>) -> Result<()> {
+fn expand_glob_pattern(
+    pattern: &str,
+    out: &mut Vec<PathBuf>,
+    seen: &mut HashSet<PathBuf>,
+) -> Result<()> {
     let pattern = pattern.trim();
     if pattern.is_empty() {
         return Ok(());
@@ -340,7 +342,9 @@ fn post_sign_rust_sip(
         Some(RustSipBackend::Msix) => {
             let ext = extension_lower(target).unwrap_or_default();
             if matches!(ext.as_str(), "msix" | "appx" | "msixbundle" | "appxbundle") {
-                crate::win::sip_rust::sign_msix::post_sign_msix_digest_parity_check(target, global)?;
+                crate::win::sip_rust::sign_msix::post_sign_msix_digest_parity_check(
+                    target, global,
+                )?;
             }
         }
         Some(RustSipBackend::Cab) => {
@@ -373,10 +377,7 @@ fn try_sign_one(
     target: &Path,
 ) -> Result<String> {
     if args.skip_signed && file_has_embedded_authenticode(target) {
-        return Ok(format!(
-            "Skipped (already signed): {}\n",
-            target.display()
-        ));
+        return Ok(format!("Skipped (already signed): {}\n", target.display()));
     }
     let block = sign_one_target(args, global, target)?;
     post_sign_rust_sip(backend, target, global)?;
@@ -526,9 +527,7 @@ pub fn sign_file(args: &SignArgs, global: &GlobalOpts) -> Result<CommandOutput> 
             Err(e) => {
                 failures += 1;
                 if args.continue_on_error {
-                    combined.push_str(&format!(
-                        "Failed: {target_display}: {e:#}\n"
-                    ));
+                    combined.push_str(&format!("Failed: {target_display}: {e:#}\n"));
                 } else {
                     return Err(e);
                 }

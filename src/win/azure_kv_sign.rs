@@ -1,28 +1,27 @@
 //! Azure Key Vault REST signing for Authenticode (`SignerSignEx3` + `AuthenticodeDigestSign` callback).
 
 use crate::cli::{DigestAlgorithm, GlobalOpts, SignArgs};
-use crate::win::sign_core::{
-    adopt_cert, authenticode_sign_embedded, encoding, infer_digest_for_cert, merge_additional_cert_file,
-    open_memory_cert_store, validate_cert_constraints,
-};
 use crate::win::sealing::validate_sign_constraints_paths;
+use crate::win::sign_core::{
+    adopt_cert, authenticode_sign_embedded, encoding, infer_digest_for_cert,
+    merge_additional_cert_file, open_memory_cert_store, validate_cert_constraints,
+};
 use anyhow::{Context as _, Result, anyhow};
 use base64::Engine as _;
 use serde::Deserialize;
-use x509_cert::der::Decode;
 use std::cell::RefCell;
 use std::mem::size_of;
 use url::Url;
 use windows::Win32::Foundation::{E_FAIL, S_OK};
-use windows::Win32::Security::Cryptography::{
-    CALG_SHA_256, CALG_SHA_384, CALG_SHA_512, CERT_CONTEXT, CRYPT_INTEGER_BLOB,
-    CERT_STORE_ADD_REPLACE_EXISTING, CertAddCertificateContextToStore,
-    CertCreateCertificateContext, CertFreeCertificateContext, SIGNER_DIGEST_SIGN_INFO,
-    SIGNER_DIGEST_SIGN_INFO_0,
-};
-use windows::Win32::System::Memory::{LocalAlloc, LMEM_FIXED};
-use windows::core::HRESULT;
 use windows::Win32::Security::Cryptography::ALG_ID;
+use windows::Win32::Security::Cryptography::{
+    CALG_SHA_256, CALG_SHA_384, CALG_SHA_512, CERT_CONTEXT, CERT_STORE_ADD_REPLACE_EXISTING,
+    CRYPT_INTEGER_BLOB, CertAddCertificateContextToStore, CertCreateCertificateContext,
+    CertFreeCertificateContext, SIGNER_DIGEST_SIGN_INFO, SIGNER_DIGEST_SIGN_INFO_0,
+};
+use windows::Win32::System::Memory::{LMEM_FIXED, LocalAlloc};
+use windows::core::HRESULT;
+use x509_cert::der::Decode;
 
 thread_local! {
     static KV_HTTP: RefCell<Option<KvCallbackState>> = const { RefCell::new(None) };
@@ -101,18 +100,14 @@ fn acquire_access_token(args: &SignArgs) -> Result<String> {
         .as_deref()
         .filter(|s| !s.trim().is_empty())
         .ok_or_else(|| {
-            anyhow!(
-                "Azure Key Vault client credentials require --azure-key-vault-tenant-id (-kvt)"
-            )
+            anyhow!("Azure Key Vault client credentials require --azure-key-vault-tenant-id (-kvt)")
         })?;
     let client_id = args
         .azure_key_vault_client_id
         .as_deref()
         .filter(|s| !s.trim().is_empty())
         .ok_or_else(|| {
-            anyhow!(
-                "Azure Key Vault client credentials require --azure-key-vault-client-id (-kvi)"
-            )
+            anyhow!("Azure Key Vault client credentials require --azure-key-vault-client-id (-kvi)")
         })?;
     let secret = args
         .azure_key_vault_client_secret
@@ -160,7 +155,11 @@ fn acquire_access_token(args: &SignArgs) -> Result<String> {
     Ok(j.access_token)
 }
 
-fn fetch_certificate(args: &SignArgs, token: &str, http: &reqwest::blocking::Client) -> Result<KeyVaultCertificate> {
+fn fetch_certificate(
+    args: &SignArgs,
+    token: &str,
+    http: &reqwest::blocking::Client,
+) -> Result<KeyVaultCertificate> {
     let base = normalize_vault_base(
         args.azure_key_vault_url
             .as_deref()
@@ -172,8 +171,7 @@ fn fetch_certificate(args: &SignArgs, token: &str, http: &reqwest::blocking::Cli
         .filter(|s| !s.trim().is_empty())
         .ok_or_else(|| anyhow!("--azure-key-vault-certificate (-kvc) is required"))?;
 
-    let mut url =
-        Url::parse(&base).map_err(|e| anyhow!("invalid --azure-key-vault-url: {e}"))?;
+    let mut url = Url::parse(&base).map_err(|e| anyhow!("invalid --azure-key-vault-url: {e}"))?;
     url.path_segments_mut()
         .map_err(|_| anyhow!("--azure-key-vault-url must be a hierarchical https URL"))?
         .push("certificates")
@@ -274,7 +272,9 @@ unsafe extern "system" fn azure_kv_digest_callback(
     let outcome = KV_HTTP.with(|slot| {
         let borrowed = slot.borrow();
         let Some(state) = borrowed.as_ref() else {
-            return Err(anyhow!("Azure KV signing thread-local state was not installed"));
+            return Err(anyhow!(
+                "Azure KV signing thread-local state was not installed"
+            ));
         };
         let alg = match kv_signature_alg(state.key_kind, algid_hash) {
             Ok(a) => a,
@@ -365,10 +365,7 @@ pub(crate) fn validate_azure_kv_mutex(args: &SignArgs) -> Result<()> {
             "Azure Key Vault signing cannot be combined with --csp / --key-container"
         ));
     }
-    if args.dlib.is_some()
-        || args.dmdf.is_some()
-        || args.trusted_signing_dlib_root.is_some()
-    {
+    if args.dlib.is_some() || args.dmdf.is_some() || args.trusted_signing_dlib_root.is_some() {
         return Err(anyhow!(
             "Azure Key Vault signing cannot be combined with --dlib / --dmdf / --trusted-signing-dlib-root"
         ));
@@ -383,11 +380,21 @@ pub(crate) fn validate_azure_kv_mutex(args: &SignArgs) -> Result<()> {
         ));
     }
 
-    let has_sp = args.azure_key_vault_client_secret.as_ref().map(|s| !s.trim().is_empty()) == Some(true);
-    let has_tenant =
-        args.azure_key_vault_tenant_id.as_ref().map(|s| !s.trim().is_empty()) == Some(true);
-    let has_client =
-        args.azure_key_vault_client_id.as_ref().map(|s| !s.trim().is_empty()) == Some(true);
+    let has_sp = args
+        .azure_key_vault_client_secret
+        .as_ref()
+        .map(|s| !s.trim().is_empty())
+        == Some(true);
+    let has_tenant = args
+        .azure_key_vault_tenant_id
+        .as_ref()
+        .map(|s| !s.trim().is_empty())
+        == Some(true);
+    let has_client = args
+        .azure_key_vault_client_id
+        .as_ref()
+        .map(|s| !s.trim().is_empty())
+        == Some(true);
     let has_token = args
         .azure_key_vault_access_token
         .as_ref()
@@ -458,7 +465,9 @@ pub(crate) fn sign_with_azure_key_vault(
     // SAFETY: `cer_der` is valid DER for the duration of import.
     let leaf = unsafe { CertCreateCertificateContext(encoding(), &cer_der) };
     if leaf.is_null() {
-        return Err(anyhow!("CertCreateCertificateContext failed for Key Vault certificate"));
+        return Err(anyhow!(
+            "CertCreateCertificateContext failed for Key Vault certificate"
+        ));
     }
     unsafe {
         CertAddCertificateContextToStore(

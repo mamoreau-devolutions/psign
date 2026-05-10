@@ -397,7 +397,9 @@ fn msix_dlib_dmdf_path_executes() {
         rust.arg("--password").arg(pw);
     }
     rust.arg(&out);
-    let rust_out = rust.output().expect("run signtool-windows msix dlib/dmdf sign");
+    let rust_out = rust
+        .output()
+        .expect("run signtool-windows msix dlib/dmdf sign");
     assert!(
         rust_out.status.success(),
         "{}",
@@ -1357,7 +1359,8 @@ fn artifact_signing_rest_submit_smoke() {
         cmd.arg("--managed-identity");
     } else {
         cmd.arg("--tenant-id").arg(tenant.as_ref().expect("tenant"));
-        cmd.arg("--client-id").arg(client_id.as_ref().expect("client id"));
+        cmd.arg("--client-id")
+            .arg(client_id.as_ref().expect("client id"));
         cmd.arg("--client-secret")
             .arg(client_secret.as_ref().expect("client secret"));
     }

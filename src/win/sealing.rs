@@ -30,8 +30,8 @@ pub fn validate_sign_constraints_paths<'a>(
     args: &SignArgs,
     paths: impl IntoIterator<Item = &'a std::path::Path>,
 ) -> Result<()> {
-    let decoupled_digest = (args.dlib.is_some() || args.trusted_signing_dlib_root.is_some())
-        && args.dmdf.is_some();
+    let decoupled_digest =
+        (args.dlib.is_some() || args.trusted_signing_dlib_root.is_some()) && args.dmdf.is_some();
     if (args.dlib.is_some() || args.trusted_signing_dlib_root.is_some()) != args.dmdf.is_some() {
         return Err(anyhow!(
             "--dmdf must be provided together with either --dlib or --trusted-signing-dlib-root"

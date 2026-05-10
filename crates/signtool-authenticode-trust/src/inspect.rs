@@ -15,14 +15,17 @@ use signtool_sip_digest::verify_pe::for_each_pe_pkcs7_signed_data;
 
 const ID_SIGNED_DATA: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.7.2");
 /// Microsoft **nested signature** attribute (`NestedSignature`).
-const OID_MS_NESTED_SIGNATURE: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.4.1.311.2.4.1");
+const OID_MS_NESTED_SIGNATURE: ObjectIdentifier =
+    ObjectIdentifier::new_unwrap("1.3.6.1.4.1.311.2.4.1");
 /// PKCS#9 **`signing-time`** (legacy Authenticode timestamp hint).
-const OID_PKCS9_SIGNING_TIME: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.9.5");
+const OID_PKCS9_SIGNING_TIME: ObjectIdentifier =
+    ObjectIdentifier::new_unwrap("1.2.840.113549.1.9.5");
 /// **`id-aa-timeStampToken`** (RFC 5035).
 const OID_ID_AA_TIME_STAMP_TOKEN: ObjectIdentifier =
     ObjectIdentifier::new_unwrap("1.2.840.113549.1.9.16.2.14");
 /// Microsoft nested Authenticode RFC3161-style timestamp attribute.
-const OID_MS_TIMESTAMP_TOKEN: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.4.1.311.3.3.1");
+const OID_MS_TIMESTAMP_TOKEN: ObjectIdentifier =
+    ObjectIdentifier::new_unwrap("1.3.6.1.4.1.311.3.3.1");
 
 const DEFAULT_MAX_NEST_DEPTH: usize = 16;
 
@@ -91,7 +94,11 @@ pub fn inspect_pe_authenticode(pe_bytes: &[u8]) -> Result<InspectPeFileReport> {
     Ok(InspectPeFileReport { entries })
 }
 
-fn inspect_pkcs7_recursive(pkcs7_der: &[u8], depth: usize, max_depth: usize) -> Result<InspectPkcs7Report> {
+fn inspect_pkcs7_recursive(
+    pkcs7_der: &[u8],
+    depth: usize,
+    max_depth: usize,
+) -> Result<InspectPkcs7Report> {
     if depth > max_depth {
         return Err(anyhow!(
             "nested PKCS#7 depth exceeds limit ({max_depth}); possible corrupt or cyclic structure"
@@ -140,11 +147,7 @@ fn inspect_signed_data(
     max_depth: usize,
 ) -> Result<InspectPkcs7Report> {
     let encap_content_type_oid = Some(sd.encap_content_info.econtent_type.to_string());
-    let certificate_count = sd
-        .certificates
-        .as_ref()
-        .map(|set| set.0.len())
-        .unwrap_or(0);
+    let certificate_count = sd.certificates.as_ref().map(|set| set.0.len()).unwrap_or(0);
 
     let mut signers = Vec::new();
     let mut nested_signatures = Vec::new();
@@ -192,7 +195,9 @@ fn decode_nested_pkcs7_payload(payload: &[u8]) -> Result<Vec<u8>> {
             return Ok(inner.to_vec());
         }
     }
-    Err(anyhow!("nested payload is not a decodable SignedData ContentInfo"))
+    Err(anyhow!(
+        "nested payload is not a decodable SignedData ContentInfo"
+    ))
 }
 
 fn peel_octet_string_outer(bytes: &[u8]) -> Option<&[u8]> {

@@ -21,8 +21,8 @@ pub mod trust_verify_pe;
 pub mod verification_instant;
 
 pub use inspect::{
-    InspectAuthenticodeDigest, InspectPeEntry, InspectPeFileReport, InspectPkcs7Report, InspectSigner,
-    TimestampHint, inspect_authenticode_pkcs7_der, inspect_pe_authenticode,
+    InspectAuthenticodeDigest, InspectPeEntry, InspectPeFileReport, InspectPkcs7Report,
+    InspectSigner, TimestampHint, inspect_authenticode_pkcs7_der, inspect_pe_authenticode,
 };
 pub use policy::AuthenticodeTrustPolicy;
 pub use trust_verify_cab::trust_verify_cab_bytes;

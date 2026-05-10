@@ -226,11 +226,7 @@ pub fn combine_batch_exit_codes(acc: i32, next: i32) -> i32 {
     if acc == AZURE_SIGN_EXIT_PARTIAL_SUCCESS || next == AZURE_SIGN_EXIT_PARTIAL_SUCCESS {
         return AZURE_SIGN_EXIT_PARTIAL_SUCCESS;
     }
-    if acc == 2 || next == 2 {
-        2
-    } else {
-        0
-    }
+    if acc == 2 || next == 2 { 2 } else { 0 }
 }
 
 #[cfg(test)]

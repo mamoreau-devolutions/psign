@@ -35,8 +35,10 @@ From the repo root (see [`docs/roadmap-authenticode-linux.md`](docs/roadmap-auth
 
 ```sh
 cargo install --path crates/signtool-digest-cli --locked   # installs `signtool-portable`
-cargo digest-test    # alias: sip-digest lib tests + digest-cli integration tests
-cargo digest-check   # alias: `cargo check` on both portable crates
+# Optional: Azure Code Signing `:sign` LRO on Linux/macOS (same as `signtool-windows artifact-signing-submit`):
+# cargo install --path crates/signtool-digest-cli --locked --features artifact-signing-rest
+cargo digest-test    # alias: sip-digest + authenticode-trust + codesigning-rest lib tests + digest-cli integration tests
+cargo digest-check   # alias: `cargo check` on portable workspace crates (includes `signtool-codesigning-rest`)
 ```
 
 Unix CI (`ci-unix`) runs **`cargo fmt`**, strict **`clippy -D warnings`** on those crates plus the **`signtool-rs` library**, and the digest CLI tests. Local mirror (bash): **`scripts/linux-portable-validation.sh`** from the repo root.

@@ -50,6 +50,48 @@ fn help_lists_core_subcommands() {
     }
 }
 
+fn decode_hex_lower(s: &str) -> Vec<u8> {
+    assert_eq!(s.len() % 2, 0, "even hex length");
+    (0..s.len() / 2)
+        .map(|i| u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).expect("hex"))
+        .collect()
+}
+
+#[test]
+fn pe_digest_raw_output_file_matches_known_sha256_tiny32() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("digest.bin");
+    let mut cmd = Command::cargo_bin("signtool-portable").unwrap();
+    cmd.args([
+        "pe-digest",
+        "--algorithm",
+        "sha256",
+        "--encoding",
+        "raw",
+        "--output",
+    ])
+    .arg(&out)
+    .arg(tiny32_fixture());
+    cmd.assert().success();
+    let raw = std::fs::read(&out).unwrap();
+    assert_eq!(raw.len(), 32);
+    let expected_hex = "4f5b3633fc51d9447beb5c546e9ae6e58d6eb42d1e96d623dc168d97013c08a8";
+    assert_eq!(raw, decode_hex_lower(expected_hex));
+}
+
+#[cfg(feature = "artifact-signing-rest")]
+#[test]
+fn help_lists_artifact_signing_submit_when_feature_enabled() {
+    let mut cmd = Command::cargo_bin("signtool-portable").unwrap();
+    cmd.arg("--help");
+    let assert = cmd.assert().success();
+    let out = std::str::from_utf8(&assert.get_output().stdout).expect("utf-8 help");
+    assert!(
+        out.contains("artifact-signing-submit"),
+        "help should list artifact-signing-submit when built with artifact-signing-rest"
+    );
+}
+
 fn tiny32_fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi")
@@ -229,9 +271,9 @@ fn artifact_signing_metadata_check_accepts_valid_json_file() {
     let mut cmd = Command::cargo_bin("signtool-portable").unwrap();
     cmd.args(["artifact-signing-metadata-check", "--path"])
         .arg(&path);
-    cmd.assert()
-        .success()
-        .stdout(predicate::str::contains("artifact-signing-metadata-check: ok"));
+    cmd.assert().success().stdout(predicate::str::contains(
+        "artifact-signing-metadata-check: ok",
+    ));
 }
 
 #[test]

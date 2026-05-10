@@ -473,10 +473,7 @@ pub struct SignArgs {
     #[arg(long = "azure-key-vault-certificate", visible_alias = "kvc")]
     pub azure_key_vault_certificate: Option<String>,
     /// Optional certificate version (`-kvcv`).
-    #[arg(
-        long = "azure-key-vault-certificate-version",
-        visible_alias = "kvcv"
-    )]
+    #[arg(long = "azure-key-vault-certificate-version", visible_alias = "kvcv")]
     pub azure_key_vault_certificate_version: Option<String>,
     #[arg(long = "azure-key-vault-client-id", visible_alias = "kvi")]
     pub azure_key_vault_client_id: Option<String>,

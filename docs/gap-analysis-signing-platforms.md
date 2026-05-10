@@ -33,7 +33,7 @@ Legend: **Sign** = produce/embed Authenticode; **WT verify** = `WinVerifyTrust`-
 |------|--------|-----|
 | **Drop-in Linux replacement for `signtool.exe` sign/verify** | Not supported | Signing and WinTrust-backed verify require Windows CryptAPI/SIP (`SignerSignEx3`, `WinVerifyTrust`). |
 | **Drop-in Linux replacement for AzureSignTool** | Not supported | Key Vault signing is implemented only in **`signtool-windows`** (`--azure-key-vault-*`, feature **`azure-kv-sign`**). Embedding signatures still uses **`SignerSignEx3`** + OS SIP. |
-| **Drop-in Linux replacement for Artifact Signing (dlib / REST)** | Partial | **`artifact-signing-submit`** (feature **`artifact-signing-rest`**) is **Windows-only** and returns signature bytes / JSON — it does **not** embed into PE/MSIX without the Microsoft dlib path or future Rust PKCS#7 producers. **`signtool-portable`** validates **`--dmdf`** JSON shape only. |
+| **Drop-in Linux replacement for Artifact Signing (dlib / REST)** | Partial | **`artifact-signing-submit`** (**`--features artifact-signing-rest`**) runs on **Linux/macOS** via **`signtool-portable`** or on Windows via **`signtool-windows`** — same **`:sign`** LRO (**hash → JSON**). **Embedding** PKCS#7 still requires **`SignerSignEx3`** + dlib or future portable CMS/embed. **`signtool-portable`** validates **`--dmdf`** JSON without network. |
 | **Linux verify + digest parity for many Authenticode formats** | Supported | **`signtool-portable`** covers PE, CAB, MSI, ESD/WIM, cleartext MSIX, catalog, scripts; **`trust-verify-*`** adds anchor-based CMS trust (see [`authenticode-trust-stack.md`](authenticode-trust-stack.md)). |
 | **Maximum Authenticode subject formats** | Windows signs all SIP-registered types Rust can digest-check | **Encrypted MSIX**, **VBA/mso**, **extension SIP DLLs**, **standalone `.p7x`** subject handling — see [`rust-sip-gaps.md`](rust-sip-gaps.md). |
 
@@ -91,7 +91,7 @@ Details: [`migration-azuresigntool.md`](migration-azuresigntool.md).
 | Surface | Implementation |
 |---------|----------------|
 | Decoupled sign (`--dlib`, `--trusted-signing-dlib-root`, `--dmdf`) | **`signtool-windows`** only |
-| REST hash signing | **`artifact-signing-submit`** (`--features artifact-signing-rest`), Windows binary |
+| REST hash signing | **`artifact-signing-submit`** (`--features artifact-signing-rest`) on **`signtool-windows`** or **`signtool-portable`** |
 | Metadata validation without signing | **`signtool-portable artifact-signing-metadata-check`** |
 
 **Gap:** REST output is **not** wired into a portable Authenticode embedder; docs state MVP is hash signing / diagnostics. [`migration-artifact-signing.md`](migration-artifact-signing.md).

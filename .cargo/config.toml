@@ -2,9 +2,9 @@
 # Main Windows CLI (`default-members` omit root crate — always pass `-p signtool-rs`).
 windows-bin = "build -p signtool-rs --bin signtool-windows --locked"
 # Portable Authenticode digest stack (no Win32). See docs/roadmap-authenticode-linux.md.
-digest-check = "check -p signtool-sip-digest -p signtool-digest-cli -p signtool-authenticode-trust --locked"
+digest-check = "check -p signtool-sip-digest -p signtool-digest-cli -p signtool-authenticode-trust -p signtool-codesigning-rest --locked"
 # `signtool-digest-cli` has integration tests only — keep it last so `--lib` does not silence them.
-digest-test = "test -p signtool-sip-digest --lib -p signtool-authenticode-trust --lib -p signtool-digest-cli --locked"
+digest-test = "test -p signtool-sip-digest --lib -p signtool-authenticode-trust --lib -p signtool-codesigning-rest --lib -p signtool-digest-cli --locked"
 # Matches ci-unix `signtool-rs` stub + portable lib (no `win` module on Linux).
 unix-lib-check = "check -p signtool-rs --lib --locked"
 # `default-members` omits the main crate; use this instead of `cargo run --bin depgraph`.

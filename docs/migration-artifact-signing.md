@@ -4,7 +4,7 @@ Microsoft **Artifact Signing** (often called **Trusted Signing**) integrates wit
 
 **signtool-windows** uses the same Win32 bridge as SignTool: **`SignerSignEx3`** with **`SIGNER_DIGEST_SIGN_INFO`** pointing at the DLL exports (this repo prefers **`AuthenticodeDigestSignExWithFileHandle`** when present, matching Microsoft’s Azure dlib).
 
-**signtool-portable** cannot load the mixed-mode/.NET dlib or call **`SignerSignEx3`**; use it **after** signing for digest consistency checks and **anchor-based trust verification** (see [Portable post-sign verification](#portable-post-sign-verification) below).
+**signtool-portable** cannot load the mixed-mode/.NET dlib or call **`SignerSignEx3`**; use it **after** embedding for digest consistency checks and **anchor-based trust verification** (see [Portable post-sign verification](#portable-post-sign-verification) below). With **`--features artifact-signing-rest`** it can still call the same **`:sign`** REST LRO as **`signtool-windows`** (hash in → JSON out — embedding remains a separate step).
 
 ### Optional: Azure Code Signing **REST** hash signing (experimental)
 
@@ -23,6 +23,20 @@ signtool-windows.exe artifact-signing-submit `
 ```
 
 This runs the **`:sign`** LRO and prints the final JSON (**`signature`**, **`signingCertificate`**, …). It does **not** embed an Authenticode PKCS#7 into a PE by itself — combine with your signing pipeline or continue using **`--dlib`** / **`--trusted-signing-dlib-root`** for **`SignerSignEx3`** embedding.
+
+#### Linux / CI: same REST helper from **`signtool-portable`**
+
+Build or install with **`--features artifact-signing-rest`**, then use **`artifact-signing-submit`** with the same flags as Windows. Produce a raw Authenticode digest file from an unsigned PE with **`pe-digest --encoding raw --output digest.bin`** (SHA-256 → 32 bytes).
+
+```bash
+cargo build -p signtool-digest-cli --features artifact-signing-rest --locked
+./target/debug/signtool-portable pe-digest --algorithm sha256 --encoding raw --output digest.bin ./MyApp.exe
+./target/debug/signtool-portable artifact-signing-submit \
+  --region westus --account-name myAccount --profile-name myProfile \
+  --digest-file digest.bin --signature-algorithm RS256 --managed-identity
+```
+
+Optional debug logs: **`SIGNTOOL_PORTABLE_DEBUG=1`**.
 
 ## Flag mapping (Microsoft sample → signtool-windows)
 

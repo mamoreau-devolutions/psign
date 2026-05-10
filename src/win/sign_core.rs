@@ -16,12 +16,11 @@ use windows::Win32::Security::Cryptography::{
     CERT_KEY_PROV_INFO_PROP_ID, CERT_NAME_ISSUER_FLAG, CERT_NAME_SIMPLE_DISPLAY_TYPE,
     CERT_OPEN_STORE_FLAGS, CERT_QUERY_ENCODING_TYPE, CERT_SIGN_HASH_CNG_ALG_PROP_ID,
     CERT_STORE_ADD_REPLACE_EXISTING, CERT_STORE_PROV_MEMORY, CERT_STORE_PROV_SYSTEM_W,
-    CERT_SYSTEM_STORE_CURRENT_USER,
-    CERT_SYSTEM_STORE_LOCAL_MACHINE, CRYPT_ATTRIBUTES, CRYPT_INTEGER_BLOB,
-    CertAddCertificateContextToStore, CertCloseStore, CertCreateCertificateContext,
-    CertDuplicateCertificateContext, CertEnumCertificatesInStore, CertFindCertificateInStore,
-    CertFreeCertificateContext, CertGetCertificateContextProperty, CertGetNameStringW,
-    CertOpenStore, HCERTSTORE, HCRYPTPROV_LEGACY, PFN_AUTHENTICODE_DIGEST_SIGN,
+    CERT_SYSTEM_STORE_CURRENT_USER, CERT_SYSTEM_STORE_LOCAL_MACHINE, CRYPT_ATTRIBUTES,
+    CRYPT_INTEGER_BLOB, CertAddCertificateContextToStore, CertCloseStore,
+    CertCreateCertificateContext, CertDuplicateCertificateContext, CertEnumCertificatesInStore,
+    CertFindCertificateInStore, CertFreeCertificateContext, CertGetCertificateContextProperty,
+    CertGetNameStringW, CertOpenStore, HCERTSTORE, HCRYPTPROV_LEGACY, PFN_AUTHENTICODE_DIGEST_SIGN,
     PFN_AUTHENTICODE_DIGEST_SIGN_EX, PFN_AUTHENTICODE_DIGEST_SIGN_EX_WITHFILEHANDLE,
     PFN_AUTHENTICODE_DIGEST_SIGN_WITHFILEHANDLE, PFXImportCertStore, PKCS12_ALLOW_OVERWRITE_KEY,
     PKCS12_ALWAYS_CNG_KSP, PKCS12_INCLUDE_EXTENDED_PROPERTIES, SIG_APPEND, SIGNER_ATTR_AUTHCODE,
@@ -245,7 +244,9 @@ pub(crate) fn artifact_signing_dlib_path(root: &std::path::Path) -> std::path::P
     } else {
         "x86"
     };
-    root.join("bin").join(arch).join("Azure.CodeSigning.Dlib.dll")
+    root.join("bin")
+        .join(arch)
+        .join("Azure.CodeSigning.Dlib.dll")
 }
 
 /// Effective decoupled digest DLL path: explicit `--dlib` or derived from `--trusted-signing-dlib-root`.

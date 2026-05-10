@@ -3,6 +3,7 @@ members = [
     "crates/signtool-sip-digest",
     "crates/signtool-digest-cli",
     "crates/signtool-authenticode-trust",
+    "crates/signtool-codesigning-rest",
 ]
 # Bare `cargo build` / `cargo test` at the repo root builds portable crates only (Linux/macOS friendly).
 # Use `-p signtool-rs` or `cargo build --workspace` for the full workspace including the Windows binary crate.
@@ -10,6 +11,7 @@ default-members = [
     "crates/signtool-sip-digest",
     "crates/signtool-digest-cli",
     "crates/signtool-authenticode-trust",
+    "crates/signtool-codesigning-rest",
 ]
 resolver = "2"
 
@@ -24,7 +26,7 @@ default = []
 ## Azure Key Vault signing (`AuthenticatorDigestSign` callback + REST); enables Azure-shaped CLI flags on `sign`.
 azure-kv-sign = ["dep:base64", "dep:reqwest", "dep:url"]
 ## Azure Artifact Signing / Trusted Signing **data-plane** hash signing (REST LRO); experimental helper command `artifact-signing-submit`.
-artifact-signing-rest = ["dep:base64", "dep:reqwest", "dep:url"]
+artifact-signing-rest = ["dep:signtool-codesigning-rest"]
 
 [dependencies]
 signtool-sip-digest = { path = "crates/signtool-sip-digest" }
@@ -41,6 +43,7 @@ x509-cert = "0.2.5"
 base64 = { version = "0.22", optional = true }
 glob = "0.3"
 rayon = "1.10"
+signtool-codesigning-rest = { path = "crates/signtool-codesigning-rest", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
 url = { version = "2", optional = true }
 uuid = "1"

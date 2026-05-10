@@ -1880,7 +1880,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2486,6 +2486,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "signtool-codesigning-rest"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "reqwest",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "signtool-digest-cli"
 version = "0.1.0"
 dependencies = [
@@ -2496,6 +2507,7 @@ dependencies = [
  "serde",
  "serde_json",
  "signtool-authenticode-trust",
+ "signtool-codesigning-rest",
  "signtool-sip-digest",
  "tempfile",
 ]
@@ -2517,6 +2529,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "signtool-authenticode-trust",
+ "signtool-codesigning-rest",
  "signtool-sip-digest",
  "url",
  "uuid",
@@ -3181,6 +3194,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
 dependencies = [
  "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "windows-sys"
+version = "0.60.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2f500e4d28234f72040990ec9d39e3a6b950f9f22d3dba18416c35882612bcb"
+dependencies = [
+ "windows-targets 0.53.5",
 ]
 
 [[package]]

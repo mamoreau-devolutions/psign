@@ -12,6 +12,10 @@ use signtool_authenticode_trust::{
     trust_verify_cab_bytes, trust_verify_catalog_bytes, trust_verify_detached_bytes,
     trust_verify_pe_bytes,
 };
+#[cfg(feature = "artifact-signing-rest")]
+use signtool_codesigning_rest::{
+    CodesigningAuth, CodesigningSubmitParams, submit_codesign_hash_blocking,
+};
 use signtool_sip_digest::cab_digest::{
     compute_cab_authenticode_digest, parse_cab_context, verify_cab_digest_consistency,
 };
@@ -116,6 +120,12 @@ enum Command {
         path: PathBuf,
         #[arg(long, value_enum, default_value_t = HashAlg::Sha256)]
         algorithm: HashAlg,
+        /// **`hex`** (default): one lowercase hex line. **`raw`**: raw digest bytes (e.g. for **`artifact-signing-submit`** `--digest-file`).
+        #[arg(long, value_enum, default_value_t = DigestEncoding::Hex)]
+        encoding: DigestEncoding,
+        /// Write output here instead of stdout.
+        #[arg(long, value_name = "PATH")]
+        output: Option<PathBuf>,
     },
     /// Require embedded PKCS#7; compare indirect digest to Rust PE recomputation for each Authenticode cert.
     VerifyPe { path: PathBuf },
@@ -189,6 +199,12 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         path: Option<PathBuf>,
     },
+    /// Azure Code Signing **`…:sign`** LRO (same REST contract as **`signtool-windows artifact-signing-submit`**). Requires **`--features artifact-signing-rest`** at build time.
+    #[cfg(feature = "artifact-signing-rest")]
+    ArtifactSigningSubmit {
+        #[command(flatten)]
+        args: ArtifactSigningSubmitPortableArgs,
+    },
     /// Print lowercase hex CAB Authenticode digest **without** requiring PKCS#7 (unsigned / structural check).
     ///
     /// Algorithm must match what will be used at signing time (default SHA-256).
@@ -213,6 +229,12 @@ enum HashAlg {
     Sha512,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum DigestEncoding {
+    Hex,
+    Raw,
+}
+
 impl From<HashAlg> for PeAuthenticodeHashKind {
     fn from(value: HashAlg) -> Self {
         match value {
@@ -226,6 +248,168 @@ impl From<HashAlg> for PeAuthenticodeHashKind {
 
 fn hex_lower(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn write_pe_digest_output(
+    encoding: DigestEncoding,
+    digest: &[u8],
+    output: Option<&Path>,
+) -> Result<()> {
+    use std::io::Write;
+    let write_hex_line = |w: &mut dyn Write| -> Result<()> {
+        writeln!(w, "{}", hex_lower(digest)).context("write digest hex")
+    };
+    match output {
+        Some(path) => {
+            let mut f = std::fs::File::create(path)
+                .with_context(|| format!("create {}", path.display()))?;
+            match encoding {
+                DigestEncoding::Hex => write_hex_line(&mut f)?,
+                DigestEncoding::Raw => f.write_all(digest).context("write raw digest")?,
+            }
+        }
+        None => match encoding {
+            DigestEncoding::Hex => write_hex_line(&mut std::io::stdout())?,
+            DigestEncoding::Raw => std::io::stdout()
+                .write_all(digest)
+                .context("write raw digest to stdout")?,
+        },
+    }
+    Ok(())
+}
+
+#[cfg(feature = "artifact-signing-rest")]
+#[derive(Args, Debug, Clone)]
+struct ArtifactSigningSubmitPortableArgs {
+    #[arg(long)]
+    region: String,
+    #[arg(long)]
+    account_name: String,
+    #[arg(long)]
+    profile_name: String,
+    #[arg(long)]
+    digest_file: PathBuf,
+    #[arg(long, default_value = "RS256")]
+    signature_algorithm: String,
+    #[arg(long, default_value = "2023-06-15-preview")]
+    api_version: String,
+    #[arg(long)]
+    correlation_id: Option<String>,
+    #[arg(long)]
+    access_token: Option<String>,
+    #[arg(long)]
+    managed_identity: bool,
+    #[arg(long)]
+    tenant_id: Option<String>,
+    #[arg(long)]
+    client_id: Option<String>,
+    #[arg(long)]
+    client_secret: Option<String>,
+    #[arg(long)]
+    authority: Option<String>,
+}
+
+#[cfg(feature = "artifact-signing-rest")]
+fn validate_portable_submit_args(args: &ArtifactSigningSubmitPortableArgs) -> Result<()> {
+    let has_tok = args
+        .access_token
+        .as_ref()
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+    let sp_count = (args
+        .tenant_id
+        .as_ref()
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false) as u8)
+        + (args
+            .client_id
+            .as_ref()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false) as u8)
+        + (args
+            .client_secret
+            .as_ref()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false) as u8);
+    if args.managed_identity {
+        if has_tok || sp_count != 0 {
+            return Err(anyhow!(
+                "use either --managed-identity or access token / client credentials, not multiple"
+            ));
+        }
+        return Ok(());
+    }
+    if has_tok {
+        if sp_count != 0 {
+            return Err(anyhow!(
+                "use either --access-token or client credentials tenant/id/secret, not both"
+            ));
+        }
+        return Ok(());
+    }
+    if sp_count != 0 && sp_count != 3 {
+        return Err(anyhow!(
+            "client credentials require all of --tenant-id, --client-id, and --client-secret"
+        ));
+    }
+    if sp_count == 0 {
+        return Err(anyhow!(
+            "choose authentication: --managed-identity, --access-token, or tenant/client-id/client-secret"
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "artifact-signing-rest")]
+fn portable_submit_auth(args: &ArtifactSigningSubmitPortableArgs) -> Result<CodesigningAuth> {
+    let has_tok = args
+        .access_token
+        .as_ref()
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+    if args.managed_identity {
+        return Ok(CodesigningAuth::ManagedIdentity);
+    }
+    if has_tok {
+        return Ok(CodesigningAuth::Bearer(
+            args.access_token.as_ref().unwrap().trim().to_string(),
+        ));
+    }
+    Ok(CodesigningAuth::ClientCredentials {
+        tenant_id: args.tenant_id.as_ref().unwrap().trim().to_string(),
+        client_id: args.client_id.as_ref().unwrap().trim().to_string(),
+        client_secret: args.client_secret.as_ref().unwrap().trim().to_string(),
+    })
+}
+
+#[cfg(feature = "artifact-signing-rest")]
+fn run_portable_artifact_signing_submit(args: ArtifactSigningSubmitPortableArgs) -> Result<()> {
+    validate_portable_submit_args(&args)?;
+    let digest = std::fs::read(&args.digest_file)
+        .with_context(|| format!("read digest file {}", args.digest_file.display()))?;
+    if digest.is_empty() {
+        return Err(anyhow!("digest file is empty"));
+    }
+    let auth = portable_submit_auth(&args)?;
+    let params = CodesigningSubmitParams {
+        region: args.region,
+        account_name: args.account_name,
+        profile_name: args.profile_name,
+        digest,
+        signature_algorithm: args.signature_algorithm,
+        api_version: args.api_version,
+        correlation_id: args.correlation_id,
+        authority: args.authority,
+        auth,
+    };
+    let debug_portable = std::env::var_os("SIGNTOOL_PORTABLE_DEBUG").is_some();
+    let v = submit_codesign_hash_blocking(&params, |msg| {
+        if debug_portable {
+            eprintln!("[debug] {msg}");
+        }
+    })?;
+    println!("{}", serde_json::to_string_pretty(&v)?);
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -264,8 +448,8 @@ fn run_artifact_signing_metadata_check(path: Option<PathBuf>) -> Result<()> {
     if raw.is_empty() {
         return Err(anyhow!("metadata JSON is empty"));
     }
-    let doc: ArtifactSigningMetadataDoc = serde_json::from_slice(&raw)
-        .context("parse Artifact Signing metadata JSON")?;
+    let doc: ArtifactSigningMetadataDoc =
+        serde_json::from_slice(&raw).context("parse Artifact Signing metadata JSON")?;
     if doc.Endpoint.trim().is_empty() {
         return Err(anyhow!("Endpoint must be a non-empty string"));
     }
@@ -307,10 +491,15 @@ fn main() {
 fn run() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::PeDigest { path, algorithm } => {
+        Command::PeDigest {
+            path,
+            algorithm,
+            encoding,
+            output,
+        } => {
             let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
             let digest = pe_authenticode_digest(&bytes, algorithm.into())?;
-            println!("{}", hex_lower(&digest));
+            write_pe_digest_output(encoding, &digest, output.as_deref())?;
         }
         Command::VerifyPe { path } => {
             let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
@@ -435,7 +624,9 @@ fn run() -> Result<()> {
         Command::InspectAuthenticode { path, input } => {
             let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
             let json = match input {
-                InspectInputKind::Pe => serde_json::to_string_pretty(&inspect_pe_authenticode(&bytes)?)?,
+                InspectInputKind::Pe => {
+                    serde_json::to_string_pretty(&inspect_pe_authenticode(&bytes)?)?
+                }
                 InspectInputKind::Pkcs7 => {
                     serde_json::to_string_pretty(&inspect_authenticode_pkcs7_der(&bytes)?)?
                 }
@@ -444,6 +635,10 @@ fn run() -> Result<()> {
         }
         Command::ArtifactSigningMetadataCheck { path } => {
             run_artifact_signing_metadata_check(path)?;
+        }
+        #[cfg(feature = "artifact-signing-rest")]
+        Command::ArtifactSigningSubmit { args } => {
+            run_portable_artifact_signing_submit(args)?;
         }
         Command::CabDigest { path, algorithm } => {
             let data = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
