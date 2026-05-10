@@ -52,3 +52,5 @@ Details: [`migration-azuresigntool.md`](migration-azuresigntool.md).
 ## 4. Roadmap — portable embed + more formats
 
 Ordered backlog (engineering): [`roadmap-authenticode-linux.md`](roadmap-authenticode-linux.md) (Phase 2 stretch: PKCS#7 + PE **`WIN_CERTIFICATE`**, then CAB/MSI/MSIX). SIP coverage limits: [`rust-sip-gaps.md`](rust-sip-gaps.md).
+
+**Library hooks (no CLI yet):** [`signtool-sip-digest::pkcs7`](../crates/signtool-sip-digest/src/pkcs7.rs) exposes **`parse_pe_pkcs7_spc_indirect_data`** (read **`SpcIndirectDataContent`** from an embedded PE PKCS#7) and **`spc_indirect_data_replace_message_digest`** (swap the **`messageDigest`** octets while keeping **`SpcPeImageData`**). Use together with remote signing output when rebuilding **`SignedData`** / **`WIN_CERTIFICATE`** is implemented.
