@@ -34,7 +34,9 @@ use signtool_sip_digest::page_hashes::{self, PageHashAttrKind};
 use signtool_sip_digest::pe_digest::{
     PeAuthenticodeHashKind, pe_authenticode_digest, pe_authenticode_digest_file_ranges,
 };
+use signtool_sip_digest::pe_embed;
 use signtool_sip_digest::pkcs7;
+use signtool_sip_digest::pkcs7_wire;
 use signtool_sip_digest::verify_pe;
 use signtool_sip_digest::verify_script_digest_consistency;
 use std::ffi::OsStr;
@@ -204,6 +206,19 @@ enum Command {
     },
     /// List **`WIN_CERT_TYPE_PKCS_SIGNED_DATA`** PKCS#7 rows in the PE certificate table (**`pkcs7_entries=N`** then **`index=i byte_len=L`** per line).
     ListPePkcs7 { path: PathBuf },
+    /// **Experimental:** Append raw PKCS#7 (**`SignedData`**) DER as a new **`WIN_CERTIFICATE`** row (**`pe_embed`**).
+    ///
+    /// Updates the PE security directory only — **no** **`CheckSum`** fix, **no** PKCS#7 ↔ image digest validation, **no** replacement for **`SignerSignEx3`**. For hybrid tooling (e.g. duplicate-signature layout tests) and future portable sign pipelines.
+    AppendPePkcs7 {
+        /// Input PE path (**read fully** before writing **`--output`**; same path allowed).
+        #[arg(long = "pe", value_name = "PATH")]
+        pe_path: PathBuf,
+        /// PKCS#7 DER file (**bare `SignedData`** is normalized like other portable PKCS#7 paths).
+        #[arg(long = "pkcs7", value_name = "PATH")]
+        pkcs7_path: PathBuf,
+        #[arg(long, value_name = "PATH")]
+        output: PathBuf,
+    },
     /// CAB with embedded PKCS#7: compare indirect digest to Rust CAB hash.
     VerifyCab { path: PathBuf },
     /// Signed MSI: compare PKCS#7 indirect digest to Rust OLE fingerprint (and extended stream if present).
@@ -849,6 +864,28 @@ fn run() -> Result<()> {
             for (i, len) in lens.iter().enumerate() {
                 println!("index={i} byte_len={len}");
             }
+        }
+        Command::AppendPePkcs7 {
+            pe_path,
+            pkcs7_path,
+            output,
+        } => {
+            let pe_image = std::fs::read(&pe_path)
+                .with_context(|| format!("read PE {}", pe_path.display()))?;
+            let pkcs7_raw = std::fs::read(&pkcs7_path)
+                .with_context(|| format!("read {}", pkcs7_path.display()))?;
+            let pkcs7_der = pkcs7_wire::normalize_pkcs7_der_for_authenticode(&pkcs7_raw);
+            let out_image =
+                pe_embed::pe_append_authenticode_pkcs7_certificate(pe_image, pkcs7_der.as_ref())
+                    .with_context(|| {
+                        format!(
+                            "append-pe-pkcs7 {} + {}",
+                            pe_path.display(),
+                            pkcs7_path.display()
+                        )
+                    })?;
+            std::fs::write(&output, &out_image)
+                .with_context(|| format!("write {}", output.display()))?;
         }
         Command::VerifyCab { path } => {
             verify_cab_digest_consistency(&path)

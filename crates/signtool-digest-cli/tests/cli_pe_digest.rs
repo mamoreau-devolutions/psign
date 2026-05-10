@@ -45,6 +45,7 @@ fn help_lists_core_subcommands() {
         "inspect-pe-spc-indirect",
         "extract-pe-pkcs7",
         "list-pe-pkcs7",
+        "append-pe-pkcs7",
     ] {
         assert!(
             out.contains(needle),
@@ -284,6 +285,41 @@ fn extract_pe_pkcs7_index_out_of_range_fails() {
         .arg("--index")
         .arg("1");
     cmd.assert().failure();
+}
+
+#[test]
+fn append_pe_pkcs7_duplicate_row_lists_two_entries() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pe_copy = dir.path().join("a.exe");
+    let pkcs7_path = dir.path().join("sig.der");
+    let out_pe = dir.path().join("b.exe");
+    std::fs::copy(tiny32_fixture(), &pe_copy).expect("copy fixture");
+
+    let mut ext = Command::cargo_bin("signtool-portable").unwrap();
+    ext.arg("extract-pe-pkcs7")
+        .arg(&pe_copy)
+        .arg("--output")
+        .arg(&pkcs7_path);
+    ext.assert().success();
+
+    let mut app = Command::cargo_bin("signtool-portable").unwrap();
+    app.arg("append-pe-pkcs7")
+        .arg("--pe")
+        .arg(&pe_copy)
+        .arg("--pkcs7")
+        .arg(&pkcs7_path)
+        .arg("--output")
+        .arg(&out_pe);
+    app.assert().success();
+
+    let mut lst = Command::cargo_bin("signtool-portable").unwrap();
+    lst.arg("list-pe-pkcs7").arg(&out_pe);
+    let assert = lst.assert().success();
+    let out = std::str::from_utf8(&assert.get_output().stdout).expect("utf8");
+    assert!(
+        out.contains("pkcs7_entries=2"),
+        "expected pkcs7_entries=2, got {out:?}"
+    );
 }
 
 #[test]
