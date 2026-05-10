@@ -338,6 +338,15 @@ fn append_pe_pkcs7_duplicate_row_lists_two_entries() {
         out.contains("pkcs7_entries=2"),
         "expected pkcs7_entries=2, got {out:?}"
     );
+
+    let mut chk = Command::cargo_bin("signtool-portable").unwrap();
+    chk.arg("pe-checksum").arg("--strict").arg(&out_pe);
+    let chk_assert = chk.assert().success();
+    let chk_out = std::str::from_utf8(&chk_assert.get_output().stdout).expect("utf8");
+    assert!(
+        chk_out.contains("match=yes"),
+        "append-pe-pkcs7 output should satisfy pe-checksum --strict, got {chk_out:?}"
+    );
 }
 
 #[test]
