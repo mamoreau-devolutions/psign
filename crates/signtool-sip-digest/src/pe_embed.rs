@@ -1,7 +1,8 @@
 //! Grow the PE attribute certificate table with an additional **`WIN_CERTIFICATE`** wrapping PKCS#7 (**Authenticode**).
 //!
 //! This module performs **file layout only**: it does **not** build a valid CMS **`SignedData`**, re-hash the PE for signing,
-//! update **`Optional Header.CheckSum`**, or match **`SignerSignEx3`** output byte-for-byte. It exists so Linux-side tooling
+//! or match **`SignerSignEx3`** output byte-for-byte. **`pe_append_authenticode_pkcs7_certificate`** does refresh **`CheckSum`**
+//! (**`pe_compute_image_checksum`**) after mutation. It exists so Linux-side tooling
 //! can experiment with **multi-signature** placement and so future portable signers can call into a single embed helper.
 //!
 //! **Layout** matches the Windows **`WIN_CERTIFICATE`** record produced by **`repack_pkcs_signed_win_certificate`** in the Windows-only
@@ -21,6 +22,64 @@ const PE32_MAGIC: u16 = 0x10b;
 const PE32PLUS_MAGIC: u16 = 0x20b;
 
 const IMAGE_DIRECTORY_ENTRY_SECURITY: usize = 4;
+
+/// Byte offset from the start of the optional header to **`CheckSum`** (** DWORD**, PE32 and PE32+).
+const OPTIONAL_HEADER_CHECKSUM_OFFSET: usize = 64;
+
+fn pe_checksum_field_file_offset(pe: &[u8]) -> Result<usize> {
+    let (optional_start, _) = pe_optional_header_start(pe)?;
+    let off = optional_start + OPTIONAL_HEADER_CHECKSUM_OFFSET;
+    if off + 4 > pe.len() {
+        return Err(anyhow!(
+            "PE image truncated before Optional Header CheckSum"
+        ));
+    }
+    Ok(off)
+}
+
+/// Compute the PE **image checksum** (Windows **`CheckSumMappedFile`** / PE loader style).
+///
+/// The **`CheckSum`** field itself is treated as **zero** during the 16-bit_word accumulation; the low 16 bits are folded until
+/// **`≤ 0xffff`**, then **`image.len()`** (**`u32`**) is added (wrapping).
+pub fn pe_compute_image_checksum(image: &[u8]) -> Result<u32> {
+    let check_off = pe_checksum_field_file_offset(image)?;
+    let mut sum: u64 = 0;
+    let mut i = 0usize;
+    while i < image.len() {
+        if i >= check_off && i < check_off + 4 {
+            i = check_off + 4;
+            continue;
+        }
+        if i + 1 < image.len() {
+            sum += u64::from(u16::from_le_bytes([image[i], image[i + 1]]));
+        } else {
+            sum += u64::from(image[i]);
+        }
+        sum = (sum >> 16) + (sum & 0xffff);
+        i += 2;
+    }
+    while (sum >> 16) != 0 {
+        sum = (sum >> 16) + (sum & 0xffff);
+    }
+    Ok((sum as u32).wrapping_add(image.len() as u32))
+}
+
+/// Write **`checksum`** to the optional header **`CheckSum`** field (**little-endian**).
+pub fn pe_write_image_checksum(image: &mut [u8], checksum: u32) -> Result<()> {
+    let off = pe_checksum_field_file_offset(image)?;
+    image[off..off + 4].copy_from_slice(&checksum.to_le_bytes());
+    Ok(())
+}
+
+fn pe_refresh_image_checksum(image: &mut [u8]) -> Result<()> {
+    let c = pe_compute_image_checksum(image)?;
+    pe_write_image_checksum(image, c)?;
+    debug_assert_eq!(
+        pe_compute_image_checksum(image).expect("recompute checksum"),
+        c
+    );
+    Ok(())
+}
 
 /// Wrap **raw PKCS#7** (**`SignedData`**) bytes in a **`WIN_CERTIFICATE`** with **padding to 8-byte alignment** (Windows layout).
 pub fn wrap_pkcs7_der_authenticode_win_certificate(pkcs7_der: &[u8]) -> Vec<u8> {
@@ -115,7 +174,7 @@ fn write_security_data_directory(pe: &mut [u8], cert_file_ptr: u32, cert_size: u
 /// - When a table **already exists**, new bytes are appended immediately after **`VirtualAddress + Size`**; the file is truncated
 ///   first if it is longer than that end offset (defensive).
 ///
-/// **`CheckSum`** is **not** recomputed (left unchanged).
+/// **`Optional Header.CheckSum`** is recomputed after changes (**`pe_compute_image_checksum`**).
 pub fn pe_append_authenticode_pkcs7_certificate(
     mut pe_image: Vec<u8>,
     pkcs7_der: &[u8],
@@ -126,6 +185,7 @@ pub fn pe_append_authenticode_pkcs7_certificate(
         let off = pe_image.len() as u32;
         pe_image.extend_from_slice(&wrapped);
         write_security_data_directory(&mut pe_image, off, wrapped.len() as u32)?;
+        pe_refresh_image_checksum(&mut pe_image)?;
         return Ok(pe_image);
     }
     let start = va as usize;
@@ -151,6 +211,7 @@ pub fn pe_append_authenticode_pkcs7_certificate(
         .checked_add(wrapped.len() as u32)
         .ok_or_else(|| anyhow!("certificate table size overflow"))?;
     write_security_data_directory(&mut pe_image, va, new_size)?;
+    pe_refresh_image_checksum(&mut pe_image)?;
     Ok(pe_image)
 }
 
@@ -206,5 +267,31 @@ mod tests {
             row1_pkcs7, pkcs7_der,
             "second row must wrap the same PKCS#7 bytes"
         );
+        let chk = pe_compute_image_checksum(&out).expect("checksum");
+        let off = pe_checksum_field_file_offset(&out).expect("chk off");
+        assert_eq!(
+            chk,
+            u32::from_le_bytes(out[off..off + 4].try_into().unwrap())
+        );
+    }
+
+    #[test]
+    fn tiny32_signed_fixture_checksum_matches_embedded_header() {
+        let pe =
+            include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi")
+                .as_slice();
+        let off = pe_checksum_field_file_offset(pe).unwrap();
+        let stored = u32::from_le_bytes(pe[off..off + 4].try_into().unwrap());
+        assert_eq!(pe_compute_image_checksum(pe).unwrap(), stored);
+    }
+
+    #[test]
+    fn tiny64_signed_fixture_checksum_matches_embedded_header() {
+        let pe =
+            include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny64.signed.efi")
+                .as_slice();
+        let off = pe_checksum_field_file_offset(pe).unwrap();
+        let stored = u32::from_le_bytes(pe[off..off + 4].try_into().unwrap());
+        assert_eq!(pe_compute_image_checksum(pe).unwrap(), stored);
     }
 }
