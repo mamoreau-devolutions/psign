@@ -7,7 +7,7 @@
 //! [`crate::cab_digest`] (MSCF CAB layout), [`crate::msi_digest`] (OLE compound), [`crate::msix_digest`] (APPX AX\* blob under OID **`1.3.6.1.4.1.311.2.1.30`**), etc. Encoding those payloads into PKCS#7 is the missing producer piece.
 //!
 //! **Milestone:** The **`authenticode`** crate publishes ASN.1 structs (`SpcIndirectDataContent`, `DigestInfo`, …) with `der` **Decode**/**Encode**.
-//! [`parse_pe_pkcs7_spc_indirect_data`] and [`spc_indirect_data_replace_message_digest`] support **Linux-side digest substitution** before a future **`SignedData`** signer assembles countersignatures / PKCS#9 attributes. **`WIN_CERTIFICATE`** embedding remains [`crate::pe_embed`].
+//! [`parse_pe_pkcs7_spc_indirect_data_at`] / [`parse_pe_pkcs7_spc_indirect_data`] and [`spc_indirect_data_replace_message_digest`] support **Linux-side digest substitution** before a future **`SignedData`** signer assembles countersignatures / PKCS#9 attributes. **`WIN_CERTIFICATE`** embedding remains [`crate::pe_embed`].
 
 use anyhow::{Result, anyhow};
 use authenticode::{DigestInfo, SpcIndirectDataContent};
@@ -41,11 +41,14 @@ fn signed_data_from_pkcs7_der(pkcs7_der: &[u8]) -> Result<SignedData> {
         .map_err(|e| anyhow!("SignedData: {e}"))
 }
 
-/// Decode **`SpcIndirectDataContent`** from the first embedded **`WIN_CERT_TYPE_PKCS_SIGNED_DATA`** PKCS#7 on **`pe_image`**.
+/// Decode **`SpcIndirectDataContent`** from the **`pkcs7_index`**-th embedded **`WIN_CERT_TYPE_PKCS_SIGNED_DATA`** PKCS#7 (**`0`** = first), certificate-table order.
 ///
-/// Fails if there is no certificate table, no PKCS#7 entry, or CMS parsing does not yield encapsulated Authenticode content.
-pub fn parse_pe_pkcs7_spc_indirect_data(pe_image: &[u8]) -> Result<SpcIndirectDataContent> {
-    let pkcs7 = crate::verify_pe::pe_first_pkcs7_signed_data_der(pe_image)?;
+/// Fails if there is no certificate table, no PKCS#7 row at **`pkcs7_index`**, or CMS parsing does not yield encapsulated Authenticode content.
+pub fn parse_pe_pkcs7_spc_indirect_data_at(
+    pe_image: &[u8],
+    pkcs7_index: usize,
+) -> Result<SpcIndirectDataContent> {
+    let pkcs7 = crate::verify_pe::pe_nth_pkcs7_signed_data_der(pe_image, pkcs7_index)?;
     let sd = signed_data_from_pkcs7_der(&pkcs7)?;
     let encap_any = sd
         .encap_content_info
@@ -55,6 +58,13 @@ pub fn parse_pe_pkcs7_spc_indirect_data(pe_image: &[u8]) -> Result<SpcIndirectDa
     encap_any
         .decode_as::<SpcIndirectDataContent>()
         .map_err(|e| anyhow!("SpcIndirectDataContent: {e}"))
+}
+
+/// Decode **`SpcIndirectDataContent`** from the **first** embedded PKCS#7 (same as **`pkcs7_index`** **`0`**).
+///
+/// See [`parse_pe_pkcs7_spc_indirect_data_at`] for multi-signed PEs.
+pub fn parse_pe_pkcs7_spc_indirect_data(pe_image: &[u8]) -> Result<SpcIndirectDataContent> {
+    parse_pe_pkcs7_spc_indirect_data_at(pe_image, 0)
 }
 
 /// Clone **`template.data`** (including **`SpcPeImageData`** bits) and replace **`messageDigest.digest`** with **`new_digest`**.
@@ -135,6 +145,22 @@ mod tests {
         let pe_bytes =
             include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny64.signed.efi");
         assert_spc_round_trip_and_digest_matches_sip(pe_bytes);
+    }
+
+    #[test]
+    fn parse_pe_pkcs7_spc_indirect_at_index_zero_matches_helper() {
+        let pe_bytes =
+            include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi");
+        let a = parse_pe_pkcs7_spc_indirect_data(pe_bytes).expect("parse");
+        let b = parse_pe_pkcs7_spc_indirect_data_at(pe_bytes, 0).expect("parse at 0");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn parse_pe_pkcs7_spc_indirect_at_index_one_errors_on_single_signed_fixture() {
+        let pe_bytes =
+            include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi");
+        assert!(parse_pe_pkcs7_spc_indirect_data_at(pe_bytes, 1).is_err());
     }
 
     #[test]
