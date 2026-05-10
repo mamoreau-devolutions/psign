@@ -210,7 +210,7 @@ pub fn signer_info_pkcs9_message_digest_octets(si: &SignerInfo) -> Result<Vec<u8
 ///
 /// **`template`** must already use **`eContentType`** **`authenticode::SPC_INDIRECT_DATA_OBJID`** (Authenticode **`SpcIndirectDataContent`**).
 ///
-/// **Cryptographic note:** Swapping the indirect payload **invalidates** the existing **`SignerInfo`** signature (PKCS#9 **`messageDigest`** / **`contentType`** attrs no longer match **`encryptedDigest`**). Use for **tests**, **`verify-pe`** negative cases, or pipelines that also rebuild **`SignerInfo`** and signature octets (remote signing).
+/// **Cryptographic note:** Swapping the indirect payload **invalidates** the existing **`SignerInfo`** signature (PKCS#9 **`messageDigest`** / **`contentType`** attrs no longer match **`encryptedDigest`**). **`cms_digest_encapsulated_econtent_bytes_from_signed_data`** then disagrees with **`signer_info_pkcs9_message_digest_octets`** until authenticated attributes are rebuilt — regression **`replace_encap_only_leaves_pkcs9_message_digest_stale_vs_fresh_econtent_hash`**. Use for **tests**, **`verify-pe`** negative cases, or pipelines that also rebuild **`SignerInfo`** and signature octets (remote signing).
 pub fn signed_data_replace_encapsulated_spc_indirect(
     template: &SignedData,
     indirect: &SpcIndirectDataContent,
@@ -269,6 +269,31 @@ mod tests {
         let pe_bytes =
             include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny64.signed.efi");
         assert_cms_encap_digest_matches_pkcs9(pe_bytes);
+    }
+
+    // Encap-only swap: PKCS#9 messageDigest in SignerInfo stays stale until attrs + signature rebuild.
+    #[test]
+    fn replace_encap_only_leaves_pkcs9_message_digest_stale_vs_fresh_econtent_hash() {
+        let pe_bytes =
+            include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi");
+        let pkcs7 = crate::verify_pe::pe_nth_pkcs7_signed_data_der(pe_bytes, 0).expect("pkcs7");
+        let sd = parse_pkcs7_signed_data_der(&pkcs7).expect("SignedData");
+        let indirect = parse_pe_pkcs7_spc_indirect_data(pe_bytes).expect("indirect");
+        let mut flipped_digest = indirect.message_digest.digest.as_bytes().to_vec();
+        flipped_digest[0] ^= 0xff;
+        let flipped =
+            spc_indirect_data_replace_message_digest(&indirect, &flipped_digest).expect("flip");
+        let sd_new =
+            signed_data_replace_encapsulated_spc_indirect(&sd, &flipped).expect("replace encap");
+
+        let si = sd_new.signer_infos.0.as_slice().first().expect("SignerInfo");
+        let fresh_encap_digest =
+            cms_digest_encapsulated_econtent_bytes_from_signed_data(&sd_new).expect("encap hash");
+        let stale_pkcs9 = signer_info_pkcs9_message_digest_octets(si).expect("pkcs9");
+        assert_ne!(
+            fresh_encap_digest, stale_pkcs9,
+            "SignerInfo still carries old PKCS#9 messageDigest after encap-only swap"
+        );
     }
 
     fn assert_spc_round_trip_and_digest_matches_sip(pe_bytes: &[u8]) {
