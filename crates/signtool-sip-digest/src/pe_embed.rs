@@ -71,6 +71,14 @@ pub fn pe_write_image_checksum(image: &mut [u8], checksum: u32) -> Result<()> {
     Ok(())
 }
 
+/// Read **`Optional Header.CheckSum`** (**little-endian**) without validating it.
+pub fn pe_read_image_checksum(image: &[u8]) -> Result<u32> {
+    let off = pe_checksum_field_file_offset(image)?;
+    Ok(u32::from_le_bytes(image[off..off + 4].try_into().map_err(
+        |_| anyhow!("PE optional header CheckSum field truncated"),
+    )?))
+}
+
 fn pe_refresh_image_checksum(image: &mut [u8]) -> Result<()> {
     let c = pe_compute_image_checksum(image)?;
     pe_write_image_checksum(image, c)?;
@@ -280,8 +288,7 @@ mod tests {
         let pe =
             include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi")
                 .as_slice();
-        let off = pe_checksum_field_file_offset(pe).unwrap();
-        let stored = u32::from_le_bytes(pe[off..off + 4].try_into().unwrap());
+        let stored = pe_read_image_checksum(pe).unwrap();
         assert_eq!(pe_compute_image_checksum(pe).unwrap(), stored);
     }
 
@@ -290,8 +297,7 @@ mod tests {
         let pe =
             include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny64.signed.efi")
                 .as_slice();
-        let off = pe_checksum_field_file_offset(pe).unwrap();
-        let stored = u32::from_le_bytes(pe[off..off + 4].try_into().unwrap());
+        let stored = pe_read_image_checksum(pe).unwrap();
         assert_eq!(pe_compute_image_checksum(pe).unwrap(), stored);
     }
 }
