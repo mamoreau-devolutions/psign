@@ -40,7 +40,7 @@ jobs:
         run: cargo test -p signtool-authenticode-trust --lib --locked
 
       - name: Codesigning REST crate tests (no Win32)
-        run: cargo test -p signtool-codesigning-rest --lib --locked
+        run: cargo test -p signtool-codesigning-rest --locked
 
       - name: Azure KV REST crate tests (no Win32)
         run: cargo test -p signtool-azure-kv-rest --locked

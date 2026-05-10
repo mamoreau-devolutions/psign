@@ -418,6 +418,7 @@ fn run_portable_artifact_signing_submit(args: ArtifactSigningSubmitPortableArgs)
         correlation_id: args.correlation_id,
         authority: args.authority,
         auth,
+        endpoint_base_url: None,
     };
     let debug_portable = std::env::var_os("SIGNTOOL_PORTABLE_DEBUG").is_some();
     let v = submit_codesign_hash_blocking(&params, |msg| {

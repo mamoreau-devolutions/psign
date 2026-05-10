@@ -35,6 +35,20 @@ pub struct CodesigningSubmitParams {
     pub correlation_id: Option<String>,
     pub authority: Option<String>,
     pub auth: CodesigningAuth,
+    /// Override data-plane origin (scheme + host and optional port), no trailing slash.
+    /// Default: `https://{region}.codesigning.azure.net`. Used by integration tests;
+    /// omit in production unless pointing at a non-standard endpoint.
+    pub endpoint_base_url: Option<String>,
+}
+
+fn data_plane_base_url(params: &CodesigningSubmitParams) -> String {
+    if let Some(ref u) = params.endpoint_base_url {
+        let t = u.trim().trim_end_matches('/');
+        if !t.is_empty() {
+            return t.to_string();
+        }
+    }
+    format!("https://{}.codesigning.azure.net", params.region.trim())
 }
 
 fn normalize_authority(authority: Option<&str>) -> String {
@@ -173,12 +187,12 @@ pub fn submit_codesign_hash_blocking(
         .build()
         .map_err(|e| anyhow!("HTTP client: {e}"))?;
 
-    let region = params.region.trim();
+    let base = data_plane_base_url(params);
     let account = params.account_name.trim();
     let profile = params.profile_name.trim();
     let api = params.api_version.trim();
     let submit_url = format!(
-        "https://{region}.codesigning.azure.net/codesigningaccounts/{account}/certificateprofiles/{profile}:sign?api-version={api}",
+        "{base}/codesigningaccounts/{account}/certificateprofiles/{profile}:sign?api-version={api}",
     );
 
     let body = serde_json::json!({
@@ -223,7 +237,7 @@ pub fn submit_codesign_hash_blocking(
         loc
     } else if let Some(id) = accept_json.get("id").and_then(|v| v.as_str()) {
         format!(
-            "https://{region}.codesigning.azure.net/codesigningaccounts/{account}/certificateprofiles/{profile}/sign/{id}?api-version={api}",
+            "{base}/codesigningaccounts/{account}/certificateprofiles/{profile}/sign/{id}?api-version={api}",
         )
     } else {
         return Ok(accept_json);
@@ -250,6 +264,7 @@ mod tests {
             correlation_id: None,
             authority: None,
             auth: CodesigningAuth::Bearer("  ".into()),
+            endpoint_base_url: None,
         };
         assert!(acquire_codesigning_token(&p).is_err());
     }
