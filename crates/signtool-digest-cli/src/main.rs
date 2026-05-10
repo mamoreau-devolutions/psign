@@ -208,7 +208,7 @@ enum Command {
     ListPePkcs7 { path: PathBuf },
     /// **Experimental:** Append raw PKCS#7 (**`SignedData`**) DER as a new **`WIN_CERTIFICATE`** row (**`pe_embed`**).
     ///
-    /// Updates the PE security directory only — **no** **`CheckSum`** fix, **no** PKCS#7 ↔ image digest validation, **no** replacement for **`SignerSignEx3`**. For hybrid tooling (e.g. duplicate-signature layout tests) and future portable sign pipelines.
+    /// Updates the PE security directory and recomputes **`Optional Header.CheckSum`** (**`pe_compute_image_checksum`**). Does **not** validate PKCS#7 ↔ image digest or replace **`SignerSignEx3`**. For hybrid tooling and future portable sign pipelines.
     AppendPePkcs7 {
         /// Input PE path (**read fully** before writing **`--output`**; same path allowed).
         #[arg(long = "pe", value_name = "PATH")]

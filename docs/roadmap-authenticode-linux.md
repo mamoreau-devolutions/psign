@@ -31,7 +31,7 @@ The primary `signtool-rs` binary is **Windows-first**: it depends on **`windows`
 
 Order-of-effort sketch (each step needs tests + fixtures):
 
-1. **Portable CMS producer** — Finish **`SignedData`** assembly for **PE** (`SpcIndirectData` + **`WIN_CERTIFICATE`** embed) using existing **`pe_digest`** / helpers in [`pkcs7.rs`](../crates/signtool-sip-digest/src/pkcs7.rs). **`pe_embed`** already **`wrap`**/**append** PKCS#7 rows (grow cert table); remaining work is **CMS encode**, **checksum**, and **unsigned→signed** parity.
+1. **Portable CMS producer** — Finish **`SignedData`** assembly for **PE** (`SpcIndirectData` + **`WIN_CERTIFICATE`** embed) using existing **`pe_digest`** / helpers in [`pkcs7.rs`](../crates/signtool-sip-digest/src/pkcs7.rs). **`pe_embed`** **`wrap`**/**append** PKCS#7 rows and recomputes **`CheckSum`** (**`pe_compute_image_checksum`**); remaining work is **CMS encode** and **unsigned→signed** parity.
 2. **Remote signing adapters on Unix** — Small **`reqwest`** clients mirroring **`azure_kv_sign.rs`** (KV `keys/sign`) and **`artifact_signing_rest.rs`** (codesigning `:sign` LRO) behind Cargo features, emitting **raw signature bytes** for step (1).
 3. **Additional embedders** — CAB, MSI streams, MSIX ZIP manipulation (hardest: **`AppxSipCreateIndirectData`**-equivalent APPX blob + publisher binding rules).
 4. **RFC3161 request/sign** — Replace stub [`timestamp.rs`](../crates/signtool-sip-digest/src/timestamp.rs) for post-sign or nested countersignatures.
