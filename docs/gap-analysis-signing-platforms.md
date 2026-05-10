@@ -39,7 +39,7 @@ Legend: **Sign** = produce/embed Authenticode; **WT verify** = `WinVerifyTrust`-
 | **Linux verify + digest parity for many Authenticode formats** | Supported | **`signtool-portable`** covers PE, CAB, MSI, ESD/WIM, cleartext MSIX, catalog, scripts; **`trust-verify-*`** adds anchor-based CMS trust (see [`authenticode-trust-stack.md`](authenticode-trust-stack.md)). |
 | **Maximum Authenticode subject formats** | Windows signs all SIP-registered types Rust can digest-check | **Encrypted MSIX**, **VBA/mso**, **extension SIP DLLs**, **standalone `.p7x`** subject handling — see [`rust-sip-gaps.md`](rust-sip-gaps.md). |
 
-**Practical Linux path today:** Use **`signtool-portable`** for **digest computation**, **`:sign` REST** (**`artifact-signing-submit`** with **`--features artifact-signing-rest`**), **inspect**, and **verify/trust** across supported formats. **Embed** Authenticode (PKCS#7 into the subject) still requires **`signtool-windows`** / **`SignerSignEx3`** (or native **`signtool.exe`**) until portable CMS+embed lands. **AzureSignTool**-style Key Vault signing remains **Windows-only** in this repo. Cookbook: [`linux-signing-pipelines.md`](linux-signing-pipelines.md).
+**Practical Linux path today:** Use **`signtool-portable`** for **digest computation**, **Key Vault `keys/sign`** on digest files (**`azure-key-vault-sign-digest`** with **`--features azure-kv-sign-portable`**), **`:sign` REST** (**`artifact-signing-submit`** with **`--features artifact-signing-rest`**), **inspect**, and **verify/trust** across supported formats. **Embed** Authenticode (PKCS#7 into the subject) still requires **`signtool-windows`** / **`SignerSignEx3`** (or native **`signtool.exe`**) until portable CMS+embed lands. Cookbook: [`linux-signing-pipelines.md`](linux-signing-pipelines.md).
 
 **Long-term Linux signing** (if required): implement portable **CMS `SignedData` production** + **format-specific embedding** (PE `WIN_CERTIFICATE`, CAB PKCS#7 placement, MSI digital signature streams, MSIX `ContentTypes` / manifest glue, etc.) and combine with **remote signing** (KV REST, Artifact Signing `:sign` LRO). Work is tracked as PKCS#7 encode stubs in [`crates/signtool-sip-digest/src/pkcs7.rs`](crates/signtool-sip-digest/src/pkcs7.rs) and [`pe_embed.rs`](crates/signtool-sip-digest/src/pe_embed.rs).
 
@@ -104,6 +104,8 @@ Details: [`migration-azuresigntool.md`](migration-azuresigntool.md).
 
 **Commands (verify / inspect / digest tools):** See [`roadmap-authenticode-linux.md`](roadmap-authenticode-linux.md) and **`signtool-portable --help`**.
 
+**Remote signing steps (no embed):** With **`--features azure-kv-sign-portable`**, **`azure-key-vault-sign-digest`** performs Azure Key Vault **`keys/sign`** on a **raw digest file** (same REST shape as AzureSignTool’s remote step). With **`--features artifact-signing-rest`**, **`artifact-signing-submit`** calls Trusted Signing **`:sign`**. Neither writes PKCS#7 into a PE/CAB/MSI subject without **`signtool-windows`** (or future portable CMS embed).
+
 **Formats with portable digest + PKCS#7 consistency (and optional trust):**
 
 - PE / WinMD-style CLI metadata
@@ -114,7 +116,7 @@ Details: [`migration-azuresigntool.md`](migration-azuresigntool.md).
 - Catalog `.cat` (CMS digest consistency; not full CTL membership / `CryptCATAdmin` policy)
 - PowerShell-class scripts, WSH `.js`/`.vbs`/`.wsf` (heuristic strip/hash — may diverge from COM Unicode conversion edge cases)
 
-**Not signing:** No **`sign`**, **`timestamp`**, **`remove`**, KV, or dlib.
+**Not full Authenticode lifecycle:** No **`sign`** / **`timestamp`** / **`remove`** verbs, no **`--dlib`** decoupled DLL path, and no embedding **SignedData** into subjects on Linux (see PKCS#7 stubs in **`signtool-sip-digest`**).
 
 ---
 

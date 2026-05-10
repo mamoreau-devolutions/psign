@@ -50,8 +50,18 @@ Map decompiled types to this repo:
 | Likely AzureSignTool concern | Rust analogue |
 |------------------------------|---------------|
 | Key Vault **`keys/sign`** HTTP / auth | [`src/win/azure_kv_sign.rs`](../src/win/azure_kv_sign.rs) |
-| Digest algorithms / PKCS#1 padding | `kv_signature_alg`, RSA vs EC branches |
+| Digest algorithms / JWS alg (**RS256** / **ES256**, …) | [`signtool-azure-kv-rest`](../crates/signtool-azure-kv-rest/src/lib.rs) **`kv_jws_alg`**, RSA vs EC from **`cer`** DER |
 | Batch / HRESULT exits | `SignArgs`, `--exit-codes azuresigntool` |
+
+## ilspycmd (.NET Artifact Signing client libraries)
+
+NuGet packages such as **`Microsoft.ArtifactSigning.Client`** ship managed DLLs (REST LRO, metadata helpers). Extract the package, then:
+
+```powershell
+ilspycmd -p -o .\artifact-client-decompiled Microsoft.ArtifactSigning.Client.dll
+```
+
+Compare HTTP shapes and JSON models to [`crates/signtool-codesigning-rest`](../crates/signtool-codesigning-rest/) (**`:sign`** LRO, OAuth scope **`https://codesigning.azure.net/.default`**). Native **`Azure.CodeSigning.Dlib.dll`** remains PE — use **IDA** on a writable copy (above).
 
 ## Relating reversing work to Linux signing
 
