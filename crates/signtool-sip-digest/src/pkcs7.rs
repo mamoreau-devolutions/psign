@@ -7,14 +7,15 @@
 //! [`crate::cab_digest`] (MSCF CAB layout), [`crate::msi_digest`] (OLE compound), [`crate::msix_digest`] (APPX AX\* blob under OID **`1.3.6.1.4.1.311.2.1.30`**), etc. Encoding those payloads into PKCS#7 is the missing producer piece; [`crate::pe_embed`] can append **`WIN_CERTIFICATE`** rows once PKCS#7 DER exists.
 //!
 //! **Milestone:** The **`authenticode`** crate publishes ASN.1 structs (`SpcIndirectDataContent`, `DigestInfo`, …) with `der` **Decode**/**Encode**.
-//! [`parse_pe_pkcs7_spc_indirect_data_at`] / [`parse_pe_pkcs7_spc_indirect_data`] and [`spc_indirect_data_replace_message_digest`] support **Linux-side digest substitution** before a future **`SignedData`** signer assembles countersignatures / PKCS#9 attributes. [`cms_digest_encapsulated_econtent_bytes`] and [`signer_info_pkcs9_message_digest_octets`] pin **RFC 5652 §5.4** **`eContent`** hashing to PKCS#9 **`messageDigest`** on fixtures (RustCrypto **`cms` SignerInfoBuilder** semantics). [`signer_info_signed_attributes_sequence_der`] yields the **`SET OF Attribute`** octets for §5.4 authenticated-attribute signing. **`WIN_CERTIFICATE`** embedding remains [`crate::pe_embed`].
+//! [`parse_pe_pkcs7_spc_indirect_data_at`] / [`parse_pe_pkcs7_spc_indirect_data`] and [`spc_indirect_data_replace_message_digest`] support **Linux-side digest substitution** before a future **`SignedData`** signer assembles countersignatures / PKCS#9 attributes. [`cms_digest_encapsulated_econtent_bytes`] and [`signer_info_pkcs9_message_digest_octets`] pin **RFC 5652 §5.4** **`eContent`** hashing to PKCS#9 **`messageDigest`** on fixtures (RustCrypto **`cms` SignerInfoBuilder** semantics). [`signer_info_signed_attributes_sequence_der`] yields the **`SET OF Attribute`** octets for §5.4 authenticated-attribute signing; [`signed_attributes_replace_pkcs9_message_digest`] refreshes PKCS#9 **`messageDigest`** after **`encapContentInfo`** changes (**`encryptedDigest`** still requires re-sign). **`WIN_CERTIFICATE`** embedding remains [`crate::pe_embed`].
 
 use anyhow::{Result, anyhow};
 use authenticode::{DigestInfo, SpcIndirectDataContent};
 use cms::content_info::ContentInfo;
-use cms::signed_data::{SignedData, SignerInfo};
-use der::asn1::{Any, ObjectIdentifier, OctetString};
-use der::{Decode, Encode, Reader, SliceReader};
+use cms::signed_data::{SignedAttributes, SignedData, SignerInfo};
+use der::asn1::{Any, ObjectIdentifier, OctetString, OctetStringRef, SetOfVec};
+use der::{Decode, Encode, Reader, SliceReader, Tag};
+use x509_cert::attr::Attribute;
 use digest::Digest as _;
 
 /// CMS **`signedData`** content type OID (`id-signedData`).
@@ -224,11 +225,55 @@ pub fn signer_info_signed_attributes_sequence_der(si: &SignerInfo) -> Result<Vec
     Ok(out)
 }
 
+fn pkcs9_message_digest_attribute(new_digest: &[u8]) -> Result<Attribute> {
+    let md_der = OctetStringRef::new(new_digest)
+        .map_err(|e| anyhow!("messageDigest OCTET STRING ref: {e}"))?;
+    let val = Any::new(Tag::OctetString, md_der.as_bytes())
+        .map_err(|e| anyhow!("PKCS#9 messageDigest AttributeValue ANY: {e}"))?;
+    let mut values = SetOfVec::new();
+    values
+        .insert(val)
+        .map_err(|e| anyhow!("SET OF AttributeValue insert: {e}"))?;
+    Ok(Attribute {
+        oid: PKCS9_MESSAGE_DIGEST_OID,
+        values,
+    })
+}
+
+/// Clone authenticated **`SET OF Attribute`** and replace PKCS#9 **`messageDigest`** (**[`PKCS9_MESSAGE_DIGEST_OID`]**) with **`new_message_digest`**.
+///
+/// **`SET`** element ordering is re-canonicalized via **`SetOfVec::try_from`** (DER ordering). Encoding matches RustCrypto **`cms`** **`create_message_digest_attribute`** (**`builder`** feature; **RFC 5652** §11.2).
+///
+/// **`SignerInfo.encryptedDigest`** remains invalid until the key signs the updated authenticated-attribute **`SET`** (**RFC 5652** §5.4).
+pub fn signed_attributes_replace_pkcs9_message_digest(
+    attrs: &SignedAttributes,
+    new_message_digest: &[u8],
+) -> Result<SignedAttributes> {
+    let mut found = false;
+    let mut out = Vec::with_capacity(attrs.len());
+    for attr in attrs.iter() {
+        if attr.oid == PKCS9_MESSAGE_DIGEST_OID {
+            found = true;
+            out.push(pkcs9_message_digest_attribute(new_message_digest)?);
+        } else {
+            out.push(attr.clone());
+        }
+    }
+    if !found {
+        return Err(anyhow!(
+            "authenticated attributes contain no PKCS#9 messageDigest ({})",
+            PKCS9_MESSAGE_DIGEST_OID
+        ));
+    }
+    SetOfVec::try_from(out)
+        .map_err(|e| anyhow!("SignedAttributes SET OF Attribute canonicalization: {e}"))
+}
+
 /// Replace **`SignedData.encapContentInfo.eContent`** with **`indirect`** while keeping **`digestAlgorithms`**, **`certificates`**, **`crls`**, and **`signerInfos`** unchanged.
 ///
 /// **`template`** must already use **`eContentType`** **`authenticode::SPC_INDIRECT_DATA_OBJID`** (Authenticode **`SpcIndirectDataContent`**).
 ///
-/// **Cryptographic note:** Swapping the indirect payload **invalidates** the existing **`SignerInfo`** signature (PKCS#9 **`messageDigest`** / **`contentType`** attrs no longer match **`encryptedDigest`**). **`cms_digest_encapsulated_econtent_bytes_from_signed_data`** then disagrees with **`signer_info_pkcs9_message_digest_octets`** until authenticated attributes are rebuilt — regression **`replace_encap_only_leaves_pkcs9_message_digest_stale_vs_fresh_econtent_hash`**. Use for **tests**, **`verify-pe`** negative cases, or pipelines that also rebuild **`SignerInfo`** and signature octets (remote signing).
+/// **Cryptographic note:** Swapping the indirect payload **invalidates** the existing **`SignerInfo`** signature (PKCS#9 **`messageDigest`** / **`contentType`** attrs no longer match **`encryptedDigest`**). **`cms_digest_encapsulated_econtent_bytes_from_signed_data`** then disagrees with **`signer_info_pkcs9_message_digest_octets`** until authenticated attributes are rebuilt (**[`signed_attributes_replace_pkcs9_message_digest`]**) — regression **`replace_encap_only_leaves_pkcs9_message_digest_stale_vs_fresh_econtent_hash`**. Use for **tests**, **`verify-pe`** negative cases, or pipelines that also rebuild **`SignerInfo`** and signature octets (remote signing).
 pub fn signed_data_replace_encapsulated_spc_indirect(
     template: &SignedData,
     indirect: &SpcIndirectDataContent,
@@ -315,6 +360,36 @@ mod tests {
                 "SET OF Attribute DER round-trip"
             );
         }
+    }
+
+    #[test]
+    fn replace_pkcs9_message_digest_realigns_with_encap_hash_after_indirect_swap() {
+        let pe_bytes =
+            include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi");
+        let pkcs7 = crate::verify_pe::pe_nth_pkcs7_signed_data_der(pe_bytes, 0).expect("pkcs7");
+        let sd = parse_pkcs7_signed_data_der(&pkcs7).expect("SignedData");
+        let indirect = parse_pe_pkcs7_spc_indirect_data(pe_bytes).expect("indirect");
+        let mut flipped_digest = indirect.message_digest.digest.as_bytes().to_vec();
+        flipped_digest[0] ^= 0xff;
+        let flipped =
+            spc_indirect_data_replace_message_digest(&indirect, &flipped_digest).expect("flip");
+        let sd_new =
+            signed_data_replace_encapsulated_spc_indirect(&sd, &flipped).expect("replace encap");
+        let fresh =
+            cms_digest_encapsulated_econtent_bytes_from_signed_data(&sd_new).expect("encap digest");
+
+        let si = sd_new.signer_infos.0.as_slice().first().expect("SignerInfo");
+        let attrs = si.signed_attrs.as_ref().expect("signed_attrs");
+        let fixed_attrs =
+            signed_attributes_replace_pkcs9_message_digest(attrs, &fresh).expect("replace pkcs9 md");
+
+        let mut si_fixed = si.clone();
+        si_fixed.signed_attrs = Some(fixed_attrs);
+        assert_eq!(
+            signer_info_pkcs9_message_digest_octets(&si_fixed).expect("pkcs9"),
+            fresh,
+            "PKCS#9 messageDigest must match fresh CMS eContent hash after attr rewrite"
+        );
     }
 
     // Encap-only swap: PKCS#9 messageDigest in SignerInfo stays stale until attrs + signature rebuild.
