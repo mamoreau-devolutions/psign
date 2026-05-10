@@ -30,7 +30,7 @@ Hand-rolled COFF/optional-header traversal was deferred: **`object`** + the **`a
 | `verify_pe.rs` | Compare recomputed digest vs PKCS#7 indirect data for each embedded Authenticode cert |
 | `cab_digest.rs`, `catalog_digest.rs`, `msi_digest.rs`, `esd_digest.rs`, `msix_digest.rs` | Format-specific SIP digest recomputation |
 | `ps_script.rs`, `wsh_script.rs` | Script strip/hash heuristics vs PKCS#7 |
-| `pkcs7.rs` | **`SignedData`** decode, **`ContentInfo`** DER encode from **`SignedData`**, **`SpcIndirectDataContent`** parse/replace + DER encode helpers; **new** portable **`SignerInfo`** assembly still TODO |
+| `pkcs7.rs` | **`SignedData`** decode (**`parse_pkcs7_signed_data_der`**), **`ContentInfo`** DER encode (**`encode_pkcs7_content_info_signed_data_der`**), **`SpcIndirectDataContent`** parse/replace + DER encode helpers; **new** portable **`SignerInfo`** assembly still TODO |
 | `pe_embed.rs` | **`WIN_CERTIFICATE`** PKCS#7 wrap, attribute-cert **append**, optional-header **`CheckSum`** recompute (**`pe_compute_image_checksum`**) |
 | `timestamp.rs` | RFC3161 embed notes — **stub** (Tier 1b) |
 | `page_hashes.rs` | PE page-hash CMS extract + Authenticode payload peel / flat table parse (Tier 1c); segment verify still Win32 |

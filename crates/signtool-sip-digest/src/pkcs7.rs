@@ -45,7 +45,11 @@ pub fn encode_pkcs7_content_info_signed_data_der(sd: &SignedData) -> Result<Vec<
         .map_err(|e| anyhow!("encode ContentInfo: {e}"))
 }
 
-fn signed_data_from_pkcs7_der(pkcs7_der: &[u8]) -> Result<SignedData> {
+/// Decode **`SignedData`** from PKCS#7 DER (**outer `ContentInfo`** with **`contentType`** **`id-signedData`**).
+///
+/// Accepts the same blob layout as embedded PE **`WIN_CERT_TYPE_PKCS_SIGNED_DATA`** rows (after optional
+/// [`crate::pkcs7_wire::normalize_pkcs7_der_for_authenticode`] trimming).
+pub fn parse_pkcs7_signed_data_der(pkcs7_der: &[u8]) -> Result<SignedData> {
     let normalized = crate::pkcs7_wire::normalize_pkcs7_der_for_authenticode(pkcs7_der);
     let bytes = normalized.as_ref();
     let mut r = SliceReader::new(bytes).map_err(|_| anyhow!("empty PKCS#7"))?;
@@ -69,7 +73,7 @@ pub fn parse_pe_pkcs7_spc_indirect_data_at(
     pkcs7_index: usize,
 ) -> Result<SpcIndirectDataContent> {
     let pkcs7 = crate::verify_pe::pe_nth_pkcs7_signed_data_der(pe_image, pkcs7_index)?;
-    let sd = signed_data_from_pkcs7_der(&pkcs7)?;
+    let sd = parse_pkcs7_signed_data_der(&pkcs7)?;
     let encap_any = sd
         .encap_content_info
         .econtent
@@ -188,7 +192,7 @@ mod tests {
         let pe_bytes =
             include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi");
         let pkcs7 = crate::verify_pe::pe_nth_pkcs7_signed_data_der(pe_bytes, 0).expect("pkcs7");
-        let sd = signed_data_from_pkcs7_der(&pkcs7).expect("SignedData");
+        let sd = parse_pkcs7_signed_data_der(&pkcs7).expect("SignedData");
         let der = sd.to_der().expect("to_der");
         let again = SignedData::from_der(der.as_slice()).expect("from_der");
         assert_eq!(sd, again);

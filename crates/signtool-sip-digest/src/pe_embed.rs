@@ -226,6 +226,10 @@ pub fn pe_append_authenticode_pkcs7_certificate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pkcs7::{
+        encode_pkcs7_content_info_signed_data_der, parse_pe_pkcs7_spc_indirect_data,
+        parse_pe_pkcs7_spc_indirect_data_at, parse_pkcs7_signed_data_der,
+    };
     use crate::verify_pe::{pe_nth_pkcs7_signed_data_der, pe_pkcs7_signed_data_entry_count};
 
     #[test]
@@ -248,6 +252,51 @@ mod tests {
         assert_eq!(
             u16::from_le_bytes(w[6..8].try_into().unwrap()),
             WIN_CERT_TYPE_PKCS_SIGNED_DATA
+        );
+    }
+
+    #[test]
+    fn append_reencoded_pkcs7_row_matches_spc_indirect_and_checksum() {
+        let pe_bytes =
+            include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi")
+                .as_slice();
+        let row0 = pe_nth_pkcs7_signed_data_der(pe_bytes, 0).expect("row0 pkcs7");
+        let sd = parse_pkcs7_signed_data_der(&row0).expect("SignedData");
+        let reencoded = encode_pkcs7_content_info_signed_data_der(&sd).expect("reencode");
+
+        let indirect0 = parse_pe_pkcs7_spc_indirect_data(pe_bytes).expect("indirect 0");
+        let out =
+            pe_append_authenticode_pkcs7_certificate(pe_bytes.to_vec(), reencoded.as_slice())
+                .expect("append reencoded");
+        assert_eq!(pe_pkcs7_signed_data_entry_count(&out).unwrap(), 2);
+        assert_eq!(
+            pe_nth_pkcs7_signed_data_der(&out, 0).unwrap(),
+            row0,
+            "first WIN_CERTIFICATE row unchanged"
+        );
+
+        let indirect1 =
+            parse_pe_pkcs7_spc_indirect_data_at(&out, 1).expect("indirect from appended row");
+        assert_eq!(
+            indirect0, indirect1,
+            "cms re-encode must preserve Authenticode SpcIndirectDataContent"
+        );
+
+        let row1 = pe_nth_pkcs7_signed_data_der(&out, 1).expect("row1");
+        let row1_pkcs7 = crate::pkcs7_wire::pkcs7_outer_sequence_prefix(&row1)
+            .expect("row1 PKCS#7 SEQUENCE prefix");
+        let re_norm = crate::pkcs7_wire::normalize_pkcs7_der_for_authenticode(&reencoded);
+        assert_eq!(
+            row1_pkcs7,
+            re_norm.as_ref(),
+            "appended row must match normalized re-encoded PKCS#7 bytes"
+        );
+
+        let chk = pe_compute_image_checksum(&out).expect("checksum");
+        let off = pe_checksum_field_file_offset(&out).expect("chk off");
+        assert_eq!(
+            chk,
+            u32::from_le_bytes(out[off..off + 4].try_into().unwrap())
         );
     }
 
