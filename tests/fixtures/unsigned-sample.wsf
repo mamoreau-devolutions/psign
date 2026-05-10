@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<package>
+  <job id="signtool-rs-parity-fixture">
+    <script language="JScript"><![CDATA[
+void 0;
+]]></script>
+  </job>
+</package>

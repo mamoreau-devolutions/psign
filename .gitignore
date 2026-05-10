@@ -1,0 +1,10 @@
+/target/
+/vendor/
+/parity-output/
+# Legacy local dir name (keep binary copies + IDA artifacts out of git)
+/reversing/
+/docs/ida-api-map.md
+/tests/fixtures/private/
+.env
+# Local CI artifact unpack / agent scratch dirs
+tmp-ci-*/

@@ -1,0 +1,27 @@
+name: rust-sip-parity
+
+on:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+  schedule:
+    - cron: "15 7 * * 0"
+
+jobs:
+  rust-sip-golden:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: SIP digest crate (full portable lib tests)
+        run: cargo test -p signtool-sip-digest --lib --locked
+
+      - name: Portable digest CLI (PE fixtures)
+        run: cargo test -p signtool-digest-cli --locked
+
+      - name: Optional signing parity (machine env)
+        shell: pwsh
+        run: ./scripts/rust-sip-parity-pe.ps1 -WorkspaceRoot "${{ github.workspace }}"

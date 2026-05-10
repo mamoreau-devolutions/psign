@@ -1,0 +1,63 @@
+# Optional parity tiers that need extra inputs (decoupled digest DLL/metadata, catalog files).
+# Configure repository secrets then run from Actions → Parity extensions → Run workflow.
+name: parity-extensions
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_msix_decoupled:
+        description: Run MSIX decoupled (/dlib + /dmdf) parity via msix-parity-sign.ps1
+        type: boolean
+        default: false
+      run_catalog_verify:
+        description: Run Rust catalog verify against SIGNTOOL_RS_CATALOG_* secrets
+        type: boolean
+        default: false
+
+jobs:
+  msix-decoupled:
+    if: ${{ inputs.run_msix_decoupled }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build -p signtool-rs --bin signtool-rs
+      - name: Bootstrap Devolutions test PKI + pack minimal MSIX
+        shell: pwsh
+        env:
+          SIGNTOOL_RS_MSIX_DLIB: ${{ secrets.SIGNTOOL_RS_MSIX_DLIB }}
+          SIGNTOOL_RS_MSIX_DMDF: ${{ secrets.SIGNTOOL_RS_MSIX_DMDF }}
+        run: |
+          if (-not $env:SIGNTOOL_RS_MSIX_DLIB -or -not $env:SIGNTOOL_RS_MSIX_DMDF) {
+            throw "Set repository secrets SIGNTOOL_RS_MSIX_DLIB and SIGNTOOL_RS_MSIX_DMDF."
+          }
+          ./scripts/ci/bootstrap-devolutions-authenticode.ps1 -EmitGithubEnv
+          $ws = "${{ github.workspace }}"
+          $exe = Join-Path $ws "target\debug\signtool-rs.exe"
+          $rt = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }
+          $msix = Join-Path $rt "signtool_rs_extension_decoupled.msix"
+          ./scripts/ci/pack-minimal-msix.ps1 -WorkspaceRoot $ws -PeAsExecutable $exe -OutputMsix $msix
+          $env:SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE = $msix
+          ./scripts/msix-parity-sign.ps1 -UseDecoupledDigest -FailOnSemantic
+
+  catalog-verify:
+    if: ${{ inputs.run_catalog_verify }}
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build -p signtool-rs --bin signtool-rs
+      - name: Catalog verify (Rust)
+        shell: pwsh
+        env:
+          SIGNTOOL_RS_CATALOG_TARGET: ${{ secrets.SIGNTOOL_RS_CATALOG_TARGET }}
+          SIGNTOOL_RS_CATALOG_FILE: ${{ secrets.SIGNTOOL_RS_CATALOG_FILE }}
+        run: |
+          if (-not $env:SIGNTOOL_RS_CATALOG_TARGET -or -not $env:SIGNTOOL_RS_CATALOG_FILE) {
+            throw "Set repository secrets SIGNTOOL_RS_CATALOG_TARGET and SIGNTOOL_RS_CATALOG_FILE."
+          }
+          $rust = Join-Path "${{ github.workspace }}" "target\debug\signtool-rs.exe"
+          & $rust verify $env:SIGNTOOL_RS_CATALOG_TARGET --catalog $env:SIGNTOOL_RS_CATALOG_FILE
+          if ($LASTEXITCODE -ne 0) { throw "Catalog verify failed with exit $LASTEXITCODE" }
+          & $rust verify $env:SIGNTOOL_RS_CATALOG_TARGET --catalog $env:SIGNTOOL_RS_CATALOG_FILE --os-version-check "386:10.0.26100.0"
+          if ($LASTEXITCODE -ne 0) { throw "Catalog verify with --os-version-check failed with exit $LASTEXITCODE" }

@@ -1,0 +1,1157 @@
+#![cfg(windows)]
+
+use assert_cmd::prelude::*;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+#[test]
+#[ignore = "requires native signtool.exe and local fixture"]
+fn verify_matches_native_exit_code_for_known_signed_binary() {
+    let fixture =
+        Path::new(r"C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe");
+    if !fixture.exists() {
+        return;
+    }
+
+    let native = Command::new(native_signtool())
+        .arg("verify")
+        .arg("/pa")
+        .arg(fixture)
+        .output()
+        .expect("failed to execute native signtool");
+
+    let rust = Command::cargo_bin("signtool-rs")
+        .expect("binary available")
+        .arg("verify")
+        .arg("--policy")
+        .arg("pa")
+        .arg(fixture)
+        .output()
+        .expect("failed to execute signtool-rs");
+
+    assert_eq!(native.status.success(), rust.status.success());
+}
+
+#[test]
+#[ignore = "requires native signtool.exe and local fixture"]
+fn verify_default_policy_matches_native_failure() {
+    let fixture =
+        Path::new(r"C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe");
+    if !fixture.exists() {
+        return;
+    }
+
+    let native = Command::new(native_signtool())
+        .arg("verify")
+        .arg(fixture)
+        .output()
+        .expect("failed to execute native signtool");
+
+    let rust = Command::cargo_bin("signtool-rs")
+        .expect("binary available")
+        .arg("verify")
+        .arg("--policy")
+        .arg("default")
+        .arg(fixture)
+        .output()
+        .expect("failed to execute signtool-rs");
+
+    assert_eq!(native.status.success(), rust.status.success());
+}
+
+fn env_path(name: &str) -> Option<String> {
+    std::env::var(name).ok().filter(|v| !v.trim().is_empty())
+}
+
+fn native_signtool() -> &'static str {
+    r"C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe"
+}
+
+fn native_signtool_optional_path() -> Option<PathBuf> {
+    env_path("SIGNTOOL_EXE")
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .or_else(|| {
+            let p = PathBuf::from(native_signtool());
+            p.exists().then_some(p)
+        })
+}
+
+#[test]
+#[ignore = "requires SIGNTOOL_RS_UNSIGNED_FIXTURE,SIGNTOOL_RS_TEST_PFX,SIGNTOOL_RS_TEST_PFX_PASSWORD"]
+fn sign_semantic_parity_creates_verifiable_signature() {
+    let unsigned = match env_path("SIGNTOOL_RS_UNSIGNED_FIXTURE") {
+        Some(v) => v,
+        None => return,
+    };
+    let pfx = match env_path("SIGNTOOL_RS_TEST_PFX") {
+        Some(v) => v,
+        None => return,
+    };
+    let pfx_password = env_path("SIGNTOOL_RS_TEST_PFX_PASSWORD");
+    let signed_out = std::env::temp_dir().join("signtool_rs_signed_semantic.exe");
+    let _ = std::fs::copy(&unsigned, &signed_out).expect("copy unsigned fixture");
+
+    let mut rust = Command::cargo_bin("signtool-rs").expect("binary available");
+    rust.arg("sign")
+        .arg("--pfx")
+        .arg(&pfx)
+        .arg("--digest")
+        .arg("sha256")
+        .arg(&signed_out);
+    if let Some(p) = pfx_password {
+        rust.arg("--password").arg(p);
+    }
+    let rust_out = rust.output().expect("run signtool-rs sign");
+    assert!(
+        rust_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rust_out.stderr)
+    );
+
+    let native = Command::new(native_signtool())
+        .arg("verify")
+        .arg("/pa")
+        .arg(&signed_out)
+        .output()
+        .expect("run native verify");
+    assert!(
+        native.status.success(),
+        "{}",
+        String::from_utf8_lossy(&native.stdout)
+    );
+}
+
+#[test]
+#[ignore = "requires SIGNTOOL_RS_SIGNED_FIXTURE and SIGNTOOL_RS_TIMESTAMP_URL"]
+fn timestamp_semantic_parity_adds_countersignature() {
+    let signed_fixture = match env_path("SIGNTOOL_RS_SIGNED_FIXTURE") {
+        Some(v) => v,
+        None => return,
+    };
+    let tsa = match env_path("SIGNTOOL_RS_TIMESTAMP_URL") {
+        Some(v) => v,
+        None => return,
+    };
+    let ts_out = std::env::temp_dir().join("signtool_rs_timestamp_semantic.exe");
+    let _ = std::fs::copy(&signed_fixture, &ts_out).expect("copy signed fixture");
+
+    let rust = Command::cargo_bin("signtool-rs")
+        .expect("binary available")
+        .arg("timestamp")
+        .arg("--rfc3161-url")
+        .arg(&tsa)
+        .arg("--digest")
+        .arg("sha256")
+        .arg(&ts_out)
+        .output()
+        .expect("run signtool-rs timestamp");
+    assert!(
+        rust.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rust.stderr)
+    );
+
+    let native = Command::new(native_signtool())
+        .arg("verify")
+        .arg("/pa")
+        .arg("/v")
+        .arg(&ts_out)
+        .output()
+        .expect("run native verify after timestamp");
+    let out = String::from_utf8_lossy(&native.stdout).to_ascii_lowercase();
+    assert!(
+        native.status.success(),
+        "{}",
+        String::from_utf8_lossy(&native.stdout)
+    );
+    assert!(out.contains("rfc3161") || out.contains("timestamp"));
+}
+
+#[test]
+#[ignore = "requires SIGNTOOL_RS_DETACHED_CONTENT and SIGNTOOL_RS_DETACHED_PKCS7"]
+fn detached_semantic_parity_matches_native_integrity() {
+    let content = match env_path("SIGNTOOL_RS_DETACHED_CONTENT") {
+        Some(v) => v,
+        None => return,
+    };
+    let sig = match env_path("SIGNTOOL_RS_DETACHED_PKCS7") {
+        Some(v) => v,
+        None => return,
+    };
+    let rust = Command::cargo_bin("signtool-rs")
+        .expect("binary available")
+        .args(["verify", "--policy", "pa", "--allow-test-root"])
+        .arg(&content)
+        .arg("--detached-pkcs7")
+        .arg(&sig)
+        .output()
+        .expect("run rust detached verify");
+    assert!(
+        rust.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rust.stderr)
+    );
+}
+
+#[test]
+#[ignore = "requires SIGNTOOL_RS_CATALOG_TARGET and SIGNTOOL_RS_CATALOG_FILE"]
+fn catalog_semantic_path_executes_in_rust() {
+    let target = match env_path("SIGNTOOL_RS_CATALOG_TARGET") {
+        Some(v) => v,
+        None => return,
+    };
+    let catalog = match env_path("SIGNTOOL_RS_CATALOG_FILE") {
+        Some(v) => v,
+        None => return,
+    };
+    let rust = Command::cargo_bin("signtool-rs")
+        .expect("binary available")
+        .arg("verify")
+        .arg(&target)
+        .arg("--catalog")
+        .arg(&catalog)
+        .output()
+        .expect("run rust catalog verify");
+    assert!(
+        rust.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rust.stderr)
+    );
+
+    let rust_os = Command::cargo_bin("signtool-rs")
+        .expect("binary available")
+        .args(["verify", "--os-version-check", "386:10.0.26100.0"])
+        .arg(&target)
+        .arg("--catalog")
+        .arg(&catalog)
+        .output()
+        .expect("run rust catalog verify with os-version-check");
+    assert!(
+        rust_os.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rust_os.stderr)
+    );
+}
+
+#[test]
+#[ignore = "requires SIGNTOOL_RS_MULTISIG_FIXTURE"]
+fn multisig_verify_path_executes_in_rust() {
+    let fixture = match env_path("SIGNTOOL_RS_MULTISIG_FIXTURE") {
+        Some(v) => v,
+        None => return,
+    };
+    let rust = Command::cargo_bin("signtool-rs")
+        .expect("binary available")
+        .arg("verify")
+        .arg(fixture)
+        .arg("--all-signatures")
+        .output()
+        .expect("run rust multisig verify");
+    assert!(
+        rust.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rust.stderr)
+    );
+}
+
+#[test]
+#[ignore = "requires SIGNTOOL_RS_REVOCATION_FIXTURE"]
+fn revocation_policy_path_executes() {
+    let fixture = match env_path("SIGNTOOL_RS_REVOCATION_FIXTURE") {
+        Some(v) => v,
+        None => return,
+    };
+    let rust = Command::cargo_bin("signtool-rs")
+        .expect("binary available")
+        .arg("verify")
+        .arg(fixture)
+        .arg("--policy")
+        .arg("default")
+        .arg("--revocation-check")
+        .output()
+        .expect("run rust verify with revocation");
+    let _ = rust.status.code();
+}
+
+#[test]
+#[ignore = "requires SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE,SIGNTOOL_RS_MSIX_TEST_PFX,SIGNTOOL_RS_MSIX_TIMESTAMP_URL"]
+fn msix_sign_with_rfc3161_timestamp_executes() {
+    let unsigned_msix = match env_path("SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE") {
+        Some(v) => v,
+        None => return,
+    };
+    let pfx = match env_path("SIGNTOOL_RS_MSIX_TEST_PFX") {
+        Some(v) => v,
+        None => return,
+    };
+    let tsa = match env_path("SIGNTOOL_RS_MSIX_TIMESTAMP_URL") {
+        Some(v) => v,
+        None => return,
+    };
+    let pfx_password = env_path("SIGNTOOL_RS_MSIX_TEST_PFX_PASSWORD");
+    let out = std::env::temp_dir().join("signtool_rs_msix_semantic.msix");
+    let _ = std::fs::copy(&unsigned_msix, &out).expect("copy unsigned msix");
+
+    let mut rust = Command::cargo_bin("signtool-rs").expect("binary available");
+    rust.arg("sign")
+        .arg("--pfx")
+        .arg(&pfx)
+        .arg("--digest")
+        .arg("sha256")
+        .arg("--timestamp-url")
+        .arg(&tsa)
+        .arg("--timestamp-digest")
+        .arg("sha256");
+    if let Some(pw) = pfx_password {
+        rust.arg("--password").arg(pw);
+    }
+    rust.arg(&out);
+    let rust_out = rust.output().expect("run signtool-rs msix sign");
+    assert!(
+        rust_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rust_out.stderr)
+    );
+}
+
+#[test]
+#[ignore = "requires SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE and SIGNTOOL_RS_MSIX_TEST_PFX"]
+fn msix_sign_requires_timestamp_url() {
+    let unsigned_msix = match env_path("SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE") {
+        Some(v) => v,
+        None => return,
+    };
+    let pfx = match env_path("SIGNTOOL_RS_MSIX_TEST_PFX") {
+        Some(v) => v,
+        None => return,
+    };
+    let out = std::env::temp_dir().join("signtool_rs_msix_notimestamp.msix");
+    let _ = std::fs::copy(&unsigned_msix, &out).expect("copy unsigned msix");
+    let rust = Command::cargo_bin("signtool-rs")
+        .expect("binary available")
+        .arg("sign")
+        .arg("--pfx")
+        .arg(&pfx)
+        .arg("--digest")
+        .arg("sha256")
+        .arg(&out)
+        .output()
+        .expect("run signtool-rs msix sign without timestamp");
+    assert!(!rust.status.success());
+}
+
+#[test]
+#[ignore = "requires SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE,SIGNTOOL_RS_MSIX_TEST_PFX,SIGNTOOL_RS_MSIX_TIMESTAMP_URL,SIGNTOOL_RS_MSIX_DLIB,SIGNTOOL_RS_MSIX_DMDF"]
+fn msix_dlib_dmdf_path_executes() {
+    let unsigned_msix = match env_path("SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE") {
+        Some(v) => v,
+        None => return,
+    };
+    let pfx = match env_path("SIGNTOOL_RS_MSIX_TEST_PFX") {
+        Some(v) => v,
+        None => return,
+    };
+    let tsa = match env_path("SIGNTOOL_RS_MSIX_TIMESTAMP_URL") {
+        Some(v) => v,
+        None => return,
+    };
+    let dlib = match env_path("SIGNTOOL_RS_MSIX_DLIB") {
+        Some(v) => v,
+        None => return,
+    };
+    let dmdf = match env_path("SIGNTOOL_RS_MSIX_DMDF") {
+        Some(v) => v,
+        None => return,
+    };
+    let pfx_password = env_path("SIGNTOOL_RS_MSIX_TEST_PFX_PASSWORD");
+    let out = std::env::temp_dir().join("signtool_rs_msix_decoupled.msix");
+    let _ = std::fs::copy(&unsigned_msix, &out).expect("copy unsigned msix");
+
+    let mut rust = Command::cargo_bin("signtool-rs").expect("binary available");
+    rust.arg("sign")
+        .arg("--pfx")
+        .arg(&pfx)
+        .arg("--digest")
+        .arg("sha256")
+        .arg("--timestamp-url")
+        .arg(&tsa)
+        .arg("--timestamp-digest")
+        .arg("sha256")
+        .arg("--dlib")
+        .arg(&dlib)
+        .arg("--dmdf")
+        .arg(&dmdf)
+        .arg("--page-hashes");
+    if let Some(pw) = pfx_password {
+        rust.arg("--password").arg(pw);
+    }
+    rust.arg(&out);
+    let rust_out = rust.output().expect("run signtool-rs msix dlib/dmdf sign");
+    assert!(
+        rust_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rust_out.stderr)
+    );
+}
+
+/// PowerShell `.ps1`: same Windows SIP stack as native (`SignerSignEx3`). Bytes may differ (PKCS#7
+/// encoding); native `verify /pa` must accept the Rust-signed file.
+#[test]
+#[ignore = "requires SIGNTOOL_RS_TEST_PFX; native signtool.exe; optional SIGNTOOL_RS_TEST_PFX_PASSWORD and SIGNTOOL_RS_PS1_UNSIGNED_FIXTURE"]
+fn ps1_sign_aligns_with_native_sip_stack() {
+    let pfx = match env_path("SIGNTOOL_RS_TEST_PFX") {
+        Some(v) => v,
+        None => return,
+    };
+    let Some(native_exe) = native_signtool_optional_path() else {
+        return;
+    };
+    let ps1_src = env_path("SIGNTOOL_RS_PS1_UNSIGNED_FIXTURE")
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| {
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/unsigned-sample.ps1")
+        });
+    if !ps1_src.exists() {
+        return;
+    }
+    let tmp_nat = std::env::temp_dir().join("signtool_rs_ps1_itest_native.ps1");
+    let tmp_rust = std::env::temp_dir().join("signtool_rs_ps1_itest_rust.ps1");
+    let _ = std::fs::copy(&ps1_src, &tmp_nat).expect("copy native ps1 temp");
+    let _ = std::fs::copy(&ps1_src, &tmp_rust).expect("copy rust ps1 temp");
+
+    let pw = env_path("SIGNTOOL_RS_TEST_PFX_PASSWORD");
+
+    let mut native_cmd = Command::new(&native_exe);
+    native_cmd
+        .arg("sign")
+        .arg("/fd")
+        .arg("SHA256")
+        .arg("/f")
+        .arg(&pfx)
+        .arg(&tmp_nat);
+    if let Some(ref p) = pw {
+        native_cmd.arg("/p").arg(p);
+    }
+    let native_out = native_cmd.output().expect("native sign ps1");
+    assert!(
+        native_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&native_out.stderr)
+    );
+
+    let mut rust_cmd = Command::cargo_bin("signtool-rs").expect("binary available");
+    rust_cmd
+        .arg("sign")
+        .arg("--pfx")
+        .arg(&pfx)
+        .arg("--digest")
+        .arg("sha256")
+        .arg(&tmp_rust);
+    if let Some(p) = pw {
+        rust_cmd.arg("--password").arg(p);
+    }
+    let rust_out = rust_cmd.output().expect("rust sign ps1");
+    assert!(
+        rust_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rust_out.stderr)
+    );
+
+    let nat_bytes = std::fs::read(&tmp_nat).expect("read native signed");
+    let rust_bytes = std::fs::read(&tmp_rust).expect("read rust signed");
+
+    let nv_rust = Command::new(&native_exe)
+        .arg("verify")
+        .arg("/pa")
+        .arg(&tmp_rust)
+        .output()
+        .expect("native verify rust-signed ps1");
+    assert!(
+        nv_rust.status.success(),
+        "{}",
+        String::from_utf8_lossy(&nv_rust.stdout)
+    );
+
+    if nat_bytes != rust_bytes {
+        let nv_nat = Command::new(&native_exe)
+            .arg("verify")
+            .arg("/pa")
+            .arg(&tmp_nat)
+            .output()
+            .expect("native verify native-signed ps1");
+        assert!(
+            nv_nat.status.success(),
+            "{}",
+            String::from_utf8_lossy(&nv_nat.stdout)
+        );
+    }
+}
+
+/// PowerShell `.psm1`: same Windows SIP as `.ps1`.
+#[test]
+#[ignore = "requires SIGNTOOL_RS_TEST_PFX; native signtool.exe; optional SIGNTOOL_RS_TEST_PFX_PASSWORD and SIGNTOOL_RS_PSM1_UNSIGNED_FIXTURE"]
+fn psm1_sign_aligns_with_native_sip_stack() {
+    let pfx = match env_path("SIGNTOOL_RS_TEST_PFX") {
+        Some(v) => v,
+        None => return,
+    };
+    let Some(native_exe) = native_signtool_optional_path() else {
+        return;
+    };
+    let src = env_path("SIGNTOOL_RS_PSM1_UNSIGNED_FIXTURE")
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| {
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/unsigned-sample.psm1")
+        });
+    if !src.exists() {
+        return;
+    }
+    let tmp_nat = std::env::temp_dir().join("signtool_rs_psm1_itest_native.psm1");
+    let tmp_rust = std::env::temp_dir().join("signtool_rs_psm1_itest_rust.psm1");
+    let _ = std::fs::copy(&src, &tmp_nat).expect("copy native psm1 temp");
+    let _ = std::fs::copy(&src, &tmp_rust).expect("copy rust psm1 temp");
+
+    let pw = env_path("SIGNTOOL_RS_TEST_PFX_PASSWORD");
+
+    let mut native_cmd = Command::new(&native_exe);
+    native_cmd
+        .arg("sign")
+        .arg("/fd")
+        .arg("SHA256")
+        .arg("/f")
+        .arg(&pfx)
+        .arg(&tmp_nat);
+    if let Some(ref p) = pw {
+        native_cmd.arg("/p").arg(p);
+    }
+    let native_out = native_cmd.output().expect("native sign psm1");
+    assert!(
+        native_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&native_out.stderr)
+    );
+
+    let mut rust_cmd = Command::cargo_bin("signtool-rs").expect("binary available");
+    rust_cmd
+        .arg("sign")
+        .arg("--pfx")
+        .arg(&pfx)
+        .arg("--digest")
+        .arg("sha256")
+        .arg(&tmp_rust);
+    if let Some(p) = pw {
+        rust_cmd.arg("--password").arg(p);
+    }
+    let rust_out = rust_cmd.output().expect("rust sign psm1");
+    assert!(
+        rust_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rust_out.stderr)
+    );
+
+    let nat_bytes = std::fs::read(&tmp_nat).expect("read native signed");
+    let rust_bytes = std::fs::read(&tmp_rust).expect("read rust signed");
+
+    let nv_rust = Command::new(&native_exe)
+        .arg("verify")
+        .arg("/pa")
+        .arg(&tmp_rust)
+        .output()
+        .expect("native verify rust-signed psm1");
+    assert!(
+        nv_rust.status.success(),
+        "{}",
+        String::from_utf8_lossy(&nv_rust.stdout)
+    );
+
+    if nat_bytes != rust_bytes {
+        let nv_nat = Command::new(&native_exe)
+            .arg("verify")
+            .arg("/pa")
+            .arg(&tmp_nat)
+            .output()
+            .expect("native verify native-signed psm1");
+        assert!(
+            nv_nat.status.success(),
+            "{}",
+            String::from_utf8_lossy(&nv_nat.stdout)
+        );
+    }
+}
+
+/// PowerShell manifest `.psd1`: same Windows SIP as `.ps1`.
+#[test]
+#[ignore = "requires SIGNTOOL_RS_TEST_PFX; native signtool.exe; optional SIGNTOOL_RS_TEST_PFX_PASSWORD and SIGNTOOL_RS_PSD1_UNSIGNED_FIXTURE"]
+fn psd1_sign_aligns_with_native_sip_stack() {
+    let pfx = match env_path("SIGNTOOL_RS_TEST_PFX") {
+        Some(v) => v,
+        None => return,
+    };
+    let Some(native_exe) = native_signtool_optional_path() else {
+        return;
+    };
+    let src = env_path("SIGNTOOL_RS_PSD1_UNSIGNED_FIXTURE")
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| {
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/unsigned-sample.psd1")
+        });
+    if !src.exists() {
+        return;
+    }
+    let tmp_nat = std::env::temp_dir().join("signtool_rs_psd1_itest_native.psd1");
+    let tmp_rust = std::env::temp_dir().join("signtool_rs_psd1_itest_rust.psd1");
+    let _ = std::fs::copy(&src, &tmp_nat).expect("copy native psd1 temp");
+    let _ = std::fs::copy(&src, &tmp_rust).expect("copy rust psd1 temp");
+
+    let pw = env_path("SIGNTOOL_RS_TEST_PFX_PASSWORD");
+
+    let mut native_cmd = Command::new(&native_exe);
+    native_cmd
+        .arg("sign")
+        .arg("/fd")
+        .arg("SHA256")
+        .arg("/f")
+        .arg(&pfx)
+        .arg(&tmp_nat);
+    if let Some(ref p) = pw {
+        native_cmd.arg("/p").arg(p);
+    }
+    let native_out = native_cmd.output().expect("native sign psd1");
+    assert!(
+        native_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&native_out.stderr)
+    );
+
+    let mut rust_cmd = Command::cargo_bin("signtool-rs").expect("binary available");
+    rust_cmd
+        .arg("sign")
+        .arg("--pfx")
+        .arg(&pfx)
+        .arg("--digest")
+        .arg("sha256")
+        .arg(&tmp_rust);
+    if let Some(p) = pw {
+        rust_cmd.arg("--password").arg(p);
+    }
+    let rust_out = rust_cmd.output().expect("rust sign psd1");
+    assert!(
+        rust_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rust_out.stderr)
+    );
+
+    let nat_bytes = std::fs::read(&tmp_nat).expect("read native signed");
+    let rust_bytes = std::fs::read(&tmp_rust).expect("read rust signed");
+
+    let nv_rust = Command::new(&native_exe)
+        .arg("verify")
+        .arg("/pa")
+        .arg(&tmp_rust)
+        .output()
+        .expect("native verify rust-signed psd1");
+    assert!(
+        nv_rust.status.success(),
+        "{}",
+        String::from_utf8_lossy(&nv_rust.stdout)
+    );
+
+    if nat_bytes != rust_bytes {
+        let nv_nat = Command::new(&native_exe)
+            .arg("verify")
+            .arg("/pa")
+            .arg(&tmp_nat)
+            .output()
+            .expect("native verify native-signed psd1");
+        assert!(
+            nv_nat.status.success(),
+            "{}",
+            String::from_utf8_lossy(&nv_nat.stdout)
+        );
+    }
+}
+
+/// Windows Installer `.msi`: OS SIP (`msisip.dll`); same `SignerSignEx3` / `WinVerifyTrust` stack as native.
+#[test]
+#[ignore = "requires SIGNTOOL_RS_MSI_UNSIGNED_FIXTURE and SIGNTOOL_RS_TEST_PFX; native signtool.exe; optional SIGNTOOL_RS_TEST_PFX_PASSWORD and SIGNTOOL_RS_MSI_TIMESTAMP_URL"]
+fn msi_sign_aligns_with_native_sip_stack() {
+    let msi_src = match env_path("SIGNTOOL_RS_MSI_UNSIGNED_FIXTURE") {
+        Some(v) => PathBuf::from(v),
+        None => return,
+    };
+    if !msi_src.exists() {
+        return;
+    }
+    let pfx = match env_path("SIGNTOOL_RS_TEST_PFX") {
+        Some(v) => v,
+        None => return,
+    };
+    let Some(native_exe) = native_signtool_optional_path() else {
+        return;
+    };
+    let tmp_nat = std::env::temp_dir().join("signtool_rs_msi_itest_native.msi");
+    let tmp_rust = std::env::temp_dir().join("signtool_rs_msi_itest_rust.msi");
+    let _ = std::fs::copy(&msi_src, &tmp_nat).expect("copy native msi temp");
+    let _ = std::fs::copy(&msi_src, &tmp_rust).expect("copy rust msi temp");
+
+    let pw = env_path("SIGNTOOL_RS_TEST_PFX_PASSWORD");
+    let ts = env_path("SIGNTOOL_RS_MSI_TIMESTAMP_URL");
+
+    let mut native_cmd = Command::new(&native_exe);
+    native_cmd
+        .arg("sign")
+        .arg("/fd")
+        .arg("SHA256")
+        .arg("/f")
+        .arg(&pfx)
+        .arg(&tmp_nat);
+    if let Some(ref p) = pw {
+        native_cmd.arg("/p").arg(p);
+    }
+    if let Some(ref u) = ts {
+        native_cmd.arg("/tr").arg(u).arg("/td").arg("SHA256");
+    }
+    let native_out = native_cmd.output().expect("native sign msi");
+    assert!(
+        native_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&native_out.stderr)
+    );
+
+    let mut rust_cmd = Command::cargo_bin("signtool-rs").expect("binary available");
+    rust_cmd
+        .arg("sign")
+        .arg("--pfx")
+        .arg(&pfx)
+        .arg("--digest")
+        .arg("sha256")
+        .arg(&tmp_rust);
+    if let Some(p) = pw {
+        rust_cmd.arg("--password").arg(p);
+    }
+    if let Some(u) = ts {
+        rust_cmd
+            .arg("--timestamp-url")
+            .arg(u)
+            .arg("--timestamp-digest")
+            .arg("sha256");
+    }
+    let rust_out = rust_cmd.output().expect("rust sign msi");
+    assert!(
+        rust_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rust_out.stderr)
+    );
+
+    let nat_bytes = std::fs::read(&tmp_nat).expect("read native signed");
+    let rust_bytes = std::fs::read(&tmp_rust).expect("read rust signed");
+
+    let nv_rust = Command::new(&native_exe)
+        .arg("verify")
+        .arg("/pa")
+        .arg(&tmp_rust)
+        .output()
+        .expect("native verify rust-signed msi");
+    assert!(
+        nv_rust.status.success(),
+        "{}",
+        String::from_utf8_lossy(&nv_rust.stdout)
+    );
+
+    if nat_bytes != rust_bytes {
+        let nv_nat = Command::new(&native_exe)
+            .arg("verify")
+            .arg("/pa")
+            .arg(&tmp_nat)
+            .output()
+            .expect("native verify native-signed msi");
+        assert!(
+            nv_nat.status.success(),
+            "{}",
+            String::from_utf8_lossy(&nv_nat.stdout)
+        );
+    }
+}
+
+/// Windows metadata `.winmd`: PE-based CLI assembly; OS Authenticode SIP (`SignerSignEx3` / `WinVerifyTrust`).
+#[test]
+#[ignore = "requires SIGNTOOL_RS_WINMD_UNSIGNED_FIXTURE and SIGNTOOL_RS_TEST_PFX; native signtool.exe; optional SIGNTOOL_RS_TEST_PFX_PASSWORD and SIGNTOOL_RS_WINMD_TIMESTAMP_URL"]
+fn winmd_sign_aligns_with_native_sip_stack() {
+    let winmd_src = match env_path("SIGNTOOL_RS_WINMD_UNSIGNED_FIXTURE") {
+        Some(v) => PathBuf::from(v),
+        None => return,
+    };
+    if !winmd_src.exists() {
+        return;
+    }
+    let pfx = match env_path("SIGNTOOL_RS_TEST_PFX") {
+        Some(v) => v,
+        None => return,
+    };
+    let Some(native_exe) = native_signtool_optional_path() else {
+        return;
+    };
+    let tmp_nat = std::env::temp_dir().join("signtool_rs_winmd_itest_native.winmd");
+    let tmp_rust = std::env::temp_dir().join("signtool_rs_winmd_itest_rust.winmd");
+    let _ = std::fs::copy(&winmd_src, &tmp_nat).expect("copy native winmd temp");
+    let _ = std::fs::copy(&winmd_src, &tmp_rust).expect("copy rust winmd temp");
+
+    let pw = env_path("SIGNTOOL_RS_TEST_PFX_PASSWORD");
+    let ts = env_path("SIGNTOOL_RS_WINMD_TIMESTAMP_URL");
+
+    let mut native_cmd = Command::new(&native_exe);
+    native_cmd
+        .arg("sign")
+        .arg("/fd")
+        .arg("SHA256")
+        .arg("/f")
+        .arg(&pfx)
+        .arg(&tmp_nat);
+    if let Some(ref p) = pw {
+        native_cmd.arg("/p").arg(p);
+    }
+    if let Some(ref u) = ts {
+        native_cmd.arg("/tr").arg(u).arg("/td").arg("SHA256");
+    }
+    let native_out = native_cmd.output().expect("native sign winmd");
+    assert!(
+        native_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&native_out.stderr)
+    );
+
+    let mut rust_cmd = Command::cargo_bin("signtool-rs").expect("binary available");
+    rust_cmd
+        .arg("sign")
+        .arg("--pfx")
+        .arg(&pfx)
+        .arg("--digest")
+        .arg("sha256")
+        .arg(&tmp_rust);
+    if let Some(p) = pw {
+        rust_cmd.arg("--password").arg(p);
+    }
+    if let Some(u) = ts {
+        rust_cmd
+            .arg("--timestamp-url")
+            .arg(u)
+            .arg("--timestamp-digest")
+            .arg("sha256");
+    }
+    let rust_out = rust_cmd.output().expect("rust sign winmd");
+    assert!(
+        rust_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rust_out.stderr)
+    );
+
+    let nat_bytes = std::fs::read(&tmp_nat).expect("read native signed winmd");
+    let rust_bytes = std::fs::read(&tmp_rust).expect("read rust signed winmd");
+
+    let nv_rust = Command::new(&native_exe)
+        .arg("verify")
+        .arg("/pa")
+        .arg(&tmp_rust)
+        .output()
+        .expect("native verify rust-signed winmd");
+    assert!(
+        nv_rust.status.success(),
+        "{}",
+        String::from_utf8_lossy(&nv_rust.stdout)
+    );
+
+    if nat_bytes != rust_bytes {
+        let nv_nat = Command::new(&native_exe)
+            .arg("verify")
+            .arg("/pa")
+            .arg(&tmp_nat)
+            .output()
+            .expect("native verify native-signed winmd");
+        assert!(
+            nv_nat.status.success(),
+            "{}",
+            String::from_utf8_lossy(&nv_nat.stdout)
+        );
+    }
+}
+
+/// Windows Script Host `.js`: OS SIP when registered (same stack as native `signtool`).
+#[test]
+#[ignore = "requires SIGNTOOL_RS_TEST_PFX; native signtool.exe; optional SIGNTOOL_RS_TEST_PFX_PASSWORD and SIGNTOOL_RS_JS_UNSIGNED_FIXTURE"]
+fn js_sign_aligns_with_native_sip_stack() {
+    let pfx = match env_path("SIGNTOOL_RS_TEST_PFX") {
+        Some(v) => v,
+        None => return,
+    };
+    let Some(native_exe) = native_signtool_optional_path() else {
+        return;
+    };
+    let js_src = env_path("SIGNTOOL_RS_JS_UNSIGNED_FIXTURE")
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| {
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/unsigned-sample.js")
+        });
+    if !js_src.exists() {
+        return;
+    }
+    let tmp_nat = std::env::temp_dir().join("signtool_rs_js_itest_native.js");
+    let tmp_rust = std::env::temp_dir().join("signtool_rs_js_itest_rust.js");
+    let _ = std::fs::copy(&js_src, &tmp_nat).expect("copy native js temp");
+    let _ = std::fs::copy(&js_src, &tmp_rust).expect("copy rust js temp");
+
+    let pw = env_path("SIGNTOOL_RS_TEST_PFX_PASSWORD");
+
+    let mut native_cmd = Command::new(&native_exe);
+    native_cmd
+        .arg("sign")
+        .arg("/fd")
+        .arg("SHA256")
+        .arg("/f")
+        .arg(&pfx)
+        .arg(&tmp_nat);
+    if let Some(ref p) = pw {
+        native_cmd.arg("/p").arg(p);
+    }
+    let native_out = native_cmd.output().expect("native sign js");
+    assert!(
+        native_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&native_out.stderr)
+    );
+
+    let mut rust_cmd = Command::cargo_bin("signtool-rs").expect("binary available");
+    rust_cmd
+        .arg("sign")
+        .arg("--pfx")
+        .arg(&pfx)
+        .arg("--digest")
+        .arg("sha256")
+        .arg(&tmp_rust);
+    if let Some(p) = pw {
+        rust_cmd.arg("--password").arg(p);
+    }
+    let rust_out = rust_cmd.output().expect("rust sign js");
+    assert!(
+        rust_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rust_out.stderr)
+    );
+
+    let nat_bytes = std::fs::read(&tmp_nat).expect("read native signed");
+    let rust_bytes = std::fs::read(&tmp_rust).expect("read rust signed");
+
+    let nv_rust = Command::new(&native_exe)
+        .arg("verify")
+        .arg("/pa")
+        .arg(&tmp_rust)
+        .output()
+        .expect("native verify rust-signed js");
+    assert!(
+        nv_rust.status.success(),
+        "{}",
+        String::from_utf8_lossy(&nv_rust.stdout)
+    );
+
+    if nat_bytes != rust_bytes {
+        let nv_nat = Command::new(&native_exe)
+            .arg("verify")
+            .arg("/pa")
+            .arg(&tmp_nat)
+            .output()
+            .expect("native verify native-signed js");
+        assert!(
+            nv_nat.status.success(),
+            "{}",
+            String::from_utf8_lossy(&nv_nat.stdout)
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires SIGNTOOL_RS_TEST_PFX; native signtool.exe; optional SIGNTOOL_RS_TEST_PFX_PASSWORD and SIGNTOOL_RS_VBS_UNSIGNED_FIXTURE"]
+fn vbs_sign_aligns_with_native_sip_stack() {
+    let pfx = match env_path("SIGNTOOL_RS_TEST_PFX") {
+        Some(v) => v,
+        None => return,
+    };
+    let Some(native_exe) = native_signtool_optional_path() else {
+        return;
+    };
+    let vbs_src = env_path("SIGNTOOL_RS_VBS_UNSIGNED_FIXTURE")
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| {
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/unsigned-sample.vbs")
+        });
+    if !vbs_src.exists() {
+        return;
+    }
+    let tmp_nat = std::env::temp_dir().join("signtool_rs_vbs_itest_native.vbs");
+    let tmp_rust = std::env::temp_dir().join("signtool_rs_vbs_itest_rust.vbs");
+    let _ = std::fs::copy(&vbs_src, &tmp_nat).expect("copy native vbs temp");
+    let _ = std::fs::copy(&vbs_src, &tmp_rust).expect("copy rust vbs temp");
+
+    let pw = env_path("SIGNTOOL_RS_TEST_PFX_PASSWORD");
+
+    let mut native_cmd = Command::new(&native_exe);
+    native_cmd
+        .arg("sign")
+        .arg("/fd")
+        .arg("SHA256")
+        .arg("/f")
+        .arg(&pfx)
+        .arg(&tmp_nat);
+    if let Some(ref p) = pw {
+        native_cmd.arg("/p").arg(p);
+    }
+    let native_out = native_cmd.output().expect("native sign vbs");
+    assert!(
+        native_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&native_out.stderr)
+    );
+
+    let mut rust_cmd = Command::cargo_bin("signtool-rs").expect("binary available");
+    rust_cmd
+        .arg("sign")
+        .arg("--pfx")
+        .arg(&pfx)
+        .arg("--digest")
+        .arg("sha256")
+        .arg(&tmp_rust);
+    if let Some(p) = pw {
+        rust_cmd.arg("--password").arg(p);
+    }
+    let rust_out = rust_cmd.output().expect("rust sign vbs");
+    assert!(
+        rust_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rust_out.stderr)
+    );
+
+    let nat_bytes = std::fs::read(&tmp_nat).expect("read native signed");
+    let rust_bytes = std::fs::read(&tmp_rust).expect("read rust signed");
+
+    let nv_rust = Command::new(&native_exe)
+        .arg("verify")
+        .arg("/pa")
+        .arg(&tmp_rust)
+        .output()
+        .expect("native verify rust-signed vbs");
+    assert!(
+        nv_rust.status.success(),
+        "{}",
+        String::from_utf8_lossy(&nv_rust.stdout)
+    );
+
+    if nat_bytes != rust_bytes {
+        let nv_nat = Command::new(&native_exe)
+            .arg("verify")
+            .arg("/pa")
+            .arg(&tmp_nat)
+            .output()
+            .expect("native verify native-signed vbs");
+        assert!(
+            nv_nat.status.success(),
+            "{}",
+            String::from_utf8_lossy(&nv_nat.stdout)
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires SIGNTOOL_RS_TEST_PFX; native signtool.exe; optional SIGNTOOL_RS_TEST_PFX_PASSWORD and SIGNTOOL_RS_WSF_UNSIGNED_FIXTURE"]
+fn wsf_sign_aligns_with_native_sip_stack() {
+    let pfx = match env_path("SIGNTOOL_RS_TEST_PFX") {
+        Some(v) => v,
+        None => return,
+    };
+    let Some(native_exe) = native_signtool_optional_path() else {
+        return;
+    };
+    let wsf_src = env_path("SIGNTOOL_RS_WSF_UNSIGNED_FIXTURE")
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| {
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/unsigned-sample.wsf")
+        });
+    if !wsf_src.exists() {
+        return;
+    }
+    let tmp_nat = std::env::temp_dir().join("signtool_rs_wsf_itest_native.wsf");
+    let tmp_rust = std::env::temp_dir().join("signtool_rs_wsf_itest_rust.wsf");
+    let _ = std::fs::copy(&wsf_src, &tmp_nat).expect("copy native wsf temp");
+    let _ = std::fs::copy(&wsf_src, &tmp_rust).expect("copy rust wsf temp");
+
+    let pw = env_path("SIGNTOOL_RS_TEST_PFX_PASSWORD");
+
+    let mut native_cmd = Command::new(&native_exe);
+    native_cmd
+        .arg("sign")
+        .arg("/fd")
+        .arg("SHA256")
+        .arg("/f")
+        .arg(&pfx)
+        .arg(&tmp_nat);
+    if let Some(ref p) = pw {
+        native_cmd.arg("/p").arg(p);
+    }
+    let native_out = native_cmd.output().expect("native sign wsf");
+    assert!(
+        native_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&native_out.stderr)
+    );
+
+    let mut rust_cmd = Command::cargo_bin("signtool-rs").expect("binary available");
+    rust_cmd
+        .arg("sign")
+        .arg("--pfx")
+        .arg(&pfx)
+        .arg("--digest")
+        .arg("sha256")
+        .arg(&tmp_rust);
+    if let Some(p) = pw {
+        rust_cmd.arg("--password").arg(p);
+    }
+    let rust_out = rust_cmd.output().expect("rust sign wsf");
+    assert!(
+        rust_out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rust_out.stderr)
+    );
+
+    let nat_bytes = std::fs::read(&tmp_nat).expect("read native signed");
+    let rust_bytes = std::fs::read(&tmp_rust).expect("read rust signed");
+
+    let nv_rust = Command::new(&native_exe)
+        .arg("verify")
+        .arg("/pa")
+        .arg(&tmp_rust)
+        .output()
+        .expect("native verify rust-signed wsf");
+    assert!(
+        nv_rust.status.success(),
+        "{}",
+        String::from_utf8_lossy(&nv_rust.stdout)
+    );
+
+    if nat_bytes != rust_bytes {
+        let nv_nat = Command::new(&native_exe)
+            .arg("verify")
+            .arg("/pa")
+            .arg(&tmp_nat)
+            .output()
+            .expect("native verify native-signed wsf");
+        assert!(
+            nv_nat.status.success(),
+            "{}",
+            String::from_utf8_lossy(&nv_nat.stdout)
+        );
+    }
+}

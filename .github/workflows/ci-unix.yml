@@ -1,0 +1,43 @@
+name: ci-unix
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  fmt-and-lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable (rustfmt, clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: rustfmt
+        run: cargo fmt --all --check
+
+      - name: Cargo.lock consistency
+        run: cargo metadata --locked --format-version 1 > /dev/null
+
+      - name: clippy (portable digest + trust crates)
+        run: cargo clippy -p signtool-sip-digest -p signtool-digest-cli -p signtool-authenticode-trust --all-targets --locked -- -D warnings
+
+      - name: clippy (signtool-rs portable lib)
+        run: cargo clippy -p signtool-rs --lib --locked -- -D warnings
+
+      - name: SIP digest crate tests (no Win32)
+        run: cargo test -p signtool-sip-digest --lib --locked
+
+      - name: Authenticode trust crate tests (no Win32)
+        run: cargo test -p signtool-authenticode-trust --lib --locked
+
+      - name: Portable digest CLI (integration smoke)
+        run: cargo test -p signtool-digest-cli --locked
+
+      - name: Check signtool-rs stub binary + portable lib
+        run: cargo check -p signtool-rs --bins --lib --locked
+
+      - name: Portable lib unit tests (native argv / response files)
+        run: cargo test -p signtool-rs --lib --locked

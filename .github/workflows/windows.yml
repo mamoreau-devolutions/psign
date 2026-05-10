@@ -1,0 +1,71 @@
+name: windows
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 6 * * *"
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --workspace --all-targets
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked
+
+      - name: Unit tests (workspace libs + bins)
+        run: cargo test --workspace --lib --bins
+
+      - name: Portable digest CLI integration test
+        run: cargo test -p signtool-digest-cli --locked
+
+      - name: Generate dependency artifacts
+        shell: pwsh
+        run: |
+          $kits = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+          $signtool = Get-ChildItem -Path $kits -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\|\\amd64\\' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $signtool) {
+            Write-Warning "signtool.exe not found; skipping depgraph."
+            exit 0
+          }
+          cargo run -p signtool-rs --bin depgraph -- --signtool "$($signtool.FullName)"
+
+      - name: Exhaustive native ↔ Rust parity (Devolutions test PKI)
+        shell: pwsh
+        run: ./scripts/ci/run-exhaustive-parity-ci.ps1 -WorkspaceRoot "${{ github.workspace }}"
+
+      - name: Validate parity artifacts
+        shell: pwsh
+        run: |
+          $ws = "${{ github.workspace }}"
+          $parityPath = Join-Path $ws "parity-output\parity-report.json"
+          $msixPath = Join-Path $ws "parity-output\msix-parity-sign-report.json"
+          $parity = Get-Content -LiteralPath $parityPath | ConvertFrom-Json
+          if ($parity.missingScenarioCount -ne 0) {
+            throw "Missing scenarios: $($parity.missingScenarioIds -join ', ')"
+          }
+          if ($parity.semanticMismatchCount -ne 0) {
+            throw "Semantic mismatches in parity report."
+          }
+          $msix = Get-Content -LiteralPath $msixPath | ConvertFrom-Json
+          if ($msix.classification -eq "semantic_mismatch") {
+            throw "MSIX parity semantic mismatch."
+          }
+
+      - name: Upload parity-output artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: parity-output-artifacts
+          path: parity-output/*.json
