@@ -29,7 +29,7 @@ At the repo root, **`cargo build`** targets **`default-members`** only (**portab
 
 The **`signtool-windows`** CLI (package **`signtool-rs`**) is Windows-only (stub exits on other targets). Cross-platform pieces live in **`signtool-sip-digest`** and the **`signtool-portable`** binary (`crates/signtool-digest-cli`). They exercise the same PE-derived Authenticode digest logic used for **PE and WinMD** (CLI metadata), plus CAB, MSI, ESD/WIM, cleartext MSIX, catalog, and scripts—without **`WinVerifyTrust`**.
 
-**Feature gaps vs native `signtool`, AzureSignTool, and Azure Artifact Signing:** [`docs/gap-analysis-signing-platforms.md`](docs/gap-analysis-signing-platforms.md).
+**Feature gaps vs native `signtool`, AzureSignTool, and Azure Artifact Signing:** [`docs/gap-analysis-signing-platforms.md`](docs/gap-analysis-signing-platforms.md). **Linux workflows (verify, REST hash sign, hybrid embed):** [`docs/linux-signing-pipelines.md`](docs/linux-signing-pipelines.md).
 
 From the repo root (see [`docs/roadmap-authenticode-linux.md`](docs/roadmap-authenticode-linux.md)):
 

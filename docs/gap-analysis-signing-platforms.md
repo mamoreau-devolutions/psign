@@ -4,6 +4,8 @@ This document compares **Windows SDK `signtool.exe`**, **AzureSignTool**, **Azur
 
 **Concrete reversing steps (IDA, ilspycmd, writable copies of Kits binaries):** [`reversing-playbook-authenticode.md`](reversing-playbook-authenticode.md).
 
+**Linux hybrid pipelines (REST hash sign, verify-only, what is still Windows-only):** [`linux-signing-pipelines.md`](linux-signing-pipelines.md).
+
 ## Format × capability matrix
 
 Legend: **Sign** = produce/embed Authenticode; **WT verify** = `WinVerifyTrust`-style OS verify; **Digest** = recompute SIP indirect data vs PKCS#7; **Trust** = portable CMS + explicit anchors.
@@ -37,7 +39,7 @@ Legend: **Sign** = produce/embed Authenticode; **WT verify** = `WinVerifyTrust`-
 | **Linux verify + digest parity for many Authenticode formats** | Supported | **`signtool-portable`** covers PE, CAB, MSI, ESD/WIM, cleartext MSIX, catalog, scripts; **`trust-verify-*`** adds anchor-based CMS trust (see [`authenticode-trust-stack.md`](authenticode-trust-stack.md)). |
 | **Maximum Authenticode subject formats** | Windows signs all SIP-registered types Rust can digest-check | **Encrypted MSIX**, **VBA/mso**, **extension SIP DLLs**, **standalone `.p7x`** subject handling — see [`rust-sip-gaps.md`](rust-sip-gaps.md). |
 
-**Practical Linux signing path today:** sign on Windows (or in a Windows CI job) with **`signtool-windows`**, then use **`signtool-portable`** on Linux for CI verification and digest/trust checks.
+**Practical Linux path today:** Use **`signtool-portable`** for **digest computation**, **`:sign` REST** (**`artifact-signing-submit`** with **`--features artifact-signing-rest`**), **inspect**, and **verify/trust** across supported formats. **Embed** Authenticode (PKCS#7 into the subject) still requires **`signtool-windows`** / **`SignerSignEx3`** (or native **`signtool.exe`**) until portable CMS+embed lands. **AzureSignTool**-style Key Vault signing remains **Windows-only** in this repo. Cookbook: [`linux-signing-pipelines.md`](linux-signing-pipelines.md).
 
 **Long-term Linux signing** (if required): implement portable **CMS `SignedData` production** + **format-specific embedding** (PE `WIN_CERTIFICATE`, CAB PKCS#7 placement, MSI digital signature streams, MSIX `ContentTypes` / manifest glue, etc.) and combine with **remote signing** (KV REST, Artifact Signing `:sign` LRO). Work is tracked as PKCS#7 encode stubs in [`crates/signtool-sip-digest/src/pkcs7.rs`](crates/signtool-sip-digest/src/pkcs7.rs) and [`pe_embed.rs`](crates/signtool-sip-digest/src/pe_embed.rs).
 
@@ -130,6 +132,7 @@ When filing issues, prefer **parity scenario IDs** from [`parity-matrix.md`](par
 |------|-------------------|----------|
 | Unix CI | `cargo digest-test` / workflows in **`ci-unix.yml`** | Linux |
 | Unix local mirror | **`scripts/linux-portable-validation.sh`** (from repo root; bash) | Linux / WSL / Git Bash |
+| Pipelines narrative | [`linux-signing-pipelines.md`](linux-signing-pipelines.md) | Linux-focused |
 | Windows parity | `./scripts/run-parity-diff.ps1`, `./scripts/ci/run-exhaustive-parity-ci.ps1` | Windows |
 | MSIX focus | `./scripts/msix-parity-sign.ps1` | Windows |
 | Optional KV / Artifact env tests | Ignored tests in **`tests/parity_signtool.rs`** | Windows |
@@ -138,6 +141,7 @@ When filing issues, prefer **parity scenario IDs** from [`parity-matrix.md`](par
 
 ## Related documents
 
+- [`linux-signing-pipelines.md`](linux-signing-pipelines.md) — Linux verify + hybrid Artifact REST flows.
 - [`reversing-playbook-authenticode.md`](reversing-playbook-authenticode.md) — IDA / ilspycmd workflow.
 - [`roadmap-authenticode-linux.md`](roadmap-authenticode-linux.md) — phased Linux strategy.
 - [`rust-sip-gaps.md`](rust-sip-gaps.md) — SIP/Tier 1b/1c engineering backlog.

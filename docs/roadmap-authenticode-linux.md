@@ -2,7 +2,7 @@
 
 The primary `signtool-rs` binary is **Windows-first**: it depends on **`windows`**, **WinVerifyTrust**, **SignerSignEx3**, and OS **CryptSIP** registration. A practical Linux story is **phased**: keep Windows as the reference implementation while carving out **portable** pieces.
 
-**Cross-tool comparison (native signtool vs AzureSignTool vs Artifact Signing vs this repo):** [`gap-analysis-signing-platforms.md`](gap-analysis-signing-platforms.md).
+**Cross-tool comparison (native signtool vs AzureSignTool vs Artifact Signing vs this repo):** [`gap-analysis-signing-platforms.md`](gap-analysis-signing-platforms.md). **Linux cookbook (verify / REST / hybrid):** [`linux-signing-pipelines.md`](linux-signing-pipelines.md).
 
 ## Phase 0 — CI and hygiene
 
