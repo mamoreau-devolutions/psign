@@ -3,7 +3,7 @@
 ## Goals
 
 - Optional **Rust-backed PE Authenticode digest** and **embedded PKCS#7 parse/compare** for parity with OS signing (`SignerSignEx3`).
-- Tier 1a progress: **`WIN_CERTIFICATE`** PKCS#7 wrap + append + PE **`CheckSum`** without **`SignerSignEx3`** (**`pe_embed`**). **CMS `SignedData` signer encode** (full portable Authenticode) remains future work.
+- Tier 1a progress: **`WIN_CERTIFICATE`** PKCS#7 wrap + append + PE **`CheckSum`** without **`SignerSignEx3`** (**`pe_embed`**). **`pkcs7::encode_pkcs7_content_info_signed_data_der`** re-encodes an existing **`SignedData`** as PKCS#7 **`ContentInfo`** (decode → encode round-trip tested); assembling a **new** **`SignedData`** / **`SignerInfo`** for remote signing remains future work.
 
 ## PE parsing strategy
 
@@ -16,7 +16,7 @@ Hand-rolled COFF/optional-header traversal was deferred: **`object`** + the **`a
 | [`authenticode`](https://crates.io/crates/authenticode) | PE image digest (`authenticode_digest`), WIN_CERTIFICATE iteration, `AuthenticodeSignature` CMS parse |
 | [`object`](https://crates.io/crates/object) | `PeFile32` / `PeFile64` implementing `PeTrait` |
 | [`sha2`](https://crates.io/crates/sha2) | SHA-256 hasher passed into `authenticode_digest` |
-| [`cms`](https://crates.io/crates/cms) / [`der`](https://crates.io/crates/der) | PKCS#7 **`SignedData`** decode + indirect-data plumbing; **full CMS encode** for production signing still TODO |
+| [`cms`](https://crates.io/crates/cms) / [`der`](https://crates.io/crates/der) | PKCS#7 **`SignedData`** decode + **`ContentInfo`** re-encode (`encode_pkcs7_content_info_signed_data_der`); **new** **`SignerInfo`** / countersignature production still TODO |
 | **`pe_embed`** (in-tree) | **`WIN_CERTIFICATE`** PKCS#7 wrap + attribute-cert append + **`CheckSum`** refresh; exercised from **`signtool-portable`** (**`append-pe-pkcs7`**, **`pe-checksum`**) |
 
 **Why not hand-roll PE parsing?** The main `signtool-rs` binary still uses **`goblin`** in `depgraph`; digest code standardizes on **`object`** to match `authenticode-rs` and avoid duplicate COFF logic.
@@ -30,7 +30,7 @@ Hand-rolled COFF/optional-header traversal was deferred: **`object`** + the **`a
 | `verify_pe.rs` | Compare recomputed digest vs PKCS#7 indirect data for each embedded Authenticode cert |
 | `cab_digest.rs`, `catalog_digest.rs`, `msi_digest.rs`, `esd_digest.rs`, `msix_digest.rs` | Format-specific SIP digest recomputation |
 | `ps_script.rs`, `wsh_script.rs` | Script strip/hash heuristics vs PKCS#7 |
-| `pkcs7.rs` | **`SignedData`** decode, **`SpcIndirectDataContent`** parse/replace + DER encode helpers; **CMS `SignedData` signer encode** still TODO |
+| `pkcs7.rs` | **`SignedData`** decode, **`ContentInfo`** DER encode from **`SignedData`**, **`SpcIndirectDataContent`** parse/replace + DER encode helpers; **new** portable **`SignerInfo`** assembly still TODO |
 | `pe_embed.rs` | **`WIN_CERTIFICATE`** PKCS#7 wrap, attribute-cert **append**, optional-header **`CheckSum`** recompute (**`pe_compute_image_checksum`**) |
 | `timestamp.rs` | RFC3161 embed notes — **stub** (Tier 1b) |
 | `page_hashes.rs` | PE page-hash CMS extract + Authenticode payload peel / flat table parse (Tier 1c); segment verify still Win32 |

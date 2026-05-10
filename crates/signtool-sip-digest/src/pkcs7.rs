@@ -13,7 +13,7 @@ use anyhow::{Result, anyhow};
 use authenticode::{DigestInfo, SpcIndirectDataContent};
 use cms::content_info::ContentInfo;
 use cms::signed_data::SignedData;
-use der::asn1::{ObjectIdentifier, OctetString};
+use der::asn1::{Any, ObjectIdentifier, OctetString};
 use der::{Decode, Encode, SliceReader};
 
 /// CMS **`signedData`** content type OID (`id-signedData`).
@@ -24,6 +24,26 @@ pub const PKCS7_ID_DATA_OID: &str = "1.2.840.113549.1.7.1";
 
 /// CMS **`signedData`** content type OID (string form).
 pub const PKCS7_ID_SIGNED_DATA_OID: &str = "1.2.840.113549.1.7.2";
+
+/// Encode **`SignedData`** as a PKCS#7 **`ContentInfo`** (**`contentType`** = **`id-signedData`**, RFC 5652).
+///
+/// This is a **building block** for portable Authenticode: mutating **`SignedData`** (e.g. new **`SignerInfo`**
+/// with remote signature octets) then calling this function yields DER for **`pe_embed`**. Re-encoding an
+/// unmodified structure is tested for **decode → encode → decode** stability on fixtures; **byte-for-byte**
+/// equality with a given **`signtool.exe`** / **`CryptMsgOpenToEncode`** output is **not** guaranteed.
+pub fn encode_pkcs7_content_info_signed_data_der(sd: &SignedData) -> Result<Vec<u8>> {
+    let sd_der = sd
+        .to_der()
+        .map_err(|e| anyhow!("encode SignedData: {e}"))?;
+    let mut rd = SliceReader::new(sd_der.as_slice()).map_err(|e| anyhow!("SignedData DER reader: {e}"))?;
+    let content = Any::decode(&mut rd).map_err(|e| anyhow!("SignedData as CMS Any: {e}"))?;
+    let ci = ContentInfo {
+        content_type: ID_SIGNED_DATA_OID,
+        content,
+    };
+    ci.to_der()
+        .map_err(|e| anyhow!("encode ContentInfo: {e}"))
+}
 
 fn signed_data_from_pkcs7_der(pkcs7_der: &[u8]) -> Result<SignedData> {
     let normalized = crate::pkcs7_wire::normalize_pkcs7_der_for_authenticode(pkcs7_der);
@@ -161,6 +181,40 @@ mod tests {
         let pe_bytes =
             include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi");
         assert!(parse_pe_pkcs7_spc_indirect_data_at(pe_bytes, 1).is_err());
+    }
+
+    #[test]
+    fn signed_data_to_der_round_trips() {
+        let pe_bytes =
+            include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi");
+        let pkcs7 = crate::verify_pe::pe_nth_pkcs7_signed_data_der(pe_bytes, 0).expect("pkcs7");
+        let sd = signed_data_from_pkcs7_der(&pkcs7).expect("SignedData");
+        let der = sd.to_der().expect("to_der");
+        let again = SignedData::from_der(der.as_slice()).expect("from_der");
+        assert_eq!(sd, again);
+    }
+
+    #[test]
+    fn content_info_encode_decode_round_trip_on_tiny32_pkcs7() {
+        let pe_bytes =
+            include_bytes!("../../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi");
+        let pkcs7 = crate::verify_pe::pe_nth_pkcs7_signed_data_der(pe_bytes, 0).expect("pkcs7");
+        let normalized = crate::pkcs7_wire::normalize_pkcs7_der_for_authenticode(&pkcs7);
+        let bytes = normalized.as_ref();
+        let mut r = SliceReader::new(bytes).expect("reader");
+        let ci = ContentInfo::decode(&mut r).expect("ContentInfo");
+        let sd = ci
+            .content
+            .decode_as::<SignedData>()
+            .expect("inner SignedData");
+        let out = encode_pkcs7_content_info_signed_data_der(&sd).expect("encode");
+        let mut r2 = SliceReader::new(out.as_slice()).expect("reader2");
+        let ci2 = ContentInfo::decode(&mut r2).expect("ContentInfo2");
+        let sd2 = ci2
+            .content
+            .decode_as::<SignedData>()
+            .expect("SignedData2");
+        assert_eq!(sd, sd2);
     }
 
     #[test]
