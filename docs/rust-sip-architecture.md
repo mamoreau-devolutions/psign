@@ -3,7 +3,7 @@
 ## Goals
 
 - Optional **Rust-backed PE Authenticode digest** and **embedded PKCS#7 parse/compare** for parity with OS signing (`SignerSignEx3`).
-- Future: full PKCS#7 `SignedData` encode + `WIN_CERTIFICATE` embed without `SignerSignEx3` (Tier 1a completion).
+- Tier 1a progress: **`WIN_CERTIFICATE`** PKCS#7 wrap + append + PE **`CheckSum`** without **`SignerSignEx3`** (**`pe_embed`**). **CMS `SignedData` signer encode** (full portable Authenticode) remains future work.
 
 ## PE parsing strategy
 
@@ -16,8 +16,8 @@ Hand-rolled COFF/optional-header traversal was deferred: **`object`** + the **`a
 | [`authenticode`](https://crates.io/crates/authenticode) | PE image digest (`authenticode_digest`), WIN_CERTIFICATE iteration, `AuthenticodeSignature` CMS parse |
 | [`object`](https://crates.io/crates/object) | `PeFile32` / `PeFile64` implementing `PeTrait` |
 | [`sha2`](https://crates.io/crates/sha2) | SHA-256 hasher passed into `authenticode_digest` |
-| [`cms`](https://crates.io/crates/cms) / [`der`](https://crates.io/crates/der) | Catalog / CAB PKCS#7 indirect-data plumbing |
-| **Future** | Windows `CryptMsgOpenToEncode` or fuller `cms` encode for PKCS#7 production signing |
+| [`cms`](https://crates.io/crates/cms) / [`der`](https://crates.io/crates/der) | PKCS#7 **`SignedData`** decode + indirect-data plumbing; **full CMS encode** for production signing still TODO |
+| **`pe_embed`** (in-tree) | **`WIN_CERTIFICATE`** PKCS#7 wrap + attribute-cert append + **`CheckSum`** refresh; exercised from **`signtool-portable`** (**`append-pe-pkcs7`**, **`pe-checksum`**) |
 
 **Why not hand-roll PE parsing?** The main `signtool-rs` binary still uses **`goblin`** in `depgraph`; digest code standardizes on **`object`** to match `authenticode-rs` and avoid duplicate COFF logic.
 
@@ -30,14 +30,14 @@ Hand-rolled COFF/optional-header traversal was deferred: **`object`** + the **`a
 | `verify_pe.rs` | Compare recomputed digest vs PKCS#7 indirect data for each embedded Authenticode cert |
 | `cab_digest.rs`, `catalog_digest.rs`, `msi_digest.rs`, `esd_digest.rs`, `msix_digest.rs` | Format-specific SIP digest recomputation |
 | `ps_script.rs`, `wsh_script.rs` | Script strip/hash heuristics vs PKCS#7 |
-| `pkcs7.rs` | PKCS#7 builder **stub** + notes |
-| `pe_embed.rs` | `WIN_CERTIFICATE` embed path — **stub** |
+| `pkcs7.rs` | **`SignedData`** decode, **`SpcIndirectDataContent`** parse/replace + DER encode helpers; **CMS `SignedData` signer encode** still TODO |
+| `pe_embed.rs` | **`WIN_CERTIFICATE`** PKCS#7 wrap, attribute-cert **append**, optional-header **`CheckSum`** recompute (**`pe_compute_image_checksum`**) |
 | `timestamp.rs` | RFC3161 embed notes — **stub** (Tier 1b) |
 | `page_hashes.rs` | PE page-hash CMS extract + Authenticode payload peel / flat table parse (Tier 1c); segment verify still Win32 |
 
 ## Linux / macOS CLI (`crates/signtool-digest-cli`)
 
-The **`signtool-portable`** binary wraps **`signtool-sip-digest`** for scripting and CI (e.g. `pe-digest`, `verify-msix`, `pe-has-page-hashes`, `pe-page-hash-info`, `verify-pe-page-hashes`, `pe-authenticode-ranges`, …). It performs **digest vs PKCS#7 indirect data** checks, **PE Authenticode digest segment listing**, and **PE page-hash tooling** (OID presence, structured parse, experimental contiguous raw-byte verification — not a full **`WinVerifyTrust`** `/ph` clone).
+The **`signtool-portable`** binary wraps **`signtool-sip-digest`** for scripting and CI (e.g. **`pe-digest`**, **`pe-checksum`**, **`verify-pe`**, **`trust-verify-*`**, **`extract-pe-pkcs7`** / **`list-pe-pkcs7`** / **`append-pe-pkcs7`**, **`inspect-pe-spc-indirect`**, **`verify-msix`**, **`pe-has-page-hashes`**, **`pe-page-hash-info`**, **`verify-pe-page-hashes`**, **`pe-authenticode-ranges`**, …). It performs **digest vs PKCS#7 indirect data** checks, **explicit-anchor trust**, **experimental PE cert-table growth**, **PE image checksum parity**, **PE Authenticode digest segment listing**, and **PE page-hash tooling** (not a full **`WinVerifyTrust`** `/ph` clone).
 
 ## Win32 adapter (`src/win/sip_rust/`)
 

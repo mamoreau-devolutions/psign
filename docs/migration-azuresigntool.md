@@ -86,7 +86,9 @@ signtool-portable azure-key-vault-sign-digest \
   --azure-key-vault-managed-identity
 ```
 
-Stdout prints **standard base64** signature bytes (no PEM). **`--signature-output PATH`** writes **raw** signature. **ECDSA** certificates use **ES256** / **ES384** / **ES512** automatically (same as **`signtool-windows`** KV path). Embedding into a PE/CAB still requires Windows **`SignerSignEx3`** (this repo) or future portable PKCS#7.
+Stdout prints **standard base64** signature bytes (no PEM). **`--signature-output PATH`** writes **raw** signature. **ECDSA** certificates use **ES256** / **ES384** / **ES512** automatically (same as **`signtool-windows`** KV path). Embedding into a PE/CAB still requires Windows **`SignerSignEx3`** (this repo) or a **future portable CMS `SignedData` builder** that consumes these signature octets.
+
+**Experimental (Linux PE layout only):** **`signtool-portable append-pe-pkcs7`** appends PKCS#7 DER as a new **`WIN_CERTIFICATE`** row and recomputes **`CheckSum`**. Use **`pe-checksum --strict`** on the output to gate ImageHlp-style checksum parity. This **does not** assemble PKCS#7 from KV signature bytes — it is for tooling / prototypes until portable **`SignedData`** encode lands.
 
 ## Verification with **`signtool-portable`**
 
