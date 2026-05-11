@@ -50,6 +50,7 @@ These checks also run under **`ci-unix.yml`** / **`scripts/linux-portable-valida
 ## Operator notes
 
 - Quick native ↔ Rust exit-code smoke over PE (and optional WinMD when env vars are set): [`scripts/sip-format-smoke.ps1`](../scripts/sip-format-smoke.ps1).
+- Reusable committed/generated fixture inventory: [`tests/fixtures/code-signing-vectors.json`](../tests/fixtures/code-signing-vectors.json). To create a local unsigned extension corpus, run [`scripts/ci/build-code-signing-vector-samples.ps1`](../scripts/ci/build-code-signing-vector-samples.ps1); its extracted output directories are gitignored.
 - WinMD parity: Tier 1 CI sets `SIGNTOOL_RS_WINMD_UNSIGNED_FIXTURE` via [`pack-minimal-winmd.ps1`](../scripts/ci/pack-minimal-winmd.ps1) (PE bytes, `.winmd` extension). Locally, point `SIGNTOOL_RS_WINMD_UNSIGNED_FIXTURE` at any unsigned `.winmd` plus the same `SIGNTOOL_RS_TEST_PFX` / password as PE; optional `SIGNTOOL_RS_WINMD_TIMESTAMP_URL` for RFC3161 (CI mirrors `SIGNTOOL_RS_TIMESTAMP_URL`).
 - To change the pinned Devolutions commit, edit `$CommitSha` in [`scripts/ci/bootstrap-devolutions-authenticode.ps1`](../scripts/ci/bootstrap-devolutions-authenticode.ps1).
 - If detached PKCS#7 generation fails on a future SDK, adjust [`scripts/ci/prepare-parity-fixtures.ps1`](../scripts/ci/prepare-parity-fixtures.ps1) (`/p7` fallback flags).

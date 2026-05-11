@@ -1,0 +1,237 @@
+{
+  "schema_version": 1,
+  "description": "Inventory of reusable and generated code-signing test vectors. Committed entries are stable bytes in this repository; generated entries are produced by scripts/ci/build-code-signing-vector-samples.ps1.",
+  "generated_output": {
+    "directory": "tests/fixtures/generated-unsigned",
+    "archive": "tests/fixtures/generated-unsigned.zip",
+    "gitignored_directories": [
+      "tests/fixtures/generated-unsigned",
+      "tests/fixtures/generated-signed"
+    ]
+  },
+  "vectors": [
+    {
+      "id": "pe-tiny32-efi-unsigned",
+      "family": "pe",
+      "extensions": [".efi"],
+      "state": "unsigned",
+      "storage": "committed",
+      "path": "tests/fixtures/pe-authenticode-upstream/tiny32.efi",
+      "size_bytes": 2048,
+      "sha256": "1b6dd9aee72c11210b6ebc1a57158fa71c5b2e2dcabe0766b87cd348ecf7c0e7",
+      "operations": ["sign-input", "pe-digest-source"],
+      "notes": "Upstream tiny PE/EFI sample; useful as a small PE-like signing input."
+    },
+    {
+      "id": "pe-tiny64-efi-unsigned",
+      "family": "pe",
+      "extensions": [".efi"],
+      "state": "unsigned",
+      "storage": "committed",
+      "path": "tests/fixtures/pe-authenticode-upstream/tiny64.efi",
+      "size_bytes": 2048,
+      "sha256": "8c8f199ecc03d889a6f4a23f515fd73035f9ebc2e692fe93be895bbf90ed0e50",
+      "operations": ["sign-input", "pe-digest-source"],
+      "notes": "Upstream tiny PE/EFI sample; preferred source for WinMD/MSIX package generation because CI uses x64."
+    },
+    {
+      "id": "pe-tiny32-efi-signed",
+      "family": "pe",
+      "extensions": [".efi"],
+      "state": "signed",
+      "storage": "committed",
+      "path": "tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi",
+      "size_bytes": 3584,
+      "sha256": "62b364ce43164b6f3423bb8a42244f92d6f423e4d0ae7c8fcccfc87bb263e589",
+      "operations": ["verify-pe", "trust-verify-pe", "extract-pe-pkcs7", "inspect-authenticode", "rs256-prehash", "page-hash-negative"],
+      "notes": "Primary portable signed PE vector; trust tests use explicit anchors/as-of because the signing cert is expired."
+    },
+    {
+      "id": "pe-tiny64-efi-signed",
+      "family": "pe",
+      "extensions": [".efi"],
+      "state": "signed",
+      "storage": "committed",
+      "path": "tests/fixtures/pe-authenticode-upstream/tiny64.signed.efi",
+      "size_bytes": 3584,
+      "sha256": "8c204bd92aa82af6b6decebfd7da8a55bc599dd7b39b2ca010a827ef170303f7",
+      "operations": ["verify-pe", "trust-verify-pe", "extract-pe-pkcs7", "inspect-authenticode", "rs256-prehash", "page-hash-negative"],
+      "notes": "Second portable signed PE vector for 64-bit coverage."
+    },
+    {
+      "id": "cab-tiny-signed",
+      "family": "cab",
+      "extensions": [".cab"],
+      "state": "signed",
+      "storage": "committed",
+      "path": "tests/fixtures/cab-authenticode-upstream/tiny-signed.cab",
+      "size_bytes": 1676,
+      "sha256": "7f4fad755dd0371b648500b192dc73736081f436e90f2026deb3e70f27c39766",
+      "operations": ["verify-cab", "extract-cab-pkcs7", "cab-rs256-prehash", "trust-verify-cab-anchor-required"],
+      "notes": "Generated with makecab plus SDK signtool; portable trust success needs matching committed anchors."
+    },
+    {
+      "id": "catalog-tiny32-pe-pkcs7",
+      "family": "catalog",
+      "extensions": [".cat"],
+      "state": "signed-synthetic",
+      "storage": "committed",
+      "path": "tests/fixtures/catalog-authenticode-upstream/tiny32-content.cat",
+      "size_bytes": 1523,
+      "sha256": "25c49be9f923fe3b194ed0a10ff1d7d7a6b56c5523ef4b66ae4472800bea0117",
+      "operations": ["verify-catalog-cms", "catalog-rs256-prehash"],
+      "notes": "The bytes are the tiny32 PE PKCS#7, not a full CTL/member catalog; useful for CMS plumbing only."
+    },
+    {
+      "id": "msi-tiny-pkcs7-stub",
+      "family": "msi",
+      "extensions": [".msi"],
+      "state": "signed-synthetic",
+      "storage": "committed",
+      "path": "tests/fixtures/msi-authenticode-upstream/tiny-pkcs7-stub.msi",
+      "size_bytes": 20480,
+      "sha256": "8b86ac6c974a6b5664ba083ad601420b84571a2b46316ca9dd36935dc6ce58ed",
+      "operations": ["extract-msi-pkcs7", "msi-rs256-prehash"],
+      "notes": "OLE stub carrying the tiny32 PE PKCS#7 in the DigitalSignature stream; not a full valid installer."
+    },
+    {
+      "id": "msix-minimal-layout",
+      "family": "msix",
+      "extensions": [".msix", ".appx"],
+      "state": "unsigned-layout",
+      "storage": "committed",
+      "path": "tests/fixtures/msix-minimal/AppxManifest.xml",
+      "size_bytes": 1452,
+      "sha256": "cd9d4abfe7283b3b46c8aa37a1e20b83a22d43160b9c909f18d91507e1e7f009",
+      "operations": ["makeappx-pack-source", "sign-input"],
+      "notes": "CI stages this manifest with a PE payload and logo before MakeAppx packing."
+    },
+    {
+      "id": "script-ps1-unsigned",
+      "family": "powershell-script",
+      "extensions": [".ps1"],
+      "state": "unsigned",
+      "storage": "committed",
+      "path": "tests/fixtures/unsigned-sample.ps1",
+      "size_bytes": 80,
+      "sha256": "a50d64caa1cf209f87ba21005b3dcf1efd997bc97680b4b5ff85ea6bda032c09",
+      "operations": ["sign-input", "verify-script-negative"],
+      "notes": "Unsigned script marker-negative fixture and Windows sign-parity input."
+    },
+    {
+      "id": "script-psm1-unsigned",
+      "family": "powershell-script",
+      "extensions": [".psm1"],
+      "state": "unsigned",
+      "storage": "committed",
+      "path": "tests/fixtures/unsigned-sample.psm1",
+      "size_bytes": 161,
+      "sha256": "0420169057b22fa8b278fa87a2d6f2a34e339378170b4b31dda6c66928b99562",
+      "operations": ["sign-input", "verify-script-negative"],
+      "notes": "Unsigned PowerShell module marker-negative fixture and Windows sign-parity input."
+    },
+    {
+      "id": "script-psd1-unsigned",
+      "family": "powershell-script",
+      "extensions": [".psd1"],
+      "state": "unsigned",
+      "storage": "committed",
+      "path": "tests/fixtures/unsigned-sample.psd1",
+      "size_bytes": 152,
+      "sha256": "5b0b8f88715cbe24dbeecf898817da3b0a180a29f477806aa3c5a6bff1611c14",
+      "operations": ["sign-input", "verify-script-negative"],
+      "notes": "Unsigned PowerShell data file marker-negative fixture and Windows sign-parity input."
+    },
+    {
+      "id": "script-js-unsigned",
+      "family": "wsh-script",
+      "extensions": [".js"],
+      "state": "unsigned",
+      "storage": "committed",
+      "path": "tests/fixtures/unsigned-sample.js",
+      "size_bytes": 66,
+      "sha256": "2e2ba6a0310899983e925e311298123aac948dd57ff3f0c1939d272a3d8fb651",
+      "operations": ["sign-input", "verify-script-negative"],
+      "notes": "Unsigned WSH JavaScript marker-negative fixture and Windows sign-parity input."
+    },
+    {
+      "id": "script-vbs-unsigned",
+      "family": "wsh-script",
+      "extensions": [".vbs"],
+      "state": "unsigned",
+      "storage": "committed",
+      "path": "tests/fixtures/unsigned-sample.vbs",
+      "size_bytes": 56,
+      "sha256": "d6b3167970e4e1d64b02e9c1544d62681263ecad3be44e191e96726fb6c71d89",
+      "operations": ["sign-input", "verify-script-negative"],
+      "notes": "Unsigned VBScript marker-negative fixture and Windows sign-parity input."
+    },
+    {
+      "id": "script-wsf-unsigned",
+      "family": "wsh-script",
+      "extensions": [".wsf"],
+      "state": "unsigned",
+      "storage": "committed",
+      "path": "tests/fixtures/unsigned-sample.wsf",
+      "size_bytes": 173,
+      "sha256": "4a021e0d36c62aeb437b49b988b7431bbfcdc90dfe8180545e88c26fd8232fe8",
+      "operations": ["sign-input", "verify-script-negative"],
+      "notes": "Unsigned Windows Script File marker-negative fixture and Windows sign-parity input."
+    },
+    {
+      "id": "rfc3161-granted-response",
+      "family": "timestamp",
+      "extensions": [".der"],
+      "state": "signed-token",
+      "storage": "committed",
+      "path": "tests/fixtures/rfc3161/ts_resp_granted_outer_len81.der",
+      "size_bytes": 138,
+      "sha256": "6bd4e95765b2634a831944d52816adbdffe0dc4b07d7277e638fd71266b8f1f6",
+      "operations": ["rfc3161-response-parse"],
+      "notes": "Parser fixture, not a file-format Authenticode signature vector."
+    },
+    {
+      "id": "generated-pe-extension-aliases",
+      "family": "pe",
+      "extensions": [".exe", ".dll", ".sys", ".ocx", ".scr", ".cpl", ".efi", ".mui"],
+      "state": "unsigned",
+      "storage": "generated",
+      "generator": "scripts/ci/build-code-signing-vector-samples.ps1",
+      "source": "tests/fixtures/pe-authenticode-upstream/tiny64.efi",
+      "operations": ["sign-input", "verify-after-sign", "rust-sip-pe-digest-gate"],
+      "notes": "Copies the tiny64 PE/EFI bytes under common PE-like extensions for extension matrix parity."
+    },
+    {
+      "id": "generated-winmd-pe-copy",
+      "family": "winmd",
+      "extensions": [".winmd"],
+      "state": "unsigned",
+      "storage": "generated",
+      "generator": "scripts/ci/build-code-signing-vector-samples.ps1",
+      "source": "tests/fixtures/pe-authenticode-upstream/tiny64.efi",
+      "operations": ["sign-input", "verify-after-sign", "rust-sip-pe-digest-gate"],
+      "notes": "Mirrors the current CI approach: PE bytes selected by .winmd extension."
+    },
+    {
+      "id": "generated-cab-unsigned",
+      "family": "cab",
+      "extensions": [".cab"],
+      "state": "unsigned",
+      "storage": "generated",
+      "generator": "scripts/ci/build-code-signing-vector-samples.ps1",
+      "operations": ["sign-input", "verify-cab-negative-before-sign"],
+      "notes": "Generated with makecab.exe when available."
+    },
+    {
+      "id": "generated-msix-appx-unsigned",
+      "family": "msix",
+      "extensions": [".msix", ".appx"],
+      "state": "unsigned",
+      "storage": "generated",
+      "generator": "scripts/ci/build-code-signing-vector-samples.ps1 -IncludeSdkPackages",
+      "source": "tests/fixtures/msix-minimal",
+      "operations": ["sign-input", "verify-after-sign", "rust-sip-msix-digest-gate"],
+      "notes": "Generated with MakeAppx.exe when SDK package tooling is available."
+    }
+  ]
+}
