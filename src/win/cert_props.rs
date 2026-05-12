@@ -8,7 +8,7 @@ use windows::Win32::Security::Cryptography::{
 };
 
 pub fn normalize_sha1_hex(input: &str) -> Result<String> {
-    let clean = input.replace(':', "").replace(' ', "");
+    let clean = input.replace([':', ' '], "");
     if clean.len() != 40 {
         return Err(anyhow!("SHA1 thumbprint must be 40 hex characters"));
     }

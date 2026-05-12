@@ -63,6 +63,7 @@ fn env_path(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.trim().is_empty())
 }
 
+#[cfg(feature = "artifact-signing-rest")]
 fn env_flag_true(name: &str) -> bool {
     matches!(
         std::env::var(name)

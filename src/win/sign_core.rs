@@ -425,7 +425,7 @@ pub(crate) fn adopt_cert(ctx: *mut CERT_CONTEXT) -> Result<CertContext> {
 }
 
 fn parse_sha1_hex(input: &str) -> Result<[u8; 20]> {
-    let clean = input.replace(':', "").replace(' ', "");
+    let clean = input.replace([':', ' '], "");
     if clean.len() != 40 {
         return Err(anyhow!("--cert-sha1 must be 40 hex characters"));
     }
@@ -642,12 +642,12 @@ fn find_cert(store: HCERTSTORE, args: &SignArgs) -> Result<CertContext> {
             ));
         }
         let c = adopt_cert(ctx)?;
-        if let Some(iss) = &args.issuer_name {
-            if !issuer_simple_contains(c.0 as *const _, iss)? {
-                return Err(anyhow!(
-                    "certificate issuer does not match requested issuer filter '{iss}'"
-                ));
-            }
+        if let Some(iss) = &args.issuer_name
+            && !issuer_simple_contains(c.0 as *const _, iss)?
+        {
+            return Err(anyhow!(
+                "certificate issuer does not match requested issuer filter '{iss}'"
+            ));
         }
         validate_cert_constraints(c.0 as *const _, args)?;
         return Ok(c);
@@ -711,11 +711,10 @@ fn find_cert(store: HCERTSTORE, args: &SignArgs) -> Result<CertContext> {
                 best_ctx = Some(adopt_cert(current)?);
                 best_not_after = not_after;
             }
-        } else if best_ctx.is_none() {
-            if cert_matches_signing_eku_prefix(current.cast_const(), args)? {
-                best_ctx = Some(adopt_cert(current)?);
-                best_not_after = not_after;
-            }
+        } else if best_ctx.is_none() && cert_matches_signing_eku_prefix(current.cast_const(), args)?
+        {
+            best_ctx = Some(adopt_cert(current)?);
+            best_not_after = not_after;
         }
         prev = Some(current.cast_const());
     }
@@ -831,14 +830,15 @@ fn auto_signer_provider_scratch(
     let Some(prov_name) = clone_wstr_with_nul(info.pwsz_prov_name.cast_const()) else {
         return Ok(None);
     };
-    let mut inner = SIGNER_PROVIDER_INFO::default();
-    inner.cbSize = size_of::<SIGNER_PROVIDER_INFO>() as u32;
-    inner.pwszProviderName = PCWSTR(prov_name.as_ptr());
-    inner.dwProviderType = info.dw_prov_type;
-    inner.dwKeySpec = info.dw_key_spec;
-    inner.dwPvkChoice = windows::Win32::Security::Cryptography::PVK_TYPE_KEYCONTAINER;
-    inner.Anonymous = SIGNER_PROVIDER_INFO_0 {
-        pwszKeyContainer: PWSTR(container_name.as_ptr().cast_mut()),
+    let inner = SIGNER_PROVIDER_INFO {
+        cbSize: size_of::<SIGNER_PROVIDER_INFO>() as u32,
+        pwszProviderName: PCWSTR(prov_name.as_ptr()),
+        dwProviderType: info.dw_prov_type,
+        dwKeySpec: info.dw_key_spec,
+        dwPvkChoice: windows::Win32::Security::Cryptography::PVK_TYPE_KEYCONTAINER,
+        Anonymous: SIGNER_PROVIDER_INFO_0 {
+            pwszKeyContainer: PWSTR(container_name.as_ptr().cast_mut()),
+        },
     };
     Ok(Some(AutoSignerProviderScratch {
         inner,
@@ -1180,10 +1180,10 @@ pub fn sign_with_mssign32(
             },
         };
         Some(&provider as *const SIGNER_PROVIDER_INFO)
-    } else if let Some(ref ap) = auto_provider_scratch {
-        Some(&ap.inner as *const SIGNER_PROVIDER_INFO)
     } else {
-        None
+        auto_provider_scratch
+            .as_ref()
+            .map(|ap| &ap.inner as *const SIGNER_PROVIDER_INFO)
     };
 
     let mut decoupled_runtime: Option<(

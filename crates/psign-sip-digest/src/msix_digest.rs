@@ -27,6 +27,7 @@ use zip::read::ZipFile;
 const APP_SIGNATURE: &[u8] = b"AppxSignature.p7x";
 const CONTENT_TYPES: &[u8] = b"[Content_Types].xml";
 const BLOCK_MAP: &[u8] = b"AppxBlockMap.xml";
+const APP_MANIFEST: &[u8] = b"AppxManifest.xml";
 const BUNDLE_MANIFEST: &[u8] = b"AppxMetadata/AppxBundleManifest.xml";
 const CODE_INTEGRITY: &[u8] = b"AppxMetadata/CodeIntegrity.cat";
 
@@ -65,6 +66,8 @@ struct AppxDigestParts {
 
 #[derive(Clone, Debug)]
 struct ClassicEocd {
+    disk_number: u16,
+    disk_with_central_directory: u16,
     number_of_files_on_this_disk: u16,
     number_of_files: u16,
     central_directory_size: u32,
@@ -86,6 +89,10 @@ struct Zip64Eocd {
     version_needed_to_extract: u16,
     disk_number: u32,
     disk_with_central_directory: u32,
+    number_of_files_on_this_disk: u64,
+    number_of_files: u64,
+    central_directory_size: u64,
+    central_directory_offset: u64,
     tail_after_fixed: Vec<u8>,
 }
 
@@ -94,6 +101,10 @@ struct ZipTail {
     classic: ClassicEocd,
     zip64_eocd: Option<Zip64Eocd>,
     locator: Option<Zip64Locator>,
+    zip64_eocd_offset: Option<u64>,
+    eocd_offset: usize,
+    central_directory_offset: u64,
+    central_directory_size: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -101,7 +112,13 @@ struct AppxBlockMapFile {
     name: String,
     normalized_name: String,
     declared_size: u64,
+    lfh_size: Option<u64>,
     block_hashes: Vec<Vec<u8>>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct AppxPackageInventory {
+    has_code_integrity: bool,
 }
 
 enum RunningHasher {
@@ -213,6 +230,24 @@ fn required_xml_attr(
     })
 }
 
+fn optional_u64_xml_attr(
+    reader: &Reader<Cursor<&[u8]>>,
+    e: &BytesStart<'_>,
+    name: &[u8],
+) -> Result<Option<u64>> {
+    xml_attr(reader, e, name)?
+        .map(|value| {
+            value.parse::<u64>().map_err(|_| {
+                anyhow!(
+                    "AppxBlockMap.xml `{}` element has invalid `{}` value",
+                    std::str::from_utf8(e.local_name().as_ref()).unwrap_or("?"),
+                    std::str::from_utf8(name).unwrap_or("?")
+                )
+            })
+        })
+        .transpose()
+}
+
 fn normalize_appx_part_name(name: &str) -> Result<String> {
     if name.is_empty() || name.bytes().any(|b| b == 0) {
         return Err(anyhow!(
@@ -244,6 +279,7 @@ fn parse_block_map_xml(xml: &[u8]) -> Result<(PeAuthenticodeHashKind, Vec<AppxBl
     let mut files = Vec::new();
     let mut current: Option<AppxBlockMapFile> = None;
     let mut seen_names = HashSet::new();
+    let mut in_block_map = false;
 
     loop {
         match reader
@@ -251,14 +287,24 @@ fn parse_block_map_xml(xml: &[u8]) -> Result<(PeAuthenticodeHashKind, Vec<AppxBl
             .map_err(|e| anyhow!("AppxBlockMap.xml parse failed: {e}"))?
         {
             Event::Start(e) if e.local_name().as_ref() == b"BlockMap" => {
+                if kind.is_some() {
+                    return Err(anyhow!("duplicate AppxBlockMap.xml BlockMap root"));
+                }
                 let hash_method = required_xml_attr(&reader, &e, b"HashMethod")?;
                 kind = Some(hash_kind_from_block_map_uri(&hash_method)?);
+                in_block_map = true;
             }
             Event::Empty(e) if e.local_name().as_ref() == b"BlockMap" => {
+                if kind.is_some() {
+                    return Err(anyhow!("duplicate AppxBlockMap.xml BlockMap root"));
+                }
                 let hash_method = required_xml_attr(&reader, &e, b"HashMethod")?;
                 kind = Some(hash_kind_from_block_map_uri(&hash_method)?);
             }
             Event::Start(e) if e.local_name().as_ref() == b"File" => {
+                if !in_block_map {
+                    return Err(anyhow!("AppxBlockMap.xml File outside BlockMap"));
+                }
                 if current.is_some() {
                     return Err(anyhow!("nested AppxBlockMap.xml File elements are invalid"));
                 }
@@ -270,14 +316,19 @@ fn parse_block_map_xml(xml: &[u8]) -> Result<(PeAuthenticodeHashKind, Vec<AppxBl
                 let declared_size = required_xml_attr(&reader, &e, b"Size")?
                     .parse::<u64>()
                     .map_err(|_| anyhow!("AppxBlockMap.xml File `{name}` has invalid Size"))?;
+                let lfh_size = optional_u64_xml_attr(&reader, &e, b"LfhSize")?;
                 current = Some(AppxBlockMapFile {
                     name,
                     normalized_name,
                     declared_size,
+                    lfh_size,
                     block_hashes: Vec::new(),
                 });
             }
             Event::Empty(e) if e.local_name().as_ref() == b"File" => {
+                if !in_block_map {
+                    return Err(anyhow!("AppxBlockMap.xml File outside BlockMap"));
+                }
                 let name = required_xml_attr(&reader, &e, b"Name")?;
                 let normalized_name = normalize_appx_part_name(&name)?;
                 if !seen_names.insert(normalized_name.clone()) {
@@ -286,10 +337,12 @@ fn parse_block_map_xml(xml: &[u8]) -> Result<(PeAuthenticodeHashKind, Vec<AppxBl
                 let declared_size = required_xml_attr(&reader, &e, b"Size")?
                     .parse::<u64>()
                     .map_err(|_| anyhow!("AppxBlockMap.xml File `{name}` has invalid Size"))?;
+                let lfh_size = optional_u64_xml_attr(&reader, &e, b"LfhSize")?;
                 files.push(AppxBlockMapFile {
                     name,
                     normalized_name,
                     declared_size,
+                    lfh_size,
                     block_hashes: Vec::new(),
                 });
             }
@@ -303,11 +356,23 @@ fn parse_block_map_xml(xml: &[u8]) -> Result<(PeAuthenticodeHashKind, Vec<AppxBl
                     .map_err(|e| anyhow!("AppxBlockMap.xml Block Hash is not base64: {e}"))?;
                 file.block_hashes.push(hash);
             }
+            Event::End(e) if e.local_name().as_ref() == b"BlockMap" => {
+                if current.is_some() {
+                    return Err(anyhow!("AppxBlockMap.xml BlockMap ended inside File"));
+                }
+                in_block_map = false;
+            }
             Event::End(e) if e.local_name().as_ref() == b"File" => {
                 let file = current
                     .take()
                     .ok_or_else(|| anyhow!("AppxBlockMap.xml unexpected File end"))?;
                 files.push(file);
+            }
+            Event::Start(e) | Event::Empty(e) => {
+                return Err(anyhow!(
+                    "unexpected AppxBlockMap.xml element `{}`",
+                    std::str::from_utf8(e.local_name().as_ref()).unwrap_or("?")
+                ));
             }
             Event::Eof => break,
             _ => {}
@@ -332,6 +397,114 @@ fn parse_block_map_xml(xml: &[u8]) -> Result<(PeAuthenticodeHashKind, Vec<AppxBl
         }
     }
     Ok((kind, files))
+}
+
+fn validate_content_types_xml(xml: &[u8]) -> Result<()> {
+    let mut reader = Reader::from_reader(Cursor::new(xml));
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+    let mut in_types = false;
+    let mut saw_types = false;
+    let mut defaults = HashSet::new();
+    let mut overrides = HashSet::new();
+
+    loop {
+        match reader
+            .read_event_into(&mut buf)
+            .map_err(|e| anyhow!("[Content_Types].xml parse failed: {e}"))?
+        {
+            Event::Start(e) if e.local_name().as_ref() == b"Types" => {
+                if saw_types {
+                    return Err(anyhow!("duplicate [Content_Types].xml Types root"));
+                }
+                saw_types = true;
+                in_types = true;
+            }
+            Event::Empty(e) if e.local_name().as_ref() == b"Types" => {
+                if saw_types {
+                    return Err(anyhow!("duplicate [Content_Types].xml Types root"));
+                }
+                saw_types = true;
+            }
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"Default" => {
+                if !in_types {
+                    return Err(anyhow!("[Content_Types].xml Default outside Types"));
+                }
+                let extension = required_xml_attr(&reader, &e, b"Extension")?;
+                let content_type = required_xml_attr(&reader, &e, b"ContentType")?;
+                if extension.is_empty() || extension.contains('/') || extension.contains('\\') {
+                    return Err(anyhow!(
+                        "[Content_Types].xml Default has invalid Extension `{extension}`"
+                    ));
+                }
+                if content_type.is_empty() {
+                    return Err(anyhow!(
+                        "[Content_Types].xml Default `{extension}` has empty ContentType"
+                    ));
+                }
+                let key = extension.to_ascii_lowercase();
+                if !defaults.insert(key) {
+                    return Err(anyhow!(
+                        "duplicate [Content_Types].xml Default for extension `{extension}`"
+                    ));
+                }
+            }
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"Override" => {
+                if !in_types {
+                    return Err(anyhow!("[Content_Types].xml Override outside Types"));
+                }
+                let part_name = required_xml_attr(&reader, &e, b"PartName")?;
+                let content_type = required_xml_attr(&reader, &e, b"ContentType")?;
+                if !part_name.starts_with('/') {
+                    return Err(anyhow!(
+                        "[Content_Types].xml Override PartName `{part_name}` is not absolute"
+                    ));
+                }
+                if content_type.is_empty() {
+                    return Err(anyhow!(
+                        "[Content_Types].xml Override `{part_name}` has empty ContentType"
+                    ));
+                }
+                let normalized = normalize_appx_part_name(&part_name[1..])?;
+                let key = normalized.to_ascii_lowercase();
+                if !overrides.insert(key) {
+                    return Err(anyhow!(
+                        "duplicate [Content_Types].xml Override for part `{part_name}`"
+                    ));
+                }
+            }
+            Event::End(e) if e.local_name().as_ref() == b"Types" => {
+                in_types = false;
+            }
+            Event::End(e) if matches!(e.local_name().as_ref(), b"Default" | b"Override") => {}
+            Event::Start(e) | Event::Empty(e) => {
+                return Err(anyhow!(
+                    "unexpected [Content_Types].xml element `{}`",
+                    std::str::from_utf8(e.local_name().as_ref()).unwrap_or("?")
+                ));
+            }
+            Event::Text(e) => {
+                let text = e
+                    .decode()
+                    .map_err(|e| anyhow!("[Content_Types].xml text decode failed: {e}"))?;
+                if !text.trim().is_empty() {
+                    return Err(anyhow!("[Content_Types].xml contains non-whitespace text"));
+                }
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    if !saw_types {
+        return Err(anyhow!("[Content_Types].xml missing Types root"));
+    }
+    if in_types {
+        return Err(anyhow!("unterminated [Content_Types].xml Types root"));
+    }
+    Ok(())
 }
 
 fn parse_signed_appx_blob(data: &[u8]) -> Result<(usize, AppxDigestParts)> {
@@ -413,8 +586,8 @@ fn find_classic_eocd(buf: &[u8]) -> Result<(usize, ClassicEocd)> {
     while pos >= search_upper_bound {
         let p = pos as usize;
         if read_u32_le(buf, p)? == EOCD_SIG {
-            let _disk_number = read_u16_le(buf, p + 4)?;
-            let _disk_with_central_directory = read_u16_le(buf, p + 6)?;
+            let disk_number = read_u16_le(buf, p + 4)?;
+            let disk_with_central_directory = read_u16_le(buf, p + 6)?;
             let number_of_files_on_this_disk = read_u16_le(buf, p + 8)?;
             let number_of_files = read_u16_le(buf, p + 10)?;
             let central_directory_size = read_u32_le(buf, p + 12)?;
@@ -424,6 +597,13 @@ fn find_classic_eocd(buf: &[u8]) -> Result<(usize, ClassicEocd)> {
             let cend = cstart
                 .checked_add(zip_file_comment_length)
                 .ok_or_else(|| anyhow!("EOCD comment overflow"))?;
+            if cend != buf.len() {
+                pos = match pos.checked_sub(1) {
+                    Some(p) => p,
+                    None => break,
+                };
+                continue;
+            }
             let zip_file_comment = buf
                 .get(cstart..cend)
                 .ok_or_else(|| anyhow!("EOCD comment out of range"))?
@@ -431,6 +611,8 @@ fn find_classic_eocd(buf: &[u8]) -> Result<(usize, ClassicEocd)> {
             return Ok((
                 p,
                 ClassicEocd {
+                    disk_number,
+                    disk_with_central_directory,
                     number_of_files_on_this_disk,
                     number_of_files,
                     central_directory_size,
@@ -451,11 +633,17 @@ fn parse_zip64_locator(buf: &[u8], off: usize) -> Result<Zip64Locator> {
     if read_u32_le(buf, off)? != ZIP64_LOC_SIG {
         return Err(anyhow!("invalid ZIP64 locator signature"));
     }
-    Ok(Zip64Locator {
+    let locator = Zip64Locator {
         disk_with_central_directory: read_u32_le(buf, off + 4)?,
         end_of_central_directory_offset: read_u64_le(buf, off + 8)?,
         number_of_disks: read_u32_le(buf, off + 16)?,
-    })
+    };
+    if locator.disk_with_central_directory != 0 || locator.number_of_disks != 1 {
+        return Err(anyhow!(
+            "multi-disk ZIP64 archives are not valid APPX/MSIX packages"
+        ));
+    }
+    Ok(locator)
 }
 
 fn find_zip64_eocd(
@@ -470,14 +658,28 @@ fn find_zip64_eocd(
                 u64::try_from(nominal_offset).map_err(|_| anyhow!("nominal offset"))?,
             );
             let record_size = read_u64_le(buf, pos + 4)?;
+            if record_size < 44 {
+                return Err(anyhow!(
+                    "ZIP64 end-of-central-directory record is too small"
+                ));
+            }
             let version_made_by = read_u16_le(buf, pos + 12)?;
             let version_needed_to_extract = read_u16_le(buf, pos + 14)?;
             let disk_number = read_u32_le(buf, pos + 16)?;
             let disk_with_central_directory = read_u32_le(buf, pos + 20)?;
+            if disk_number != 0 || disk_with_central_directory != 0 {
+                return Err(anyhow!(
+                    "multi-disk ZIP64 archives are not valid APPX/MSIX packages"
+                ));
+            }
+            let number_of_files_on_this_disk = read_u64_le(buf, pos + 24)?;
+            let number_of_files = read_u64_le(buf, pos + 32)?;
+            let central_directory_size = read_u64_le(buf, pos + 40)?;
+            let central_directory_offset = read_u64_le(buf, pos + 48)?;
             let fixed_after_record_size = 44usize;
             let total_record_content =
                 usize::try_from(record_size).map_err(|_| anyhow!("zip64"))?;
-            let tail_len = total_record_content.saturating_sub(fixed_after_record_size);
+            let tail_len = total_record_content - fixed_after_record_size;
             let tail_start = pos + 12 + fixed_after_record_size;
             let tail_end = tail_start
                 .checked_add(tail_len)
@@ -494,6 +696,10 @@ fn find_zip64_eocd(
                     version_needed_to_extract,
                     disk_number,
                     disk_with_central_directory,
+                    number_of_files_on_this_disk,
+                    number_of_files,
+                    central_directory_size,
+                    central_directory_offset,
                     tail_after_fixed,
                 },
                 archive_offset_u64,
@@ -506,10 +712,18 @@ fn find_zip64_eocd(
 
 fn parse_zip_tail(buf: &[u8]) -> Result<ZipTail> {
     let (cde_pos, classic) = find_classic_eocd(buf)?;
+    if classic.disk_number != 0 || classic.disk_with_central_directory != 0 {
+        return Err(anyhow!(
+            "multi-disk ZIP archives are not valid APPX/MSIX packages"
+        ));
+    }
     let file_len = buf.len();
     let comment_len = classic.zip_file_comment.len();
     let mut locator = None;
     let mut zip64_eocd = None;
+    let mut zip64_eocd_offset = None;
+    let mut central_directory_offset = u64::from(classic.central_directory_offset);
+    let mut central_directory_size = u64::from(classic.central_directory_size);
 
     let locator_seek = file_len
         .checked_sub(20 + 22 + comment_len)
@@ -523,21 +737,60 @@ fn parse_zip_tail(buf: &[u8]) -> Result<ZipTail> {
         let nominal = usize::try_from(loc.end_of_central_directory_offset)
             .map_err(|_| anyhow!("zip64 nominal offset"))?;
         let search_upper = cde_pos.saturating_sub(60);
-        let (_zpos, z64, _ao) = find_zip64_eocd(buf, nominal, search_upper)?;
+        let (zpos, z64, _ao) = find_zip64_eocd(buf, nominal, search_upper)?;
+        if z64.number_of_files_on_this_disk != z64.number_of_files {
+            return Err(anyhow!(
+                "multi-disk ZIP64 entry counts are not valid APPX/MSIX packages"
+            ));
+        }
+        central_directory_offset = if classic.central_directory_offset == u32::MAX {
+            z64.central_directory_offset
+        } else {
+            u64::from(classic.central_directory_offset)
+        };
+        central_directory_size = if classic.central_directory_size == u32::MAX {
+            z64.central_directory_size
+        } else {
+            u64::from(classic.central_directory_size)
+        };
+        zip64_eocd_offset = Some(u64::try_from(zpos).map_err(|_| anyhow!("zip64 EOCD offset"))?);
         zip64_eocd = Some(z64);
     }
     if locator.is_none() {
+        if classic.number_of_files_on_this_disk == u16::MAX
+            || classic.number_of_files == u16::MAX
+            || classic.central_directory_size == u32::MAX
+            || classic.central_directory_offset == u32::MAX
+        {
+            return Err(anyhow!(
+                "classic EOCD uses ZIP64 sentinel values but ZIP64 locator is missing"
+            ));
+        }
         let cde_pos_u64 = u64::try_from(cde_pos).map_err(|_| anyhow!("cde position"))?;
         cde_pos_u64
             .checked_sub(classic.central_directory_size as u64)
             .and_then(|x| x.checked_sub(classic.central_directory_offset as u64))
             .ok_or_else(|| anyhow!("invalid EOCD central directory size/offset"))?;
     }
+    let eocd_offset_u64 = u64::try_from(cde_pos).map_err(|_| anyhow!("eocd offset"))?;
+    let cd_end = central_directory_offset
+        .checked_add(central_directory_size)
+        .ok_or_else(|| anyhow!("central directory extent overflow"))?;
+    let expected_cd_end = zip64_eocd_offset.unwrap_or(eocd_offset_u64);
+    if cd_end != expected_cd_end {
+        return Err(anyhow!(
+            "central directory extent does not end at EOCD/ZIP64 EOCD (offset={central_directory_offset}, size={central_directory_size}, expected_end={expected_cd_end})"
+        ));
+    }
 
     Ok(ZipTail {
         classic,
         zip64_eocd,
         locator,
+        zip64_eocd_offset,
+        eocd_offset: cde_pos,
+        central_directory_offset,
+        central_directory_size,
     })
 }
 
@@ -967,10 +1220,388 @@ fn read_zip_entry_raw(archive: &mut ZipArchive<Cursor<&[u8]>>, name: &str) -> Re
     Ok(v)
 }
 
+fn ascii_part(bytes: &'static [u8]) -> &'static str {
+    std::str::from_utf8(bytes).expect("APPX part constants are ASCII")
+}
+
+fn canonical_reserved_part(normalized_name: &str) -> Option<&'static str> {
+    [
+        CONTENT_TYPES,
+        BLOCK_MAP,
+        APP_SIGNATURE,
+        APP_MANIFEST,
+        BUNDLE_MANIFEST,
+        CODE_INTEGRITY,
+    ]
+    .into_iter()
+    .map(ascii_part)
+    .find(|reserved| normalized_name.eq_ignore_ascii_case(reserved))
+}
+
+fn validate_package_part_inventory(
+    archive: &ZipArchive<Cursor<&[u8]>>,
+    ext: &str,
+) -> Result<AppxPackageInventory> {
+    let is_bundle = matches!(ext, "msixbundle" | "appxbundle");
+    let mut seen = HashSet::new();
+    let mut seen_casefolded = HashMap::<String, String>::new();
+    let mut required_counts = HashMap::<&'static str, usize>::new();
+
+    for name in archive.file_names() {
+        if name.ends_with('/') || name.ends_with('\\') {
+            continue;
+        }
+        if name.contains('\\') {
+            return Err(anyhow!(
+                "APPX/MSIX ZIP entry `{name}` uses backslashes; package part names must use `/`"
+            ));
+        }
+        let normalized = normalize_appx_part_name(name)?;
+        if !seen.insert(normalized.clone()) {
+            return Err(anyhow!("duplicate APPX/MSIX ZIP part `{normalized}`"));
+        }
+        let folded = normalized.to_ascii_lowercase();
+        if let Some(previous) = seen_casefolded.insert(folded, normalized.clone()) {
+            return Err(anyhow!(
+                "duplicate APPX/MSIX ZIP part after case-insensitive normalization: `{previous}` / `{normalized}`"
+            ));
+        }
+        if let Some(canonical) = canonical_reserved_part(&normalized) {
+            if normalized != canonical {
+                return Err(anyhow!(
+                    "reserved APPX/MSIX part `{normalized}` must use canonical path `{canonical}`"
+                ));
+            }
+            *required_counts.entry(canonical).or_default() += 1;
+        }
+        if is_bundle {
+            let child_ext = normalized
+                .rsplit_once('.')
+                .map(|(_, ext)| ext.to_ascii_lowercase());
+            if child_ext
+                .as_deref()
+                .is_some_and(is_encrypted_msix_extension)
+            {
+                return Err(anyhow!(
+                    "cleartext APPX/MSIX bundle contains encrypted child package `{normalized}`"
+                ));
+            }
+        }
+    }
+
+    for required in [CONTENT_TYPES, BLOCK_MAP, APP_SIGNATURE] {
+        let required = ascii_part(required);
+        if required_counts.get(required).copied().unwrap_or(0) != 1 {
+            return Err(anyhow!(
+                "APPX/MSIX package must contain exactly one required part `{required}`"
+            ));
+        }
+    }
+
+    let flat_manifest = ascii_part(APP_MANIFEST);
+    let bundle_manifest = ascii_part(BUNDLE_MANIFEST);
+    if is_bundle {
+        if required_counts.get(bundle_manifest).copied().unwrap_or(0) != 1 {
+            return Err(anyhow!(
+                "APPX/MSIX bundle must contain exactly one required part `{bundle_manifest}`"
+            ));
+        }
+        if required_counts.get(flat_manifest).copied().unwrap_or(0) != 0 {
+            return Err(anyhow!(
+                "APPX/MSIX bundle must not contain top-level `{flat_manifest}`"
+            ));
+        }
+    } else {
+        if required_counts.get(flat_manifest).copied().unwrap_or(0) != 1 {
+            return Err(anyhow!(
+                "APPX/MSIX package must contain exactly one required part `{flat_manifest}`"
+            ));
+        }
+        if required_counts.get(bundle_manifest).copied().unwrap_or(0) != 0 {
+            return Err(anyhow!(
+                "flat APPX/MSIX package must not contain bundle part `{bundle_manifest}`"
+            ));
+        }
+    }
+
+    let code_integrity = ascii_part(CODE_INTEGRITY);
+    let code_integrity_count = required_counts.get(code_integrity).copied().unwrap_or(0);
+    if code_integrity_count > 1 {
+        return Err(anyhow!(
+            "APPX/MSIX package must contain at most one `{code_integrity}`"
+        ));
+    }
+
+    Ok(AppxPackageInventory {
+        has_code_integrity: code_integrity_count == 1,
+    })
+}
+
 fn hash_bytes(kind: PeAuthenticodeHashKind, bytes: &[u8]) -> Vec<u8> {
     let mut h = RunningHasher::new(kind);
     h.update(bytes);
     h.finalize()
+}
+
+fn data_descriptor_len_and_validate(buf: &[u8], off: usize, zf: &ZipFile<'_>) -> Result<u64> {
+    let has_sig = buf
+        .get(off..off + 4)
+        .map(|b| u32::from_le_bytes(b.try_into().unwrap()) == DD_SIG)
+        .unwrap_or(false);
+    let cursor = off + if has_sig { 4 } else { 0 };
+    let crc = read_u32_le(buf, cursor)?;
+    if crc != zf.crc32() {
+        return Err(anyhow!(
+            "ZIP data descriptor CRC does not match central directory"
+        ));
+    }
+    let classic_matches = read_u32_le(buf, cursor + 4)
+        .ok()
+        .zip(read_u32_le(buf, cursor + 8).ok())
+        .is_some_and(|(compressed_size, uncompressed_size)| {
+            u64::from(compressed_size) == zf.compressed_size()
+                && u64::from(uncompressed_size) == zf.size()
+        });
+    if classic_matches {
+        return Ok(if has_sig { 16 } else { 12 });
+    }
+
+    let zip64_matches = read_u64_le(buf, cursor + 4)
+        .ok()
+        .zip(read_u64_le(buf, cursor + 12).ok())
+        .is_some_and(|(compressed_size, uncompressed_size)| {
+            compressed_size == zf.compressed_size() && uncompressed_size == zf.size()
+        });
+    if zip64_matches {
+        Ok(if has_sig { 24 } else { 20 })
+    } else {
+        let compressed_size = read_u64_le(buf, cursor + 4)?;
+        let uncompressed_size = read_u64_le(buf, cursor + 12)?;
+        Err(anyhow!(
+            "ZIP data descriptor sizes do not match central directory (compressed={compressed_size}, uncompressed={uncompressed_size})"
+        ))
+    }
+}
+
+fn local_file_record_extent(buf: &[u8], zf: &ZipFile<'_>) -> Result<(u64, u64)> {
+    let header_start = zf.header_start();
+    let hs = usize::try_from(header_start).map_err(|_| anyhow!("header_start"))?;
+    if read_u32_le(buf, hs)? != LH_SIG {
+        return Err(anyhow!("bad local file header signature"));
+    }
+    let flags = read_u16_le(buf, hs + 6)?;
+    if flags & 0x2041 != 0 {
+        return Err(anyhow!(
+            "encrypted ZIP local file records are not valid cleartext APPX/MSIX packages"
+        ));
+    }
+    let compression = read_u16_le(buf, hs + 8)?;
+    if !matches!(compression, 0 | 8) {
+        return Err(anyhow!(
+            "unsupported ZIP compression method {compression} in APPX/MSIX local file record"
+        ));
+    }
+    if !matches!(
+        zf.compression(),
+        CompressionMethod::Stored | CompressionMethod::Deflated
+    ) {
+        return Err(anyhow!(
+            "unsupported ZIP compression method {:?} in APPX/MSIX central directory",
+            zf.compression()
+        ));
+    }
+    let name_len = read_u16_le(buf, hs + 26)? as u64;
+    let extra_len = read_u16_le(buf, hs + 28)? as u64;
+    let name_start = hs
+        .checked_add(30)
+        .ok_or_else(|| anyhow!("local file name offset overflow"))?;
+    let name_len_usize = usize::try_from(name_len).map_err(|_| anyhow!("name length"))?;
+    let name_end = name_start
+        .checked_add(name_len_usize)
+        .ok_or_else(|| anyhow!("local file name extent overflow"))?;
+    let local_name = buf
+        .get(name_start..name_end)
+        .ok_or_else(|| anyhow!("local file name out of range"))?;
+    if local_name != zf.name_raw() {
+        return Err(anyhow!(
+            "ZIP local file name does not match central directory for `{}`",
+            zf.name()
+        ));
+    }
+    let expected_data_start = header_start
+        .checked_add(30)
+        .and_then(|x| x.checked_add(name_len))
+        .and_then(|x| x.checked_add(extra_len))
+        .ok_or_else(|| anyhow!("local file header extent overflow"))?;
+    if zf.data_start() != expected_data_start {
+        return Err(anyhow!(
+            "local file header/data offset mismatch for `{}`",
+            zf.name()
+        ));
+    }
+    let compressed_end = zf
+        .data_start()
+        .checked_add(zf.compressed_size())
+        .ok_or_else(|| anyhow!("compressed payload extent overflow"))?;
+    if flags & DATA_DESCRIPTOR_BIT == 0 {
+        let crc = read_u32_le(buf, hs + 14)?;
+        let compressed_size = u64::from(read_u32_le(buf, hs + 18)?);
+        let uncompressed_size = u64::from(read_u32_le(buf, hs + 22)?);
+        if crc != zf.crc32() {
+            return Err(anyhow!(
+                "ZIP local file CRC does not match central directory for `{}`",
+                zf.name()
+            ));
+        }
+        if compressed_size != u64::from(u32::MAX) && compressed_size != zf.compressed_size() {
+            return Err(anyhow!(
+                "ZIP local compressed size does not match central directory for `{}`",
+                zf.name()
+            ));
+        }
+        if uncompressed_size != u64::from(u32::MAX) && uncompressed_size != zf.size() {
+            return Err(anyhow!(
+                "ZIP local uncompressed size does not match central directory for `{}`",
+                zf.name()
+            ));
+        }
+    }
+    let descriptor_len = if flags & DATA_DESCRIPTOR_BIT != 0 {
+        data_descriptor_len_and_validate(
+            buf,
+            usize::try_from(compressed_end).map_err(|_| anyhow!("compressed end"))?,
+            zf,
+        )?
+    } else {
+        0
+    };
+    let end = compressed_end
+        .checked_add(descriptor_len)
+        .ok_or_else(|| anyhow!("local file record extent overflow"))?;
+    Ok((header_start, end))
+}
+
+fn validate_central_directory_records(buf: &[u8], tail: &ZipTail) -> Result<()> {
+    let count = tail
+        .zip64_eocd
+        .as_ref()
+        .map(|z64| z64.number_of_files)
+        .unwrap_or(u64::from(tail.classic.number_of_files));
+    if count > 0xA00000 {
+        return Err(anyhow!(
+            "APPX/MSIX ZIP has too many central directory entries"
+        ));
+    }
+    let mut cursor = usize::try_from(tail.central_directory_offset)
+        .map_err(|_| anyhow!("central directory offset"))?;
+    let cd_end = tail
+        .central_directory_offset
+        .checked_add(tail.central_directory_size)
+        .ok_or_else(|| anyhow!("central directory extent overflow"))?;
+    let cd_end = usize::try_from(cd_end).map_err(|_| anyhow!("central directory end"))?;
+    let mut seen = 0u64;
+    while cursor < cd_end {
+        if read_u32_le(buf, cursor)? != CD_SIG {
+            return Err(anyhow!("bad central directory signature"));
+        }
+        let flags = read_u16_le(buf, cursor + 8)?;
+        if flags & 0x2041 != 0 {
+            return Err(anyhow!(
+                "encrypted ZIP central directory records are not valid cleartext APPX/MSIX packages"
+            ));
+        }
+        let compression = read_u16_le(buf, cursor + 10)?;
+        if !matches!(compression, 0 | 8) {
+            return Err(anyhow!(
+                "unsupported ZIP compression method {compression} in APPX/MSIX central directory"
+            ));
+        }
+        let file_name_length = read_u16_le(buf, cursor + 28)? as usize;
+        let extra_field_length = read_u16_le(buf, cursor + 30)? as usize;
+        let file_comment_length = read_u16_le(buf, cursor + 32)? as usize;
+        let disk_start = read_u16_le(buf, cursor + 34)?;
+        if disk_start != 0 {
+            return Err(anyhow!("central directory entry starts on a non-zero disk"));
+        }
+        if file_comment_length != 0 {
+            return Err(anyhow!(
+                "central directory file comments are not valid in APPX/MSIX packages"
+            ));
+        }
+        cursor = cursor
+            .checked_add(46)
+            .and_then(|x| x.checked_add(file_name_length))
+            .and_then(|x| x.checked_add(extra_field_length))
+            .and_then(|x| x.checked_add(file_comment_length))
+            .ok_or_else(|| anyhow!("central directory record overflow"))?;
+        if cursor > cd_end {
+            return Err(anyhow!("central directory record extends past directory"));
+        }
+        seen += 1;
+    }
+    if seen != count {
+        return Err(anyhow!(
+            "central directory entry count {seen} does not match EOCD count {count}"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_zip_file_layout(
+    buf: &[u8],
+    archive: &mut ZipArchive<Cursor<&[u8]>>,
+    tail: &ZipTail,
+) -> Result<()> {
+    validate_central_directory_records(buf, tail)?;
+    let mut extents = Vec::new();
+    for i in 0..archive.len() {
+        let zf = archive.by_index(i)?;
+        let name = zf.name().to_owned();
+        let (start, end) = local_file_record_extent(buf, &zf)?;
+        extents.push((start, end, name));
+    }
+    extents.sort_by_key(|(start, _, _)| *start);
+    let Some((first_start, _, first_name)) = extents.first() else {
+        return Err(anyhow!("APPX/MSIX ZIP has no local file records"));
+    };
+    if *first_start != 0 {
+        return Err(anyhow!(
+            "APPX/MSIX ZIP has leading bytes before first local file `{first_name}`"
+        ));
+    }
+    for pair in extents.windows(2) {
+        let (_, prev_end, prev_name) = &pair[0];
+        let (next_start, _, next_name) = &pair[1];
+        if next_start < prev_end {
+            return Err(anyhow!(
+                "APPX/MSIX ZIP local file records overlap (`{prev_name}` / `{next_name}`)"
+            ));
+        }
+        if next_start > prev_end {
+            return Err(anyhow!(
+                "APPX/MSIX ZIP has a gap between local file records `{prev_name}` and `{next_name}`"
+            ));
+        }
+    }
+    let (_, last_end, last_name) = extents.last().expect("nonempty extents");
+    if *last_end != tail.central_directory_offset {
+        return Err(anyhow!(
+            "APPX/MSIX ZIP has a gap before the central directory after `{last_name}`"
+        ));
+    }
+    let cd_end = tail
+        .central_directory_offset
+        .checked_add(tail.central_directory_size)
+        .ok_or_else(|| anyhow!("central directory extent overflow"))?;
+    let expected_cd_end = tail
+        .zip64_eocd_offset
+        .unwrap_or(u64::try_from(tail.eocd_offset).map_err(|_| anyhow!("eocd offset"))?);
+    if cd_end != expected_cd_end {
+        return Err(anyhow!(
+            "APPX/MSIX ZIP central directory does not end at EOCD/ZIP64 EOCD"
+        ));
+    }
+    Ok(())
 }
 
 fn archive_file_index_by_normalized_name(
@@ -1021,6 +1652,18 @@ fn validate_block_map_file_hashes(
         };
 
         let mut zf = archive.by_index(index)?;
+        if let Some(lfh_size) = block_file.lfh_size {
+            let actual_lfh_size = zf
+                .data_start()
+                .checked_sub(zf.header_start())
+                .ok_or_else(|| anyhow!("local file header size underflow"))?;
+            if lfh_size != actual_lfh_size {
+                return Err(anyhow!(
+                    "AppxBlockMap.xml File `{}` LfhSize {lfh_size} does not match ZIP local header size {actual_lfh_size}",
+                    block_file.name
+                ));
+            }
+        }
         let mut data = Vec::new();
         zf.read_to_end(&mut data)?;
         let data_len = u64::try_from(data.len()).map_err(|_| anyhow!("file too large"))?;
@@ -1074,11 +1717,6 @@ fn validate_block_map_file_hashes(
     }
 
     Ok(())
-}
-
-fn zip_has_bundle_manifest(archive: &ZipArchive<Cursor<&[u8]>>) -> bool {
-    let name = std::str::from_utf8(BUNDLE_MANIFEST).expect("ASCII path");
-    archive.file_names().any(|n| n == name)
 }
 
 fn cleartext_msix_extension_for_name(name: &str) -> Option<&'static str> {
@@ -1155,14 +1793,10 @@ pub fn verify_msix_digest_consistency(path: &Path) -> Result<()> {
 
 fn verify_msix_digest_consistency_bytes(buf: &[u8], ext: &str) -> Result<()> {
     let tail = parse_zip_tail(buf)?;
+    let mut layout_archive = ZipArchive::new(Cursor::new(buf))?;
+    validate_zip_file_layout(buf, &mut layout_archive, &tail)?;
     let mut archive = ZipArchive::new(Cursor::new(buf))?;
-    if matches!(ext, "msixbundle" | "appxbundle") && !zip_has_bundle_manifest(&archive) {
-        return Err(anyhow!(
-            "missing `{}` — not a valid {} bundle ZIP",
-            std::str::from_utf8(BUNDLE_MANIFEST).expect("ASCII"),
-            ext
-        ));
-    }
+    let inventory = validate_package_part_inventory(&archive, ext)?;
 
     let p7x = read_zip_entry_raw(&mut archive, std::str::from_utf8(APP_SIGNATURE)?)?;
     let pkcs7 = strip_pkcx(&p7x)?;
@@ -1174,6 +1808,8 @@ fn verify_msix_digest_consistency_bytes(buf: &[u8], ext: &str) -> Result<()> {
 
     let block_map_bytes = read_zip_entry_raw(&mut archive, std::str::from_utf8(BLOCK_MAP)?)?;
     let (kind, block_map_files) = parse_block_map_xml(&block_map_bytes)?;
+    let ct_raw = read_zip_entry_raw(&mut archive, std::str::from_utf8(CONTENT_TYPES)?)?;
+    validate_content_types_xml(&ct_raw)?;
     let expected_piece = kind.digest_output_len();
     if piece_len != expected_piece {
         return Err(anyhow!(
@@ -1181,12 +1817,9 @@ fn verify_msix_digest_consistency_bytes(buf: &[u8], ext: &str) -> Result<()> {
         ));
     }
 
-    let ct_raw = read_zip_entry_raw(&mut archive, std::str::from_utf8(CONTENT_TYPES)?)?;
     let bm_raw = read_zip_entry_raw(&mut archive, std::str::from_utf8(BLOCK_MAP)?)?;
 
-    let code_integrity_name = std::str::from_utf8(CODE_INTEGRITY).expect("ASCII path");
-    let ci_expected = archive.file_names().any(|n| n == code_integrity_name);
-    let ci_raw = if ci_expected {
+    let ci_raw = if inventory.has_code_integrity {
         Some(read_zip_entry_raw(
             &mut archive,
             std::str::from_utf8(CODE_INTEGRITY)?,
@@ -1195,7 +1828,7 @@ fn verify_msix_digest_consistency_bytes(buf: &[u8], ext: &str) -> Result<()> {
         None
     };
 
-    if ci_expected != parts.axci.is_some() {
+    if inventory.has_code_integrity != parts.axci.is_some() {
         return Err(anyhow!(
             "CodeIntegrity.cat presence does not match PKCS#7 AXCI block"
         ));
@@ -1248,7 +1881,7 @@ mod tests {
     fn block_map_xml_for_file(name: &str, size: usize, hash: &[u8]) -> Vec<u8> {
         let hash_b64 = base64::engine::general_purpose::STANDARD.encode(hash);
         format!(
-            r#"<?xml version="1.0" encoding="UTF-8"?><BlockMap xmlns="http://schemas.microsoft.com/appx/2010/blockmap" HashMethod="{HASH_SHA256}"><File Name="{name}" Size="{size}" LfhSize="0"><Block Hash="{hash_b64}"/></File></BlockMap>"#
+            r#"<?xml version="1.0" encoding="UTF-8"?><BlockMap xmlns="http://schemas.microsoft.com/appx/2010/blockmap" HashMethod="{HASH_SHA256}"><File Name="{name}" Size="{size}"><Block Hash="{hash_b64}"/></File></BlockMap>"#
         )
         .into_bytes()
     }
@@ -1265,6 +1898,110 @@ mod tests {
             writer.finish().expect("finish zip");
         }
         out.into_inner()
+    }
+
+    fn find_eocd_for_test(zip: &[u8]) -> usize {
+        zip.windows(4)
+            .rposition(|w| w == EOCD_SIG.to_le_bytes())
+            .expect("EOCD")
+    }
+
+    fn read_u32_test(buf: &[u8], off: usize) -> u32 {
+        u32::from_le_bytes(buf[off..off + 4].try_into().unwrap())
+    }
+
+    fn write_u16_test(buf: &mut [u8], off: usize, value: u16) {
+        buf[off..off + 2].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn write_u32_test(buf: &mut [u8], off: usize, value: u32) {
+        buf[off..off + 4].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn first_central_directory_offset(zip: &[u8]) -> usize {
+        let eocd = find_eocd_for_test(zip);
+        read_u32_test(zip, eocd + 16) as usize
+    }
+
+    fn first_local_header_offset(zip: &[u8]) -> usize {
+        let cd_offset = first_central_directory_offset(zip);
+        read_u32_test(zip, cd_offset + 42) as usize
+    }
+
+    fn zip_with_gap_before_central_directory() -> Vec<u8> {
+        let mut zip = zip_with_entries(&[("a.txt", b"a")]);
+        let eocd = find_eocd_for_test(&zip);
+        let cd_offset = read_u32_test(&zip, eocd + 16) as usize;
+        let gap = b"GAP";
+        zip.splice(cd_offset..cd_offset, gap.iter().copied());
+        let new_eocd = eocd + gap.len();
+        write_u32_test(&mut zip, new_eocd + 16, (cd_offset + gap.len()) as u32);
+        zip
+    }
+
+    fn zip_with_gap_between_local_files() -> Vec<u8> {
+        let mut zip = zip_with_entries(&[("a.txt", b"a"), ("b.txt", b"b")]);
+        let eocd = find_eocd_for_test(&zip);
+        let cd_offset = read_u32_test(&zip, eocd + 16) as usize;
+        let first_name_len = read_u16_le(&zip, cd_offset + 28).unwrap() as usize;
+        let first_extra_len = read_u16_le(&zip, cd_offset + 30).unwrap() as usize;
+        let first_comment_len = read_u16_le(&zip, cd_offset + 32).unwrap() as usize;
+        let second_cd = cd_offset + 46 + first_name_len + first_extra_len + first_comment_len;
+        let second_local = read_u32_test(&zip, second_cd + 42) as usize;
+
+        let gap = b"GAP";
+        zip.splice(second_local..second_local, gap.iter().copied());
+        let new_cd_offset = cd_offset + gap.len();
+        let new_eocd = eocd + gap.len();
+        let new_second_cd = second_cd + gap.len();
+        write_u32_test(
+            &mut zip,
+            new_second_cd + 42,
+            (second_local + gap.len()) as u32,
+        );
+        write_u32_test(&mut zip, new_eocd + 16, new_cd_offset as u32);
+        zip
+    }
+
+    fn zip_with_central_directory_file_comment() -> Vec<u8> {
+        let mut zip = zip_with_entries(&[("a.txt", b"a")]);
+        let eocd = find_eocd_for_test(&zip);
+        let cd_offset = read_u32_test(&zip, eocd + 16) as usize;
+        let cd_size = read_u32_test(&zip, eocd + 12);
+        let name_len = read_u16_le(&zip, cd_offset + 28).unwrap() as usize;
+        let extra_len = read_u16_le(&zip, cd_offset + 30).unwrap() as usize;
+        let comment = b"cmt";
+        let comment_at = cd_offset + 46 + name_len + extra_len;
+        zip.splice(comment_at..comment_at, comment.iter().copied());
+        write_u16_test(&mut zip, cd_offset + 32, comment.len() as u16);
+        let new_eocd = eocd + comment.len();
+        write_u32_test(&mut zip, new_eocd + 12, cd_size + comment.len() as u32);
+        zip
+    }
+
+    fn zip_with_leading_bytes() -> Vec<u8> {
+        let mut zip = zip_with_entries(&[("a.txt", b"a")]);
+        let prefix = b"PX";
+        let old_eocd = find_eocd_for_test(&zip);
+        let old_cd_offset = read_u32_test(&zip, old_eocd + 16) as usize;
+        let cd_size = read_u32_test(&zip, old_eocd + 12) as usize;
+        zip.splice(0..0, prefix.iter().copied());
+        let new_cd_offset = old_cd_offset + prefix.len();
+        let new_eocd = old_eocd + prefix.len();
+        write_u32_test(&mut zip, new_eocd + 16, new_cd_offset as u32);
+
+        let mut cd_cursor = new_cd_offset;
+        let cd_end = new_cd_offset + cd_size;
+        while cd_cursor < cd_end {
+            assert_eq!(read_u32_test(&zip, cd_cursor), CD_SIG);
+            let name_len = read_u16_le(&zip, cd_cursor + 28).unwrap() as usize;
+            let extra_len = read_u16_le(&zip, cd_cursor + 30).unwrap() as usize;
+            let comment_len = read_u16_le(&zip, cd_cursor + 32).unwrap() as usize;
+            let local_off = read_u32_test(&zip, cd_cursor + 42);
+            write_u32_test(&mut zip, cd_cursor + 42, local_off + prefix.len() as u32);
+            cd_cursor += 46 + name_len + extra_len + comment_len;
+        }
+        zip
     }
 
     fn fixture_path(rel: &str) -> PathBuf {
@@ -1328,6 +2065,32 @@ mod tests {
     }
 
     #[test]
+    fn block_map_parser_rejects_file_outside_root_and_duplicate_root() {
+        let file_outside_root = br#"<File Name="payload.txt" Size="1"><Block Hash="AAAA"/></File>"#;
+        let err = parse_block_map_xml(file_outside_root).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("File outside BlockMap"), "{msg}");
+
+        let duplicate_root = br#"<BlockMap HashMethod="http://www.w3.org/2001/04/xmlenc#sha256" /><BlockMap HashMethod="http://www.w3.org/2001/04/xmlenc#sha256" />"#;
+        let err = parse_block_map_xml(duplicate_root).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("duplicate"), "{msg}");
+    }
+
+    #[test]
+    fn content_types_validation_rejects_malformed_overrides() {
+        let no_absolute_part = br#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="AppxBlockMap.xml" ContentType="application/vnd.ms-appx.blockmap+xml"/></Types>"#;
+        let err = validate_content_types_xml(no_absolute_part).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("not absolute"), "{msg}");
+
+        let duplicate_default = br#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="a"/><Default Extension="XML" ContentType="b"/></Types>"#;
+        let err = validate_content_types_xml(duplicate_default).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("duplicate"), "{msg}");
+    }
+
+    #[test]
     fn encrypted_msix_extension_is_detected() {
         assert!(is_encrypted_msix_extension("emsix"));
         assert!(is_encrypted_msix_extension("eappxbundle"));
@@ -1335,17 +2098,231 @@ mod tests {
     }
 
     #[test]
-    fn verify_rejects_encrypted_msix_by_extension() {
+    fn verify_rejects_all_encrypted_msix_extensions() {
         let dir = std::env::temp_dir();
-        let p = dir.join("psign_fake_encrypted.emsix");
-        std::fs::write(&p, b"not-a-real-package").expect("write temp");
-        let err = verify_msix_digest_consistency(&p).unwrap_err();
-        let _ = std::fs::remove_file(&p);
+        for ext in ["eappx", "eappxbundle", "emsix", "emsixbundle"] {
+            let p = dir.join(format!("psign_fake_encrypted.{ext}"));
+            std::fs::write(&p, b"not-a-real-package").expect("write temp");
+            let err = verify_msix_digest_consistency(&p).unwrap_err();
+            let _ = std::fs::remove_file(&p);
+            let msg = format!("{err:#}");
+            assert!(
+                msg.contains("encrypted") && msg.contains("Eappx"),
+                "unexpected message for {ext}: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn zip_tail_rejects_trailing_garbage_after_eocd() {
+        let mut zip = zip_with_entries(&[("a.txt", b"a")]);
+        zip.extend_from_slice(b"trailing");
+        let err = parse_zip_tail(&zip).unwrap_err();
         let msg = format!("{err:#}");
         assert!(
-            msg.contains("encrypted") && msg.contains("Eappx"),
+            msg.contains("central-directory") || msg.contains("EOCD"),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn zip_tail_rejects_multidisk_classic_eocd() {
+        let mut zip = zip_with_entries(&[("a.txt", b"a")]);
+        let eocd = find_eocd_for_test(&zip);
+        write_u16_test(&mut zip, eocd + 4, 1);
+        let err = parse_zip_tail(&zip).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("multi-disk"), "unexpected message: {msg}");
+    }
+
+    #[test]
+    fn zip_tail_rejects_zip64_sentinel_without_locator() {
+        let mut zip = zip_with_entries(&[("a.txt", b"a")]);
+        let eocd = find_eocd_for_test(&zip);
+        write_u32_test(&mut zip, eocd + 12, u32::MAX);
+        let err = parse_zip_tail(&zip).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("ZIP64") && msg.contains("locator"),
             "unexpected message: {msg}"
         );
+    }
+
+    #[test]
+    fn zip_tail_rejects_central_directory_extent_mismatch() {
+        let mut zip = zip_with_entries(&[("a.txt", b"a")]);
+        let eocd = find_eocd_for_test(&zip);
+        let cd_size = read_u32_test(&zip, eocd + 12);
+        write_u32_test(&mut zip, eocd + 12, cd_size - 1);
+        let err = parse_zip_tail(&zip).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("central directory extent"),
+            "unexpected message: {msg}"
+        );
+    }
+
+    #[test]
+    fn zip_layout_rejects_gap_before_central_directory() {
+        let zip = zip_with_gap_before_central_directory();
+        let tail = parse_zip_tail(&zip).unwrap();
+        let mut archive = ZipArchive::new(Cursor::new(zip.as_slice())).unwrap();
+        let err = validate_zip_file_layout(&zip, &mut archive, &tail).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("gap before the central directory"), "{msg}");
+    }
+
+    #[test]
+    fn zip_layout_rejects_gap_between_local_file_records() {
+        let zip = zip_with_gap_between_local_files();
+        let tail = parse_zip_tail(&zip).unwrap();
+        let mut archive = ZipArchive::new(Cursor::new(zip.as_slice())).unwrap();
+        let err = validate_zip_file_layout(&zip, &mut archive, &tail).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("gap between local file records"), "{msg}");
+    }
+
+    #[test]
+    fn zip_layout_rejects_central_directory_file_comments() {
+        let zip = zip_with_central_directory_file_comment();
+        let tail = parse_zip_tail(&zip).unwrap();
+        let err = validate_central_directory_records(&zip, &tail).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("file comments"), "{msg}");
+    }
+
+    #[test]
+    fn zip_layout_rejects_leading_bytes_before_first_local_file() {
+        let zip = zip_with_leading_bytes();
+        let tail = parse_zip_tail(&zip).unwrap();
+        let mut archive = ZipArchive::new(Cursor::new(zip.as_slice())).unwrap();
+        let err = validate_zip_file_layout(&zip, &mut archive, &tail).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("leading bytes"), "{msg}");
+    }
+
+    #[test]
+    fn zip_layout_rejects_local_and_central_name_mismatch() {
+        let mut zip = zip_with_entries(&[("a.txt", b"a")]);
+        let local = first_local_header_offset(&zip);
+        let name_start = local + 30;
+        zip[name_start] = b'b';
+
+        let tail = parse_zip_tail(&zip).unwrap();
+        let mut archive = ZipArchive::new(Cursor::new(zip.as_slice())).unwrap();
+        let err = validate_zip_file_layout(&zip, &mut archive, &tail).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("local file name"), "{msg}");
+    }
+
+    #[test]
+    fn zip_layout_rejects_local_crc_and_size_mismatch() {
+        let mut crc_zip = zip_with_entries(&[("a.txt", b"a")]);
+        let local = first_local_header_offset(&crc_zip);
+        write_u32_test(&mut crc_zip, local + 14, 0x1234_5678);
+        let tail = parse_zip_tail(&crc_zip).unwrap();
+        let mut archive = ZipArchive::new(Cursor::new(crc_zip.as_slice())).unwrap();
+        let err = validate_zip_file_layout(&crc_zip, &mut archive, &tail).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("CRC"), "{msg}");
+
+        let mut size_zip = zip_with_entries(&[("a.txt", b"a")]);
+        let local = first_local_header_offset(&size_zip);
+        write_u32_test(&mut size_zip, local + 22, 99);
+        let tail = parse_zip_tail(&size_zip).unwrap();
+        let mut archive = ZipArchive::new(Cursor::new(size_zip.as_slice())).unwrap();
+        let err = validate_zip_file_layout(&size_zip, &mut archive, &tail).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("uncompressed size"), "{msg}");
+    }
+
+    #[test]
+    fn zip_layout_rejects_encrypted_or_unsupported_compression_bits() {
+        let mut encrypted = zip_with_entries(&[("a.txt", b"a")]);
+        let cd = first_central_directory_offset(&encrypted);
+        let local = first_local_header_offset(&encrypted);
+        write_u16_test(&mut encrypted, cd + 8, 1);
+        write_u16_test(&mut encrypted, local + 6, 1);
+        let tail = parse_zip_tail(&encrypted).unwrap();
+        let mut archive = ZipArchive::new(Cursor::new(encrypted.as_slice())).unwrap();
+        let err = validate_zip_file_layout(&encrypted, &mut archive, &tail).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("encrypted ZIP"), "{msg}");
+
+        let mut unsupported = zip_with_entries(&[("a.txt", b"a")]);
+        let cd = first_central_directory_offset(&unsupported);
+        let local = first_local_header_offset(&unsupported);
+        write_u16_test(&mut unsupported, cd + 10, 99);
+        write_u16_test(&mut unsupported, local + 8, 99);
+        let tail = parse_zip_tail(&unsupported).unwrap();
+        let err = validate_central_directory_records(&unsupported, &tail).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("unsupported ZIP compression"), "{msg}");
+    }
+
+    #[test]
+    fn zip_layout_rejects_central_directory_entry_count_mismatch() {
+        let mut zip = zip_with_entries(&[("a.txt", b"a")]);
+        let eocd = find_eocd_for_test(&zip);
+        write_u16_test(&mut zip, eocd + 8, 2);
+        write_u16_test(&mut zip, eocd + 10, 2);
+
+        let tail = parse_zip_tail(&zip).unwrap();
+        let err = validate_central_directory_records(&zip, &tail).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("entry count"), "{msg}");
+    }
+
+    #[test]
+    fn package_inventory_rejects_missing_required_and_noncanonical_reserved_parts() {
+        let missing_manifest = zip_with_entries(&[
+            ("[Content_Types].xml", b""),
+            ("AppxBlockMap.xml", b""),
+            ("AppxSignature.p7x", b""),
+        ]);
+        let archive = ZipArchive::new(Cursor::new(missing_manifest.as_slice())).unwrap();
+        let err = validate_package_part_inventory(&archive, "appx").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("AppxManifest.xml"), "{msg}");
+
+        let wrong_case = zip_with_entries(&[
+            ("[Content_Types].xml", b""),
+            ("AppxBlockMap.xml", b""),
+            ("AppxSignature.p7x", b""),
+            ("appxmanifest.xml", b""),
+        ]);
+        let archive = ZipArchive::new(Cursor::new(wrong_case.as_slice())).unwrap();
+        let err = validate_package_part_inventory(&archive, "appx").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("canonical path"), "{msg}");
+    }
+
+    #[test]
+    fn package_inventory_rejects_case_colliding_parts_and_encrypted_bundle_children() {
+        let duplicate_payload = zip_with_entries(&[
+            ("[Content_Types].xml", b""),
+            ("AppxBlockMap.xml", b""),
+            ("AppxSignature.p7x", b""),
+            ("AppxManifest.xml", b""),
+            ("payload.txt", b""),
+            ("Payload.txt", b""),
+        ]);
+        let archive = ZipArchive::new(Cursor::new(duplicate_payload.as_slice())).unwrap();
+        let err = validate_package_part_inventory(&archive, "appx").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("case-insensitive"), "{msg}");
+
+        let encrypted_child = zip_with_entries(&[
+            ("[Content_Types].xml", b""),
+            ("AppxBlockMap.xml", b""),
+            ("AppxSignature.p7x", b""),
+            ("AppxMetadata/AppxBundleManifest.xml", b""),
+            ("child.emsix", b""),
+        ]);
+        let archive = ZipArchive::new(Cursor::new(encrypted_child.as_slice())).unwrap();
+        let err = validate_package_part_inventory(&archive, "appxbundle").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("encrypted child"), "{msg}");
     }
 
     #[test]
@@ -1415,6 +2392,23 @@ mod tests {
             msg.contains("missing from package"),
             "unexpected message: {msg}"
         );
+    }
+
+    #[test]
+    fn block_map_validation_rejects_wrong_lfh_size() {
+        let payload = b"abc";
+        let hash = hash_bytes(PeAuthenticodeHashKind::Sha256, payload);
+        let hash_b64 = base64::engine::general_purpose::STANDARD.encode(hash);
+        let block_map = format!(
+            r#"<BlockMap HashMethod="{HASH_SHA256}"><File Name="payload.txt" Size="{}" LfhSize="999"><Block Hash="{hash_b64}"/></File></BlockMap>"#,
+            payload.len()
+        );
+        let (kind, files) = parse_block_map_xml(block_map.as_bytes()).unwrap();
+        let zip = zip_with_entries(&[("payload.txt", payload)]);
+
+        let err = validate_block_map_file_hashes(&zip, kind, &files).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("LfhSize"), "{msg}");
     }
 
     #[test]

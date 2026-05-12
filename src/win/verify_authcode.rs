@@ -203,10 +203,10 @@ pub fn sp_opus_from_wvt_state(
 pub fn format_verify_description_lines(name: &str, url: Option<&str>) -> String {
     // Align with `signtool verify /v /d` (SDK): padded program name, single space before URL value.
     let mut s = format!("Description:     {name}\n");
-    if let Some(u) = url {
-        if !u.is_empty() {
-            s.push_str(&format!("Description URL: {u}\n"));
-        }
+    if let Some(u) = url
+        && !u.is_empty()
+    {
+        s.push_str(&format!("Description URL: {u}\n"));
     }
     s
 }

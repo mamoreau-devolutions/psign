@@ -128,8 +128,10 @@ pub fn chain_root_subject_contains(
     if leaf.is_null() {
         return Ok(false);
     }
-    let mut chain_para = CERT_CHAIN_PARA::default();
-    chain_para.cbSize = size_of::<CERT_CHAIN_PARA>() as u32;
+    let chain_para = CERT_CHAIN_PARA {
+        cbSize: size_of::<CERT_CHAIN_PARA>() as u32,
+        ..Default::default()
+    };
     let mut chain: *mut CERT_CHAIN_CONTEXT = std::ptr::null_mut();
     unsafe {
         CertGetCertificateChain(None, leaf, None, None, &chain_para, 0, None, &mut chain)?;
@@ -205,8 +207,10 @@ pub fn intermediate_ca_thumbprints_match(
         normalized_wanted.push(crate::win::cert_props::normalize_sha1_hex(w.trim())?);
     }
 
-    let mut chain_para = CERT_CHAIN_PARA::default();
-    chain_para.cbSize = size_of::<CERT_CHAIN_PARA>() as u32;
+    let chain_para = CERT_CHAIN_PARA {
+        cbSize: size_of::<CERT_CHAIN_PARA>() as u32,
+        ..Default::default()
+    };
     let mut chain: *mut CERT_CHAIN_CONTEXT = std::ptr::null_mut();
     unsafe { CertGetCertificateChain(None, leaf, None, None, &chain_para, 0, None, &mut chain) }
         .map_err(|e| anyhow!("CertGetCertificateChain failed: {e}"))?;
@@ -228,7 +232,7 @@ pub fn intermediate_ca_thumbprints_match(
             }
             let cert = unsafe { (*el).pCertContext };
             let tp = crate::win::cert_props::cert_sha1_thumbprint_upper(cert)?;
-            if normalized_wanted.iter().any(|w| *w == tp) {
+            if normalized_wanted.contains(&tp) {
                 found = true;
                 break;
             }
@@ -276,8 +280,10 @@ pub fn chain_contains_windows_pca_2010(leaf: *const CERT_CONTEXT) -> anyhow::Res
     if leaf.is_null() {
         return Ok(false);
     }
-    let mut chain_para = CERT_CHAIN_PARA::default();
-    chain_para.cbSize = size_of::<CERT_CHAIN_PARA>() as u32;
+    let chain_para = CERT_CHAIN_PARA {
+        cbSize: size_of::<CERT_CHAIN_PARA>() as u32,
+        ..Default::default()
+    };
     let mut chain: *mut CERT_CHAIN_CONTEXT = std::ptr::null_mut();
     unsafe { CertGetCertificateChain(None, leaf, None, None, &chain_para, 0, None, &mut chain) }
         .map_err(|e| anyhow!("CertGetCertificateChain failed: {e}"))?;
