@@ -13,7 +13,11 @@
 use crate::pe_digest::PeAuthenticodeHashKind;
 use anyhow::{Result, anyhow};
 use authenticode::AuthenticodeSignature;
+use base64::Engine as _;
 use digest::Digest;
+use quick_xml::Reader;
+use quick_xml::events::{BytesStart, Event};
+use std::collections::{HashMap, HashSet};
 use std::io::{Cursor, Read};
 use std::path::Path;
 use zip::CompressionMethod;
@@ -47,6 +51,8 @@ const ZIP64_LOC_SIG: u32 = 0x0706_4b50;
 
 const DATA_DESCRIPTOR_BIT: u16 = 1 << 3;
 const DD_SIG: u32 = 0x0807_4b50;
+
+const APPX_BLOCK_SIZE: usize = 64 * 1024;
 
 #[derive(Clone, Debug)]
 struct AppxDigestParts {
@@ -88,6 +94,14 @@ struct ZipTail {
     classic: ClassicEocd,
     zip64_eocd: Option<Zip64Eocd>,
     locator: Option<Zip64Locator>,
+}
+
+#[derive(Clone, Debug)]
+struct AppxBlockMapFile {
+    name: String,
+    normalized_name: String,
+    declared_size: u64,
+    block_hashes: Vec<Vec<u8>>,
 }
 
 enum RunningHasher {
@@ -153,22 +167,8 @@ fn strip_pkcx(data: &[u8]) -> Result<&[u8]> {
     Ok(&data[4..])
 }
 
-fn hash_kind_from_block_map_xml(xml: &[u8]) -> Result<PeAuthenticodeHashKind> {
-    let s = std::str::from_utf8(xml).map_err(|_| anyhow!("AppxBlockMap.xml is not valid UTF-8"))?;
-    let needle = "HashMethod";
-    let Some(pos) = s.find(needle) else {
-        return Err(anyhow!("AppxBlockMap.xml missing HashMethod"));
-    };
-    let tail = &s[pos + needle.len()..];
-    let (qi, q) = tail
-        .char_indices()
-        .find(|(_, c)| *c == '"' || *c == '\'')
-        .ok_or_else(|| anyhow!("AppxBlockMap.xml HashMethod has no quoted value"))?;
-    let open = qi + q.len_utf8();
-    let close_rel = tail[open..]
-        .find(q)
-        .ok_or_else(|| anyhow!("AppxBlockMap.xml HashMethod value not terminated"))?;
-    let uri = tail[open..open + close_rel].trim();
+fn hash_kind_from_block_map_uri(uri: &str) -> Result<PeAuthenticodeHashKind> {
+    let uri = uri.trim();
     if uri == HASH_SHA256 {
         Ok(PeAuthenticodeHashKind::Sha256)
     } else if uri == HASH_SHA384 {
@@ -180,6 +180,158 @@ fn hash_kind_from_block_map_xml(xml: &[u8]) -> Result<PeAuthenticodeHashKind> {
             "unsupported AppxBlockMap HashMethod URI `{uri}` (expected SHA256/384/512 URIs)"
         ))
     }
+}
+
+fn xml_attr(
+    reader: &Reader<Cursor<&[u8]>>,
+    e: &BytesStart<'_>,
+    name: &[u8],
+) -> Result<Option<String>> {
+    for attr in e.attributes() {
+        let attr = attr.map_err(|e| anyhow!("AppxBlockMap.xml attribute parse failed: {e}"))?;
+        if attr.key.as_ref() == name {
+            let value = attr
+                .decode_and_unescape_value(reader.decoder())
+                .map_err(|e| anyhow!("AppxBlockMap.xml attribute decode failed: {e}"))?;
+            return Ok(Some(value.into_owned()));
+        }
+    }
+    Ok(None)
+}
+
+fn required_xml_attr(
+    reader: &Reader<Cursor<&[u8]>>,
+    e: &BytesStart<'_>,
+    name: &[u8],
+) -> Result<String> {
+    xml_attr(reader, e, name)?.ok_or_else(|| {
+        anyhow!(
+            "AppxBlockMap.xml `{}` element missing `{}` attribute",
+            std::str::from_utf8(e.local_name().as_ref()).unwrap_or("?"),
+            std::str::from_utf8(name).unwrap_or("?")
+        )
+    })
+}
+
+fn normalize_appx_part_name(name: &str) -> Result<String> {
+    if name.is_empty() || name.bytes().any(|b| b == 0) {
+        return Err(anyhow!(
+            "AppxBlockMap.xml contains an empty or NUL part name"
+        ));
+    }
+    let normalized = name.replace('\\', "/");
+    if normalized.starts_with('/') || normalized.contains(':') {
+        return Err(anyhow!(
+            "AppxBlockMap.xml part `{name}` is absolute or drive-qualified"
+        ));
+    }
+    for segment in normalized.split('/') {
+        if segment.is_empty() || segment == "." || segment == ".." {
+            return Err(anyhow!(
+                "AppxBlockMap.xml part `{name}` contains an invalid path segment"
+            ));
+        }
+    }
+    Ok(normalized)
+}
+
+fn parse_block_map_xml(xml: &[u8]) -> Result<(PeAuthenticodeHashKind, Vec<AppxBlockMapFile>)> {
+    let mut reader = Reader::from_reader(Cursor::new(xml));
+    reader.config_mut().trim_text(true);
+
+    let mut buf = Vec::new();
+    let mut kind = None;
+    let mut files = Vec::new();
+    let mut current: Option<AppxBlockMapFile> = None;
+    let mut seen_names = HashSet::new();
+
+    loop {
+        match reader
+            .read_event_into(&mut buf)
+            .map_err(|e| anyhow!("AppxBlockMap.xml parse failed: {e}"))?
+        {
+            Event::Start(e) if e.local_name().as_ref() == b"BlockMap" => {
+                let hash_method = required_xml_attr(&reader, &e, b"HashMethod")?;
+                kind = Some(hash_kind_from_block_map_uri(&hash_method)?);
+            }
+            Event::Empty(e) if e.local_name().as_ref() == b"BlockMap" => {
+                let hash_method = required_xml_attr(&reader, &e, b"HashMethod")?;
+                kind = Some(hash_kind_from_block_map_uri(&hash_method)?);
+            }
+            Event::Start(e) if e.local_name().as_ref() == b"File" => {
+                if current.is_some() {
+                    return Err(anyhow!("nested AppxBlockMap.xml File elements are invalid"));
+                }
+                let name = required_xml_attr(&reader, &e, b"Name")?;
+                let normalized_name = normalize_appx_part_name(&name)?;
+                if !seen_names.insert(normalized_name.clone()) {
+                    return Err(anyhow!("duplicate AppxBlockMap.xml File entry `{name}`"));
+                }
+                let declared_size = required_xml_attr(&reader, &e, b"Size")?
+                    .parse::<u64>()
+                    .map_err(|_| anyhow!("AppxBlockMap.xml File `{name}` has invalid Size"))?;
+                current = Some(AppxBlockMapFile {
+                    name,
+                    normalized_name,
+                    declared_size,
+                    block_hashes: Vec::new(),
+                });
+            }
+            Event::Empty(e) if e.local_name().as_ref() == b"File" => {
+                let name = required_xml_attr(&reader, &e, b"Name")?;
+                let normalized_name = normalize_appx_part_name(&name)?;
+                if !seen_names.insert(normalized_name.clone()) {
+                    return Err(anyhow!("duplicate AppxBlockMap.xml File entry `{name}`"));
+                }
+                let declared_size = required_xml_attr(&reader, &e, b"Size")?
+                    .parse::<u64>()
+                    .map_err(|_| anyhow!("AppxBlockMap.xml File `{name}` has invalid Size"))?;
+                files.push(AppxBlockMapFile {
+                    name,
+                    normalized_name,
+                    declared_size,
+                    block_hashes: Vec::new(),
+                });
+            }
+            Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"Block" => {
+                let Some(file) = current.as_mut() else {
+                    return Err(anyhow!("AppxBlockMap.xml Block outside File"));
+                };
+                let encoded = required_xml_attr(&reader, &e, b"Hash")?;
+                let hash = base64::engine::general_purpose::STANDARD
+                    .decode(encoded.as_bytes())
+                    .map_err(|e| anyhow!("AppxBlockMap.xml Block Hash is not base64: {e}"))?;
+                file.block_hashes.push(hash);
+            }
+            Event::End(e) if e.local_name().as_ref() == b"File" => {
+                let file = current
+                    .take()
+                    .ok_or_else(|| anyhow!("AppxBlockMap.xml unexpected File end"))?;
+                files.push(file);
+            }
+            Event::Eof => break,
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    if current.is_some() {
+        return Err(anyhow!("unterminated AppxBlockMap.xml File element"));
+    }
+    let kind = kind.ok_or_else(|| anyhow!("AppxBlockMap.xml missing HashMethod"))?;
+    let expected_len = kind.digest_output_len();
+    for file in &files {
+        for hash in &file.block_hashes {
+            if hash.len() != expected_len {
+                return Err(anyhow!(
+                    "AppxBlockMap.xml File `{}` has {}-byte block hash, expected {expected_len}",
+                    file.name,
+                    hash.len()
+                ));
+            }
+        }
+    }
+    Ok((kind, files))
 }
 
 fn parse_signed_appx_blob(data: &[u8]) -> Result<(usize, AppxDigestParts)> {
@@ -821,9 +973,153 @@ fn hash_bytes(kind: PeAuthenticodeHashKind, bytes: &[u8]) -> Vec<u8> {
     h.finalize()
 }
 
+fn archive_file_index_by_normalized_name(
+    archive: &mut ZipArchive<Cursor<&[u8]>>,
+) -> Result<HashMap<String, usize>> {
+    let mut files = HashMap::new();
+    for i in 0..archive.len() {
+        let zf = archive.by_index(i)?;
+        if zf.name().ends_with('/') || zf.name().ends_with('\\') {
+            continue;
+        }
+        let normalized = normalize_appx_part_name(zf.name())?;
+        if files.insert(normalized.clone(), i).is_some() {
+            return Err(anyhow!(
+                "duplicate ZIP entry after APPX path normalization: `{normalized}`"
+            ));
+        }
+    }
+    Ok(files)
+}
+
+fn validate_block_map_file_hashes(
+    buf: &[u8],
+    kind: PeAuthenticodeHashKind,
+    block_map_files: &[AppxBlockMapFile],
+) -> Result<()> {
+    // Native AppxSip.dll enables AppxPackaging block-hash validation and then
+    // streams each payload through IAppxFile; this mirrors that check without COM.
+    let mut archive = ZipArchive::new(Cursor::new(buf))?;
+    let file_index = archive_file_index_by_normalized_name(&mut archive)?;
+    let mut archive = ZipArchive::new(Cursor::new(buf))?;
+
+    for block_file in block_map_files {
+        if matches!(
+            block_file.normalized_name.as_str(),
+            "AppxBlockMap.xml" | "[Content_Types].xml" | "AppxSignature.p7x"
+        ) {
+            return Err(anyhow!(
+                "AppxBlockMap.xml must not list metadata part `{}` as payload",
+                block_file.name
+            ));
+        }
+        let Some(&index) = file_index.get(&block_file.normalized_name) else {
+            return Err(anyhow!(
+                "AppxBlockMap.xml File `{}` is missing from package ZIP",
+                block_file.name
+            ));
+        };
+
+        let mut zf = archive.by_index(index)?;
+        let mut data = Vec::new();
+        zf.read_to_end(&mut data)?;
+        let data_len = u64::try_from(data.len()).map_err(|_| anyhow!("file too large"))?;
+        if data_len != block_file.declared_size {
+            return Err(anyhow!(
+                "AppxBlockMap.xml File `{}` Size {} does not match uncompressed size {data_len}",
+                block_file.name,
+                block_file.declared_size
+            ));
+        }
+        if data.is_empty() {
+            if !block_file.block_hashes.is_empty() {
+                return Err(anyhow!(
+                    "AppxBlockMap.xml File `{}` is empty but has block hashes",
+                    block_file.name
+                ));
+            }
+            continue;
+        }
+        if block_file.block_hashes.is_empty() {
+            return Err(anyhow!(
+                "AppxBlockMap.xml File `{}` has content but no block hashes",
+                block_file.name
+            ));
+        }
+
+        let mut offset = 0usize;
+        for (block_index, expected) in block_file.block_hashes.iter().enumerate() {
+            if offset >= data.len() {
+                return Err(anyhow!(
+                    "AppxBlockMap.xml File `{}` has too many block hashes",
+                    block_file.name
+                ));
+            }
+            let end = offset.saturating_add(APPX_BLOCK_SIZE).min(data.len());
+            let actual = hash_bytes(kind, &data[offset..end]);
+            if actual != *expected {
+                return Err(anyhow!(
+                    "AppxBlockMap.xml File `{}` block {block_index} hash mismatch",
+                    block_file.name
+                ));
+            }
+            offset = end;
+        }
+        if offset != data.len() {
+            return Err(anyhow!(
+                "AppxBlockMap.xml File `{}` has too few block hashes",
+                block_file.name
+            ));
+        }
+    }
+
+    Ok(())
+}
+
 fn zip_has_bundle_manifest(archive: &ZipArchive<Cursor<&[u8]>>) -> bool {
     let name = std::str::from_utf8(BUNDLE_MANIFEST).expect("ASCII path");
     archive.file_names().any(|n| n == name)
+}
+
+fn cleartext_msix_extension_for_name(name: &str) -> Option<&'static str> {
+    let lower = name.rsplit('/').next().unwrap_or(name).to_ascii_lowercase();
+    if lower.ends_with(".msix") {
+        Some("msix")
+    } else if lower.ends_with(".appx") {
+        Some("appx")
+    } else if lower.ends_with(".msixbundle") {
+        Some("msixbundle")
+    } else if lower.ends_with(".appxbundle") {
+        Some("appxbundle")
+    } else {
+        None
+    }
+}
+
+fn verify_bundle_child_packages(buf: &[u8]) -> Result<()> {
+    let mut archive = ZipArchive::new(Cursor::new(buf))?;
+    let mut children = Vec::new();
+    for i in 0..archive.len() {
+        let mut zf = archive.by_index(i)?;
+        if zf.name().ends_with('/') || zf.name().ends_with('\\') {
+            continue;
+        }
+        let normalized = normalize_appx_part_name(zf.name())?;
+        let Some(ext) = cleartext_msix_extension_for_name(&normalized) else {
+            continue;
+        };
+        let mut child = Vec::new();
+        zf.read_to_end(&mut child)?;
+        children.push((normalized, ext, child));
+    }
+
+    for (name, ext, child) in children {
+        verify_msix_digest_consistency_bytes(&child, ext).map_err(|e| {
+            anyhow!("bundle child package `{name}` failed MSIX SIP validation: {e}")
+        })?;
+    }
+
+    Ok(())
 }
 
 /// Encrypted package extensions (`CryptSIPDll*` **`EappxSip*`** / **`EappxBundleSip*`** rows). Cleartext ZIP hash parity ([`verify_msix_digest_consistency`]) does **not** apply.
@@ -854,9 +1150,13 @@ pub fn verify_msix_digest_consistency(path: &Path) -> Result<()> {
     }
 
     let buf = std::fs::read(path)?;
-    let tail = parse_zip_tail(&buf)?;
-    let mut archive = ZipArchive::new(Cursor::new(buf.as_slice()))?;
-    if matches!(ext.as_str(), "msixbundle" | "appxbundle") && !zip_has_bundle_manifest(&archive) {
+    verify_msix_digest_consistency_bytes(&buf, &ext)
+}
+
+fn verify_msix_digest_consistency_bytes(buf: &[u8], ext: &str) -> Result<()> {
+    let tail = parse_zip_tail(buf)?;
+    let mut archive = ZipArchive::new(Cursor::new(buf))?;
+    if matches!(ext, "msixbundle" | "appxbundle") && !zip_has_bundle_manifest(&archive) {
         return Err(anyhow!(
             "missing `{}` — not a valid {} bundle ZIP",
             std::str::from_utf8(BUNDLE_MANIFEST).expect("ASCII"),
@@ -873,7 +1173,7 @@ pub fn verify_msix_digest_consistency(path: &Path) -> Result<()> {
     let (piece_len, parts) = parse_signed_appx_blob(embedded)?;
 
     let block_map_bytes = read_zip_entry_raw(&mut archive, std::str::from_utf8(BLOCK_MAP)?)?;
-    let kind = hash_kind_from_block_map_xml(&block_map_bytes)?;
+    let (kind, block_map_files) = parse_block_map_xml(&block_map_bytes)?;
     let expected_piece = kind.digest_output_len();
     if piece_len != expected_piece {
         return Err(anyhow!(
@@ -909,10 +1209,10 @@ pub fn verify_msix_digest_consistency(path: &Path) -> Result<()> {
         _ => unreachable!(),
     };
 
-    let mut archive2 = ZipArchive::new(Cursor::new(buf.as_slice()))?;
-    let (data_hash, cd_off_virt) = hash_zip_file_data(&buf, &mut archive2, &tail, kind)?;
-    let mut archive3 = ZipArchive::new(Cursor::new(buf.as_slice()))?;
-    let cd_hash = hash_cd_and_eocd(&buf, &mut archive3, &tail, kind, cd_off_virt)?;
+    let mut archive2 = ZipArchive::new(Cursor::new(buf))?;
+    let (data_hash, cd_off_virt) = hash_zip_file_data(buf, &mut archive2, &tail, kind)?;
+    let mut archive3 = ZipArchive::new(Cursor::new(buf))?;
+    let cd_hash = hash_cd_and_eocd(buf, &mut archive3, &tail, kind, cd_off_virt)?;
 
     let check = |label: &str, a: &[u8], b: &[u8]| -> Result<()> {
         if a != b {
@@ -930,6 +1230,10 @@ pub fn verify_msix_digest_consistency(path: &Path) -> Result<()> {
     if let (Some(ch), Some(sig_ci)) = (&ci_hash, &parts.axci) {
         check("AXCI (CodeIntegrity.cat)", ch, sig_ci)?;
     }
+    validate_block_map_file_hashes(buf, kind, &block_map_files)?;
+    if matches!(ext, "msixbundle" | "appxbundle") {
+        verify_bundle_child_packages(buf)?;
+    }
 
     Ok(())
 }
@@ -937,6 +1241,63 @@ pub fn verify_msix_digest_consistency(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+    use std::path::PathBuf;
+    use zip::write::FileOptions;
+
+    fn block_map_xml_for_file(name: &str, size: usize, hash: &[u8]) -> Vec<u8> {
+        let hash_b64 = base64::engine::general_purpose::STANDARD.encode(hash);
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?><BlockMap xmlns="http://schemas.microsoft.com/appx/2010/blockmap" HashMethod="{HASH_SHA256}"><File Name="{name}" Size="{size}" LfhSize="0"><Block Hash="{hash_b64}"/></File></BlockMap>"#
+        )
+        .into_bytes()
+    }
+
+    fn zip_with_entries(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut out = Cursor::new(Vec::new());
+        {
+            let mut writer = zip::ZipWriter::new(&mut out);
+            let options = FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+            for (name, bytes) in entries {
+                writer.start_file(*name, options).expect("start zip file");
+                writer.write_all(bytes).expect("write zip file");
+            }
+            writer.finish().expect("finish zip");
+        }
+        out.into_inner()
+    }
+
+    fn fixture_path(rel: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join(rel)
+    }
+
+    fn appx_with_tampered_manifest(original: &[u8]) -> Vec<u8> {
+        let mut source = ZipArchive::new(Cursor::new(original)).expect("open source appx");
+        let mut out = Cursor::new(Vec::new());
+        {
+            let mut writer = zip::ZipWriter::new(&mut out);
+            let options = FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+            for i in 0..source.len() {
+                let mut zf = source.by_index(i).expect("source entry");
+                if zf.name().ends_with('/') || zf.name().ends_with('\\') {
+                    continue;
+                }
+                let name = zf.name().to_owned();
+                let mut data = Vec::new();
+                zf.read_to_end(&mut data).expect("read source entry");
+                if name == "AppxManifest.xml" {
+                    data = b"tampered manifest".to_vec();
+                }
+                writer.start_file(name, options).expect("start entry");
+                writer.write_all(&data).expect("write entry");
+            }
+            writer.finish().expect("finish appx");
+        }
+        out.into_inner()
+    }
 
     #[test]
     fn parse_appx_blob_roundtrip_widths() {
@@ -961,7 +1322,7 @@ mod tests {
     fn hash_method_parses_sha256_uri() {
         let xml = br#"<?xml version="1.0"?><BlockMap HashMethod="http://www.w3.org/2001/04/xmlenc#sha256" />"#;
         assert_eq!(
-            hash_kind_from_block_map_xml(xml).unwrap(),
+            parse_block_map_xml(xml).unwrap().0,
             PeAuthenticodeHashKind::Sha256
         );
     }
@@ -983,6 +1344,128 @@ mod tests {
         let msg = format!("{err:#}");
         assert!(
             msg.contains("encrypted") && msg.contains("Eappx"),
+            "unexpected message: {msg}"
+        );
+    }
+
+    #[test]
+    fn block_map_validation_accepts_matching_payload_hash() {
+        let payload = b"manifest bytes";
+        let hash = hash_bytes(PeAuthenticodeHashKind::Sha256, payload);
+        let block_map = block_map_xml_for_file("AppxManifest.xml", payload.len(), &hash);
+        let (kind, files) = parse_block_map_xml(&block_map).unwrap();
+        let zip = zip_with_entries(&[("AppxManifest.xml", payload)]);
+
+        validate_block_map_file_hashes(&zip, kind, &files).unwrap();
+    }
+
+    #[test]
+    fn block_map_validation_accepts_multiple_payload_blocks() {
+        let mut payload = vec![0x41; APPX_BLOCK_SIZE + 17];
+        payload[APPX_BLOCK_SIZE] = 0x42;
+        let first = hash_bytes(PeAuthenticodeHashKind::Sha256, &payload[..APPX_BLOCK_SIZE]);
+        let second = hash_bytes(PeAuthenticodeHashKind::Sha256, &payload[APPX_BLOCK_SIZE..]);
+        let first_b64 = base64::engine::general_purpose::STANDARD.encode(first);
+        let second_b64 = base64::engine::general_purpose::STANDARD.encode(second);
+        let block_map = format!(
+            r#"<?xml version="1.0"?><BlockMap HashMethod="{HASH_SHA256}"><File Name="large.bin" Size="{}"><Block Hash="{first_b64}"/><Block Hash="{second_b64}"/></File></BlockMap>"#,
+            payload.len()
+        );
+        let (kind, files) = parse_block_map_xml(block_map.as_bytes()).unwrap();
+        let zip = zip_with_entries(&[("large.bin", &payload)]);
+
+        validate_block_map_file_hashes(&zip, kind, &files).unwrap();
+    }
+
+    #[test]
+    fn block_map_validation_rejects_tampered_payload_hash() {
+        let hash = hash_bytes(PeAuthenticodeHashKind::Sha256, b"expected bytes");
+        let block_map = block_map_xml_for_file("AppxManifest.xml", 14, &hash);
+        let (kind, files) = parse_block_map_xml(&block_map).unwrap();
+        let zip = zip_with_entries(&[("AppxManifest.xml", b"tampered bytes")]);
+
+        let err = validate_block_map_file_hashes(&zip, kind, &files).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("hash mismatch"), "unexpected message: {msg}");
+    }
+
+    #[test]
+    fn block_map_validation_rejects_declared_size_mismatch() {
+        let payload = b"abc";
+        let hash = hash_bytes(PeAuthenticodeHashKind::Sha256, payload);
+        let block_map = block_map_xml_for_file("AppxManifest.xml", 99, &hash);
+        let (kind, files) = parse_block_map_xml(&block_map).unwrap();
+        let zip = zip_with_entries(&[("AppxManifest.xml", payload)]);
+
+        let err = validate_block_map_file_hashes(&zip, kind, &files).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("Size 99"), "unexpected message: {msg}");
+    }
+
+    #[test]
+    fn block_map_validation_rejects_missing_payload() {
+        let hash = hash_bytes(PeAuthenticodeHashKind::Sha256, b"abc");
+        let block_map = block_map_xml_for_file("Missing.txt", 3, &hash);
+        let (kind, files) = parse_block_map_xml(&block_map).unwrap();
+        let zip = zip_with_entries(&[("Other.txt", b"abc")]);
+
+        let err = validate_block_map_file_hashes(&zip, kind, &files).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("missing from package"),
+            "unexpected message: {msg}"
+        );
+    }
+
+    #[test]
+    fn block_map_validation_rejects_duplicate_zip_names_after_normalization() {
+        let payload = b"abc";
+        let hash = hash_bytes(PeAuthenticodeHashKind::Sha256, payload);
+        let block_map = block_map_xml_for_file("dir/file.txt", payload.len(), &hash);
+        let (kind, files) = parse_block_map_xml(&block_map).unwrap();
+        let zip = zip_with_entries(&[("dir/file.txt", payload), ("dir\\file.txt", payload)]);
+
+        let err = validate_block_map_file_hashes(&zip, kind, &files).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("duplicate ZIP entry"),
+            "unexpected message: {msg}"
+        );
+    }
+
+    #[test]
+    fn block_map_parser_rejects_traversal_names_and_bad_hashes() {
+        let traversal = br#"<?xml version="1.0"?><BlockMap HashMethod="http://www.w3.org/2001/04/xmlenc#sha256"><File Name="..\evil.txt" Size="1"><Block Hash="AAAA"/></File></BlockMap>"#;
+        let err = parse_block_map_xml(traversal).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("invalid path segment"),
+            "unexpected message: {msg}"
+        );
+
+        let bad_hash = br#"<?xml version="1.0"?><BlockMap HashMethod="http://www.w3.org/2001/04/xmlenc#sha256"><File Name="ok.txt" Size="1"><Block Hash="not-base64!"/></File></BlockMap>"#;
+        let err = parse_block_map_xml(bad_hash).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("base64"), "unexpected message: {msg}");
+    }
+
+    #[test]
+    fn signed_appxbundle_fixture_recursively_verifies_child_package() {
+        let bundle = fixture_path("tests/fixtures/generated-signed/msix/sample.appxbundle");
+        verify_msix_digest_consistency(&bundle).unwrap();
+    }
+
+    #[test]
+    fn bundle_child_package_validation_rejects_stale_child_signature() {
+        let child_path = fixture_path("tests/fixtures/generated-signed/msix/sample.appx");
+        let child = std::fs::read(child_path).expect("read child appx fixture");
+        let tampered_child = appx_with_tampered_manifest(&child);
+        let bundle = zip_with_entries(&[("tampered.appx", &tampered_child)]);
+
+        let err = verify_bundle_child_packages(&bundle).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("bundle child package `tampered.appx`"),
             "unexpected message: {msg}"
         );
     }
