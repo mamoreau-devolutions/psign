@@ -43,6 +43,39 @@ fn committed_signed_corpus_verifies_with_psign() {
 }
 
 #[test]
+fn committed_signed_corpus_matches_portable_supported_verification() {
+    let repo = repo_root();
+    let manifest = signed_manifest();
+    assert_eq!(manifest.signed.len(), 90, "signed corpus coverage changed");
+
+    let mut parity_count = 0usize;
+    for entry in &manifest.signed {
+        if entry.state == "detached-signed" {
+            let content = repo_path(&repo, &entry.source_path);
+            let signature = repo_path(&repo, &entry.path);
+            verify_detached_with_psign(&content, &signature, &entry.id);
+            verify_detached_with_portable(&repo, &content, &signature, &entry.id);
+        } else if let Some(args) =
+            portable_args_for_entry(&repo, entry, &repo_path(&repo, &entry.path))
+        {
+            verify_embedded_with_psign(&repo_path(&repo, &entry.path), &entry.id);
+            assert_success(
+                portable()
+                    .args(args)
+                    .output()
+                    .unwrap_or_else(|e| panic!("run portable verify for {}: {e}", entry.id)),
+                &format!("portable verify {}", entry.id),
+            );
+        } else {
+            continue;
+        }
+        parity_count += 1;
+    }
+
+    assert_eq!(parity_count, 90, "portable parity coverage changed");
+}
+
+#[test]
 fn unsigned_corpus_freshly_signed_with_native_signtool_verifies_with_psign() {
     let Some(signtool) = native_signtool_optional_path() else {
         eprintln!("skipping corpus native-sign test: signtool.exe not found");
@@ -197,8 +230,70 @@ fn verify_detached_with_psign(content: &Path, p7: &Path, label: &str) {
     assert_success(verify, &format!("psign detached verify {label}"));
 }
 
+fn verify_detached_with_portable(repo: &Path, content: &Path, p7: &Path, label: &str) {
+    let verify = portable()
+        .arg("trust-verify-detached")
+        .arg(content)
+        .arg(p7)
+        .arg("--anchor-dir")
+        .arg(anchor_dir(repo))
+        .output()
+        .unwrap_or_else(|e| panic!("run portable detached verify for {label}: {e}"));
+    assert_success(verify, &format!("portable detached verify {label}"));
+}
+
 fn psign() -> Command {
     Command::cargo_bin("psign-tool-windows").expect("psign-tool-windows binary")
+}
+
+fn portable() -> Command {
+    let exe = portable_exe();
+    if !exe.is_file() {
+        let mut build = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+        build.current_dir(repo_root()).args([
+            "build",
+            "-p",
+            "psign-digest-cli",
+            "--bin",
+            "psign-tool-portable",
+            "--locked",
+        ]);
+        if std::env::var("PROFILE").ok().as_deref() == Some("release") {
+            build.arg("--release");
+        }
+        let status = build
+            .status()
+            .unwrap_or_else(|e| panic!("build psign-tool-portable: {e}"));
+        assert!(status.success(), "build psign-tool-portable failed");
+    }
+    Command::new(exe)
+}
+
+fn portable_args_for_entry(
+    repo: &Path,
+    entry: &SignedCorpusEntry,
+    path: &Path,
+) -> Option<Vec<String>> {
+    let anchor = anchor_dir(repo).display().to_string();
+    let path = path.display().to_string();
+    let args = match entry.family.as_str() {
+        "pe" | "winmd" => vec![
+            "trust-verify-pe".to_owned(),
+            path,
+            "--anchor-dir".to_owned(),
+            anchor,
+        ],
+        "cab" => vec![
+            "trust-verify-cab".to_owned(),
+            path,
+            "--anchor-dir".to_owned(),
+            anchor,
+        ],
+        "msix" => vec!["verify-msix".to_owned(), path],
+        "powershell-script" | "wsh-script" => vec!["verify-script".to_owned(), path],
+        _ => return None,
+    };
+    Some(args)
 }
 
 fn assert_success(output: Output, context: &str) {
@@ -236,6 +331,21 @@ fn repo_path(repo_root: &Path, rel: &str) -> PathBuf {
 
 fn test_pfx_path(repo_root: &Path) -> PathBuf {
     repo_root.join("tests\\fixtures\\devolutions-authenticode\\authenticode-test-cert.pfx")
+}
+
+fn anchor_dir(repo_root: &Path) -> PathBuf {
+    repo_root.join("tests\\fixtures\\devolutions-authenticode")
+}
+
+fn portable_exe() -> PathBuf {
+    if let Some(path) = std::env::var_os("CARGO_BIN_EXE_psign-tool-portable") {
+        return PathBuf::from(path);
+    }
+    let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_owned());
+    let target_dir = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo_root().join("target"));
+    target_dir.join(profile).join("psign-tool-portable.exe")
 }
 
 fn native_signtool_optional_path() -> Option<PathBuf> {

@@ -71,6 +71,73 @@ fn help_lists_core_subcommands() {
 }
 
 #[test]
+fn generated_signed_corpus_verifies_with_portable_cli() {
+    let repo = repo_root();
+    let manifest: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            repo.join("tests/fixtures/generated-signed/generated-signed-vectors.json"),
+        )
+        .expect("read signed corpus manifest"),
+    )
+    .expect("signed corpus manifest JSON");
+    let signed = manifest["signed"]
+        .as_array()
+        .expect("signed corpus entries");
+    assert_eq!(signed.len(), 90, "signed corpus coverage changed");
+
+    let mut verified = 0usize;
+    for entry in signed {
+        let id = entry["id"].as_str().expect("entry id");
+        let family = entry["family"].as_str().expect("entry family");
+        let state = entry["state"].as_str().expect("entry state");
+        if state == "detached-signed" {
+            let content = repo_path(&repo, entry["source_path"].as_str().expect("source path"));
+            let signature = repo_path(&repo, entry["path"].as_str().expect("signature path"));
+            let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+            cmd.arg("trust-verify-detached")
+                .arg(content)
+                .arg(signature)
+                .arg("--anchor-dir")
+                .arg(anchor_dir(&repo));
+            cmd.assert().success();
+            verified += 1;
+            continue;
+        }
+
+        let path = repo_path(&repo, entry["path"].as_str().expect("entry path"));
+        let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+        match family {
+            "pe" | "winmd" => {
+                cmd.arg("trust-verify-pe")
+                    .arg(path)
+                    .arg("--anchor-dir")
+                    .arg(anchor_dir(&repo));
+            }
+            "cab" => {
+                cmd.arg("trust-verify-cab")
+                    .arg(path)
+                    .arg("--anchor-dir")
+                    .arg(anchor_dir(&repo));
+            }
+            "msix" => {
+                cmd.arg("verify-msix").arg(path);
+            }
+            "powershell-script" | "wsh-script" => {
+                cmd.arg("verify-script").arg(path);
+            }
+            _ => panic!("unexpected signed corpus family for portable test: {family} ({id})"),
+        }
+        cmd.assert().success();
+        verified += 1;
+    }
+
+    assert_eq!(
+        verified, 90,
+        "portable corpus verification coverage changed"
+    );
+}
+
+#[test]
 fn signer_rs256_prehash_help_documents_signer_index_pe_subcommand() {
     let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
     cmd.args(["pe-signer-rs256-prehash", "--help"]);
@@ -577,13 +644,24 @@ fn help_lists_artifact_signing_submit_when_feature_enabled() {
 }
 
 fn tiny32_fixture() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi")
+    repo_root().join("tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi")
 }
 
 fn tiny64_fixture() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/fixtures/pe-authenticode-upstream/tiny64.signed.efi")
+    repo_root().join("tests/fixtures/pe-authenticode-upstream/tiny64.signed.efi")
+}
+
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+fn repo_path(repo_root: &Path, rel: &str) -> PathBuf {
+    let separator = std::path::MAIN_SEPARATOR.to_string();
+    repo_root.join(rel.replace('\\', &separator))
+}
+
+fn anchor_dir(repo_root: &Path) -> PathBuf {
+    repo_root.join("tests/fixtures/devolutions-authenticode")
 }
 
 #[test]

@@ -354,12 +354,6 @@ fn find_zip64_eocd(
 
 fn parse_zip_tail(buf: &[u8]) -> Result<ZipTail> {
     let (cde_pos, classic) = find_classic_eocd(buf)?;
-    let cde_pos_u64 = u64::try_from(cde_pos).map_err(|_| anyhow!("cde position"))?;
-    cde_pos_u64
-        .checked_sub(classic.central_directory_size as u64)
-        .and_then(|x| x.checked_sub(classic.central_directory_offset as u64))
-        .ok_or_else(|| anyhow!("invalid EOCD central directory size/offset"))?;
-
     let file_len = buf.len();
     let comment_len = classic.zip_file_comment.len();
     let mut locator = None;
@@ -379,6 +373,13 @@ fn parse_zip_tail(buf: &[u8]) -> Result<ZipTail> {
         let search_upper = cde_pos.saturating_sub(60);
         let (_zpos, z64, _ao) = find_zip64_eocd(buf, nominal, search_upper)?;
         zip64_eocd = Some(z64);
+    }
+    if locator.is_none() {
+        let cde_pos_u64 = u64::try_from(cde_pos).map_err(|_| anyhow!("cde position"))?;
+        cde_pos_u64
+            .checked_sub(classic.central_directory_size as u64)
+            .and_then(|x| x.checked_sub(classic.central_directory_offset as u64))
+            .ok_or_else(|| anyhow!("invalid EOCD central directory size/offset"))?;
     }
 
     Ok(ZipTail {
