@@ -7,8 +7,6 @@ param(
     [string]$WorkspaceRoot = "",
     [string]$UnsignedDir = "",
     [string]$SignedDir = "",
-    [string]$UnsignedArchivePath = "",
-    [string]$SignedArchivePath = "",
     [string]$SignToolPath = "",
     [string]$PfxPath = "",
     [string]$PfxPassword = "CodeSign123!",
@@ -32,12 +30,6 @@ elseif (-not [System.IO.Path]::IsPathRooted($UnsignedDir)) { $UnsignedDir = Join
 if (-not $SignedDir) { $SignedDir = Join-Path $WorkspaceRoot "tests\fixtures\generated-signed" }
 elseif (-not [System.IO.Path]::IsPathRooted($SignedDir)) { $SignedDir = Join-Path $WorkspaceRoot $SignedDir }
 
-if (-not $UnsignedArchivePath) { $UnsignedArchivePath = Join-Path $WorkspaceRoot "tests\fixtures\generated-unsigned.zip" }
-elseif (-not [System.IO.Path]::IsPathRooted($UnsignedArchivePath)) { $UnsignedArchivePath = Join-Path $WorkspaceRoot $UnsignedArchivePath }
-
-if (-not $SignedArchivePath) { $SignedArchivePath = Join-Path $WorkspaceRoot "tests\fixtures\generated-signed.zip" }
-elseif (-not [System.IO.Path]::IsPathRooted($SignedArchivePath)) { $SignedArchivePath = Join-Path $WorkspaceRoot $SignedArchivePath }
-
 function Resolve-File {
     param([string[]]$Candidates, [string]$Name)
     foreach ($candidate in $Candidates) {
@@ -48,6 +40,14 @@ function Resolve-File {
     $cmd = Get-Command $Name -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
     return $null
+}
+
+function Convert-ToManifestPath {
+    param([Parameter(Mandatory)][string]$Path)
+    if ($Path.StartsWith(".\", [System.StringComparison]::Ordinal)) {
+        return $Path.Substring(2)
+    }
+    return $Path
 }
 
 if (-not $SignToolPath) {
@@ -71,7 +71,6 @@ $buildUnsigned = Join-Path $PSScriptRoot "build-code-signing-vector-samples.ps1"
 $unsignedArgs = @{
     WorkspaceRoot = $WorkspaceRoot
     OutputDir = $UnsignedDir
-    ArchivePath = $UnsignedArchivePath
     Force = $Force
 }
 if ($IncludeSdkPackages) { $unsignedArgs.IncludeSdkPackages = $true }
@@ -108,7 +107,7 @@ function Add-ReportEntry {
     }
     if ($Path) {
         $file = Get-Item -LiteralPath $Path
-        $entry.path = (Resolve-Path -LiteralPath $file.FullName -Relative).TrimStart('.', '\')
+        $entry.path = Convert-ToManifestPath -Path (Resolve-Path -LiteralPath $file.FullName -Relative)
         $entry.size_bytes = $file.Length
         $entry.sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash.ToLowerInvariant()
     }
@@ -169,7 +168,7 @@ foreach ($vector in $unsigned.vectors) {
 
     if (Should-SignEmbedded -Vector $vector) {
         $rel = [string]$vector.path
-        $prefix = (Resolve-Path -LiteralPath $UnsignedDir -Relative).TrimStart('.', '\').TrimEnd('\')
+        $prefix = (Convert-ToManifestPath -Path (Resolve-Path -LiteralPath $UnsignedDir -Relative)).TrimEnd('\')
         if ($rel.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
             $rel = $rel.Substring($prefix.Length).TrimStart('\')
         }
@@ -227,14 +226,6 @@ $signedManifest = Join-Path $SignedDir "generated-signed-vectors.json"
     skipped = $skippedEntries
     failed = $failedEntries
 } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $signedManifest -Encoding utf8
-
-if (Test-Path -LiteralPath $SignedArchivePath) {
-    Remove-Item -LiteralPath $SignedArchivePath -Force
-}
-$archiveItems = Get-ChildItem -LiteralPath $SignedDir -Force
-if ($archiveItems.Count -gt 0) {
-    Compress-Archive -LiteralPath $archiveItems.FullName -DestinationPath $SignedArchivePath -Force
-}
 
 Write-Host "Unsigned vectors: $($unsigned.vectors.Count)"
 Write-Host "Signed vectors:   $($signedEntries.Count)"

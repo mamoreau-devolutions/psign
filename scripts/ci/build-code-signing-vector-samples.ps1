@@ -1,7 +1,5 @@
 # Generate small unsigned/probe inputs for the code-signing vector matrix.
-#
-# The default output directory is gitignored. Commit the zip only after reviewing
-# size, hashes, and provenance in tests/fixtures/code-signing-vectors.json.
+# Pass -ArchivePath only when an ad hoc local zip is useful.
 param(
     [string]$WorkspaceRoot = "",
     [string]$OutputDir = "",
@@ -27,10 +25,7 @@ elseif (-not [System.IO.Path]::IsPathRooted($OutputDir)) {
     $OutputDir = Join-Path $WorkspaceRoot $OutputDir
 }
 
-if (-not $ArchivePath) {
-    $ArchivePath = Join-Path $WorkspaceRoot "tests\fixtures\generated-unsigned.zip"
-}
-elseif (-not [System.IO.Path]::IsPathRooted($ArchivePath)) {
+if ($ArchivePath -and -not [System.IO.Path]::IsPathRooted($ArchivePath)) {
     $ArchivePath = Join-Path $WorkspaceRoot $ArchivePath
 }
 
@@ -60,6 +55,14 @@ New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
 $entries = New-Object System.Collections.Generic.List[object]
 
+function Convert-ToManifestPath {
+    param([Parameter(Mandatory)][string]$Path)
+    if ($Path.StartsWith(".\", [System.StringComparison]::Ordinal)) {
+        return $Path.Substring(2)
+    }
+    return $Path
+}
+
 function Add-GeneratedEntry {
     param(
         [Parameter(Mandatory)][string]$Id,
@@ -74,7 +77,7 @@ function Add-GeneratedEntry {
         [string]$Tooling = "none"
     )
     $file = Get-Item -LiteralPath $Path
-    $rel = Resolve-Path -LiteralPath $file.FullName -Relative
+    $rel = Convert-ToManifestPath -Path (Resolve-Path -LiteralPath $file.FullName -Relative)
     $entries.Add([ordered]@{
             id                = $Id
             family            = $Family
@@ -85,7 +88,7 @@ function Add-GeneratedEntry {
             expected_native   = $ExpectedNative
             expected_rust_sip = $ExpectedRustSip
             tooling           = $Tooling
-            path              = $rel.TrimStart('.', '\')
+            path              = $rel
             size_bytes        = $file.Length
             sha256            = (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash.ToLowerInvariant()
         })
@@ -366,16 +369,18 @@ $generatedManifest = Join-Path $OutputDir "generated-vectors.json"
     vectors      = $entries
 } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $generatedManifest -Encoding utf8
 
-if (Test-Path -LiteralPath $ArchivePath) {
-    Remove-Item -LiteralPath $ArchivePath -Force
+if ($ArchivePath) {
+    if (Test-Path -LiteralPath $ArchivePath) {
+        Remove-Item -LiteralPath $ArchivePath -Force
+    }
+    New-Item -ItemType Directory -Force -Path (Split-Path $ArchivePath -Parent) | Out-Null
+    $archiveItems = Get-ChildItem -LiteralPath $OutputDir -Force
+    if ($archiveItems.Count -eq 0) {
+        throw "No generated vector files found under $OutputDir"
+    }
+    Compress-Archive -LiteralPath $archiveItems.FullName -DestinationPath $ArchivePath -Force
+    Write-Host "Wrote archive: $ArchivePath"
 }
-New-Item -ItemType Directory -Force -Path (Split-Path $ArchivePath -Parent) | Out-Null
-$archiveItems = Get-ChildItem -LiteralPath $OutputDir -Force
-if ($archiveItems.Count -eq 0) {
-    throw "No generated vector files found under $OutputDir"
-}
-Compress-Archive -LiteralPath $archiveItems.FullName -DestinationPath $ArchivePath -Force
 
 Write-Host "Generated $($entries.Count) vector file(s): $OutputDir"
-Write-Host "Wrote archive: $ArchivePath"
 Write-Host "Wrote generated manifest: $generatedManifest"

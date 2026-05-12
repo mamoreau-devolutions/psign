@@ -7,8 +7,6 @@ tests/fixtures/*.vbs -text
 tests/fixtures/*.wsf -text
 tests/fixtures/generated-unsigned/** -text
 tests/fixtures/generated-signed/** -text
-tests/fixtures/generated-unsigned.zip binary
-tests/fixtures/generated-signed.zip binary
 
 # Binary Authenticode fixtures.
 tests/fixtures/**/*.appx binary

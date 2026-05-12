@@ -3,12 +3,9 @@
   "description": "Reusable committed vectors plus the generated matrix for code-signable file families exercised by psign.",
   "generated_output": {
     "directory": "tests/fixtures/generated-unsigned",
-    "archive": "tests/fixtures/generated-unsigned.zip",
     "manifest": "tests/fixtures/generated-unsigned/generated-vectors.json",
-    "gitignored_directories": [
-      "tests/fixtures/generated-unsigned",
-      "tests/fixtures/generated-signed"
-    ]
+    "signed_directory": "tests/fixtures/generated-signed",
+    "signed_manifest": "tests/fixtures/generated-signed/generated-signed-vectors.json"
   },
   "required_axes": {
     "pe_extensions": [".exe", ".dll", ".sys", ".ocx", ".scr", ".cpl", ".efi", ".mui"],
