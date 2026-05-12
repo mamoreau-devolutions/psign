@@ -23,6 +23,11 @@ Signed Authenticode outputs are not byte-for-byte reproducible because native
 signing records signing-time metadata; review and commit the regenerated
 manifests/hashes with the files.
 
+`tests/corpus_sign_verify.rs` exercises the corpus on Windows by verifying every
+committed signed vector, native-signing the unsigned source rows and verifying
+the fresh outputs with `psign`, and psign-signing the offline-supported subset
+from the current user's certificate store.
+
 Vendored public test signing materials live in
 `tests/fixtures/devolutions-authenticode/`. They are sourced from
 `Devolutions/devolutions-authenticode` and are used by
