@@ -18,9 +18,9 @@ use base64::Engine;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WshKind {
-    /// `.vbs` — `OID_VBSSIP`
+    /// `.vbs` / `.vbe` — `OID_VBSSIP`
     Vbs,
-    /// `.js` — `OID_JSSIP`
+    /// `.js` / `.jse` — `OID_JSSIP`
     Js,
     /// `.wsf`
     Wsf,
@@ -28,8 +28,8 @@ pub enum WshKind {
 
 pub fn wsh_kind_from_ext(ext: &str) -> Option<WshKind> {
     match ext.to_ascii_lowercase().as_str() {
-        "vbs" => Some(WshKind::Vbs),
-        "js" => Some(WshKind::Js),
+        "vbs" | "vbe" => Some(WshKind::Vbs),
+        "js" | "jse" => Some(WshKind::Js),
         "wsf" => Some(WshKind::Wsf),
         _ => None,
     }

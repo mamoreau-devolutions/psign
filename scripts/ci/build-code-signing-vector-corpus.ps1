@@ -126,13 +126,19 @@ function Should-SignEmbedded {
         "cab" { return $true }
         "powershell-script" { return $true }
         "wsh-script" {
-            return @(".js", ".vbs", ".wsf") -contains [string]$Vector.extension
+            return @(".js", ".jse", ".vbs", ".vbe", ".wsf") -contains [string]$Vector.extension
         }
         "msix" {
             return @(".msix", ".appx", ".msixbundle", ".appxbundle") -contains [string]$Vector.extension
         }
         "installer" {
             return @(".msi", ".msp") -contains [string]$Vector.extension
+        }
+        "catalog" {
+            return [string]$Vector.extension -eq ".cat" -and $Vector.state -eq "unsigned"
+        }
+        "wim-esd" {
+            return @(".wim", ".esd") -contains [string]$Vector.extension -and $Vector.state -eq "unsigned"
         }
         default { return $false }
     }
@@ -193,6 +199,15 @@ foreach ($vector in $unsigned.vectors) {
             Remove-Item -LiteralPath $dest -Force -ErrorAction SilentlyContinue
             Add-ReportEntry -List $failedEntries -Vector $vector -Status "sign-failed" -Message $result.Output
         }
+    }
+    elseif ($vector.family -eq "detached-pkcs7" -and $vector.state -eq "content") {
+        continue
+    }
+    elseif ($vector.state -eq "native-pa-verify-rejected") {
+        Add-ReportEntry -List $skippedEntries -Vector $vector -Status "native-pa-verify-rejected"
+    }
+    elseif ($vector.state -eq "native-sign-rejected") {
+        Add-ReportEntry -List $skippedEntries -Vector $vector -Status "native-sign-rejected"
     }
     else {
         Add-ReportEntry -List $skippedEntries -Vector $vector -Status "skipped"

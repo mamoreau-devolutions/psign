@@ -83,7 +83,7 @@ fn generated_signed_corpus_verifies_with_portable_cli() {
     let signed = manifest["signed"]
         .as_array()
         .expect("signed corpus entries");
-    assert_eq!(signed.len(), 92, "signed corpus coverage changed");
+    assert_eq!(signed.len(), 101, "signed corpus coverage changed");
 
     let mut verified = 0usize;
     for entry in signed {
@@ -119,6 +119,18 @@ fn generated_signed_corpus_verifies_with_portable_cli() {
                     .arg("--anchor-dir")
                     .arg(anchor_dir(&repo));
             }
+            "catalog" => {
+                cmd.arg("trust-verify-catalog")
+                    .arg(path)
+                    .arg("--anchor-dir")
+                    .arg(anchor_dir(&repo));
+            }
+            "wim-esd" => {
+                cmd.arg("trust-verify-esd")
+                    .arg(path)
+                    .arg("--anchor-dir")
+                    .arg(anchor_dir(&repo));
+            }
             "msix" => {
                 cmd.arg("verify-msix").arg(path);
             }
@@ -138,7 +150,7 @@ fn generated_signed_corpus_verifies_with_portable_cli() {
     }
 
     assert_eq!(
-        verified, 92,
+        verified, 101,
         "portable corpus verification coverage changed"
     );
 }

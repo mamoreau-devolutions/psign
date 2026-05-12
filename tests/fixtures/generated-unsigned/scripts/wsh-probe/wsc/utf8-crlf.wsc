@@ -1,2 +1,2 @@
-' optional WSH provider probe
-WScript.Echo "psign optional probe"
+<?xml version="1.0"?>
+<component><registration progid="Psign.WscProbe" /></component>

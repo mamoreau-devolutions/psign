@@ -257,21 +257,21 @@
       "extensions": [".jse", ".vbe", ".wsc"],
       "encodings": ["utf8", "utf16le-bom"],
       "line_endings": ["crlf"],
-      "states": ["unsigned"],
+      "states": ["unsigned", "native-sign-rejected"],
       "storage": "generated",
       "tooling": "none",
-      "expected_native": ["sign-probe"],
-      "expected_rust_sip": ["unsupported"]
+      "expected_native": ["sign-ok", "reject-unrecognized-format"],
+      "expected_rust_sip": ["wsh-digest-after-sign", "unsupported"]
     },
     {
       "id": "generated-installer-probe-matrix",
       "family": "installer",
       "extensions": [".msi", ".msp", ".mst"],
-      "states": ["unsigned", "unsigned-probe"],
+      "states": ["unsigned", "native-pa-verify-rejected"],
       "storage": "generated",
       "tooling": "wix-and-windows-sdk",
-      "expected_native": ["sign-ok", "sign-probe", "verify-after-sign"],
-      "expected_rust_sip": ["msi-digest-if-signed"]
+      "expected_native": ["sign-ok", "verify-after-sign", "sign-ok-pa-verify-reject"],
+      "expected_rust_sip": ["msi-digest-after-sign", "msi-trust-if-signed"]
     },
     {
       "id": "generated-cab-matrix",
@@ -287,11 +287,11 @@
       "id": "generated-catalog-matrix",
       "family": "catalog",
       "extensions": [".cat"],
-      "states": ["member-and-catalog-probe"],
+      "states": ["member-and-catalog"],
       "storage": "generated",
-      "tooling": "windows-sdk",
-      "expected_native": ["catalog-verify-probe"],
-      "expected_rust_sip": ["catalog-cms-if-signed"]
+      "tooling": "inf2cat",
+      "expected_native": ["sign-ok", "verify-after-sign"],
+      "expected_rust_sip": ["catalog-trust-after-sign"]
     },
     {
       "id": "generated-cleartext-package-matrix",
@@ -327,11 +327,11 @@
       "id": "generated-wim-esd-valid-probe-matrix",
       "family": "wim-esd",
       "extensions": [".wim", ".esd"],
-      "states": ["unsigned-probe"],
+      "states": ["unsigned"],
       "storage": "generated",
       "tooling": "dism",
-      "expected_native": ["sign-probe"],
-      "expected_rust_sip": ["esd-digest-if-signed"]
+      "expected_native": ["sign-ok", "verify-after-sign"],
+      "expected_rust_sip": ["esd-trust-after-sign"]
     },
     {
       "id": "generated-detached-matrix",

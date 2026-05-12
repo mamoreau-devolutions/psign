@@ -229,7 +229,10 @@ pub fn extension_supported(ext: &str) -> bool {
 }
 
 pub fn is_wsh_extension(ext: &str) -> bool {
-    matches!(ext.to_ascii_lowercase().as_str(), "js" | "vbs" | "wsf")
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "js" | "jse" | "vbs" | "vbe" | "wsf"
+    )
 }
 
 /// Compare PKCS#7 indirect digest with a heuristic UTF-16 hash over the file excluding the sig block.

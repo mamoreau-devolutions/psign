@@ -38,8 +38,12 @@ The generated matrix includes:
 
 - PE-backed aliases (`.exe`, `.dll`, `.sys`, `.ocx`, `.scr`, `.cpl`, `.efi`, `.mui`, `.winmd`) for both tiny32 and tiny64 PE sources.
 - PowerShell and WSH text variants for UTF-8, UTF-8 with BOM, UTF-16LE with BOM, UTF-16BE with BOM, CRLF, and LF.
-- Cleartext MSIX/AppX package rows, encrypted-package negative rows, CAB, installer/catalog probes, WIM/ESD negatives, detached PKCS#7 inputs, and optional-provider probes.
-- Signed counterparts for native-supported PE/WinMD/CAB/MSIX, PowerShell UTF-8/UTF-8-BOM/UTF-16LE-BOM rows, WSH `.js`/`.vbs`/`.wsf` rows, and one detached PKCS#7 signature. PowerShell UTF-16BE-BOM rows are retained unsigned and recorded as native SignTool rejects.
+- Cleartext MSIX/AppX package rows, encrypted-package negative rows, CAB, real installer/catalog rows, tiny DISM-created WIM/ESD images, detached PKCS#7 inputs, and optional-provider probes.
+- Signed counterparts for native-supported PE/WinMD/CAB/MSIX, WIM/ESD, catalog, MSI/MSP, PowerShell UTF-8/UTF-8-BOM/UTF-16LE-BOM rows, WSH `.js`/`.jse`/`.vbs`/`.vbe`/`.wsf` rows, and all detached PKCS#7 content variants. PowerShell UTF-16BE-BOM and WSH `.wsc` rows are retained unsigned and recorded as native SignTool rejects; MST is retained as a native `/pa` verification reject.
+
+The checked-in tiny WIM/ESD files are preserved by the generator during `-Force`
+regeneration. If recreating them from scratch, run DISM capture/export from an
+elevated PowerShell session before regenerating the signed corpus.
 
 Suggested corpus:
 - `unsigned.exe`

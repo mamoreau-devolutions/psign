@@ -60,6 +60,16 @@ function Resolve-Tool {
     return $null
 }
 
+$preservedWimEsd = @{}
+if (Test-Path -LiteralPath $OutputDir) {
+    foreach ($ext in @(".wim", ".esd")) {
+        $existing = Join-Path $OutputDir ("wim-esd\tiny" + $ext)
+        if (Test-Path -LiteralPath $existing) {
+            $preservedWimEsd[$ext] = [System.IO.File]::ReadAllBytes($existing)
+        }
+    }
+}
+
 if ((Test-Path -LiteralPath $OutputDir) -and -not $Force) {
     throw "Output directory already exists: $OutputDir. Pass -Force to replace it."
 }
@@ -183,12 +193,13 @@ function Write-TextVector {
         [Parameter(Mandatory)][string]$Extension,
         [Parameter(Mandatory)][string]$Encoding,
         [Parameter(Mandatory)][string]$LineEndings,
+        [string]$State = "unsigned",
         [string]$ExpectedNative = "sign-probe",
         [string]$ExpectedRustSip = "unsigned-marker-negative",
         [string]$Tooling = "none"
     )
     $bytes = Get-TextBytes -Text $Text -Encoding $Encoding
-    Write-BytesVector -RelativePath $RelativePath -Bytes $bytes -Id $Id -Family $Family -Extension $Extension -Encoding $Encoding -LineEndings $LineEndings -ExpectedNative $ExpectedNative -ExpectedRustSip $ExpectedRustSip -Tooling $Tooling
+    Write-BytesVector -RelativePath $RelativePath -Bytes $bytes -Id $Id -Family $Family -Extension $Extension -Encoding $Encoding -LineEndings $LineEndings -State $State -ExpectedNative $ExpectedNative -ExpectedRustSip $ExpectedRustSip -Tooling $Tooling
 }
 
 function Join-Lines {
@@ -252,8 +263,16 @@ foreach ($ext in $wshExtensions) {
 foreach ($ext in @(".jse", ".vbe", ".wsc")) {
     foreach ($encoding in @("utf8", "utf16le-bom")) {
         $safeExt = $ext.TrimStart('.')
-        $text = Join-Lines -Lines @("' optional WSH provider probe", "WScript.Echo ""psign optional probe""") -LineEndings "crlf"
-        Write-TextVector -RelativePath "scripts\wsh-probe\$safeExt\$encoding-crlf$ext" -Text $text -Id "generated-wsh-probe-$safeExt-$encoding" -Family "wsh-script" -Extension $ext -Encoding $encoding -LineEndings "crlf" -ExpectedNative "sign-probe" -ExpectedRustSip "unsupported"
+        $lines = switch ($ext) {
+            ".jse" { @("// optional WSH encoded JScript probe", "WScript.Echo('psign optional probe');") }
+            ".vbe" { @("' optional WSH encoded VBScript probe", "WScript.Echo ""psign optional probe""") }
+            default { @("<?xml version=`"1.0`"?>", "<component><registration progid=`"Psign.WscProbe`" /></component>") }
+        }
+        $state = if ($ext -eq ".wsc") { "native-sign-rejected" } else { "unsigned" }
+        $expectedNative = if ($ext -eq ".wsc") { "reject-unrecognized-format" } else { "sign-ok" }
+        $expectedRust = if ($ext -eq ".wsc") { "unsupported" } else { "wsh-digest-after-sign" }
+        $text = Join-Lines -Lines $lines -LineEndings "crlf"
+        Write-TextVector -RelativePath "scripts\wsh-probe\$safeExt\$encoding-crlf$ext" -Text $text -Id "generated-wsh-probe-$safeExt-$encoding" -Family "wsh-script" -Extension $ext -Encoding $encoding -LineEndings "crlf" -State $state -ExpectedNative $expectedNative -ExpectedRustSip $expectedRust
     }
 }
 
@@ -394,7 +413,7 @@ if ($wix -and $msiTran) {
 
     Add-GeneratedEntry -Id "generated-installer-tiny-msi" -Family "installer" -Path $msi -Extension ".msi" -State "unsigned" -ExpectedNative "sign-ok" -ExpectedRustSip "msi-digest-after-sign" -Tooling "wix"
     Add-GeneratedEntry -Id "generated-installer-tiny-msp" -Family "installer" -Path $msp -Extension ".msp" -State "unsigned" -ExpectedNative "sign-ok" -ExpectedRustSip "msi-digest-after-sign" -Tooling "wix"
-    Add-GeneratedEntry -Id "generated-installer-tiny-mst" -Family "installer" -Path $mst -Extension ".mst" -State "unsigned-probe" -ExpectedNative "sign-probe" -ExpectedRustSip "msi-digest-if-signed" -Tooling "wix-msitran"
+    Add-GeneratedEntry -Id "generated-installer-tiny-mst" -Family "installer" -Path $mst -Extension ".mst" -State "native-pa-verify-rejected" -ExpectedNative "sign-ok-pa-verify-reject" -ExpectedRustSip "msi-trust-if-signed" -Tooling "wix-msitran"
     Remove-Item -LiteralPath $installerWork -Recurse -Force
 }
 elseif ($RequireSdkTools) {
@@ -411,7 +430,58 @@ else {
 
 $memberPath = Join-Path $OutputDir "catalog\member.sys"
 Copy-Vector -Source $Pe64Source -RelativePath "catalog\member.sys" -Id "generated-catalog-member-sys" -Family "catalog-member" -Extension ".sys" -State "unsigned" -ExpectedNative "catalog-member" -ExpectedRustSip "not-applicable"
-Write-BytesVector -RelativePath "catalog\catalog-probe.cat" -Bytes ([System.Text.Encoding]::ASCII.GetBytes("psign catalog placeholder`r`n")) -Id "generated-catalog-probe-cat" -Family "catalog" -Extension ".cat" -State "probe" -ExpectedNative "catalog-verify-probe" -ExpectedRustSip "catalog-cms-if-signed" -Tooling "windows-sdk"
+$inf2Cat = Resolve-Tool -Name "Inf2Cat.exe" -Candidates @(
+    (Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin\10.0.26100.0\x86\Inf2Cat.exe")
+)
+if ($inf2Cat) {
+    $catalogDir = Join-Path $OutputDir "catalog"
+    $infPath = Join-Path $catalogDir "sample.inf"
+    @"
+[Version]
+Signature="`$Windows NT`$"
+Class=Sample
+ClassGuid={78A1C341-4539-11d3-B88D-00C04FAD5171}
+Provider=%ProviderName%
+CatalogFile=sample.cat
+DriverVer=01/01/2024,1.0.0.0
+
+[Manufacturer]
+%ProviderName%=Models,NTamd64
+
+[Models.NTamd64]
+%DeviceName%=Install, ROOT\PSIGNCAT
+
+[Install]
+CopyFiles=Files
+
+[Files]
+member.sys
+
+[DestinationDirs]
+Files=12
+
+[SourceDisksNames]
+1=%DiskName%,,,.
+
+[SourceDisksFiles]
+member.sys=1
+
+[Strings]
+ProviderName="Devolutions"
+DeviceName="Psign Catalog Test Device"
+DiskName="Psign Catalog Test Disk"
+"@ | Set-Content -LiteralPath $infPath -Encoding ascii
+    & $inf2Cat /driver:$catalogDir /os:10_X64 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Inf2Cat.exe failed with exit $LASTEXITCODE" }
+    $catPath = Join-Path $catalogDir "sample.cat"
+    Add-GeneratedEntry -Id "generated-catalog-sample-cat" -Family "catalog" -Path $catPath -Extension ".cat" -State "unsigned" -ExpectedNative "sign-ok" -ExpectedRustSip "catalog-trust-after-sign" -Tooling "inf2cat"
+}
+elseif ($RequireSdkTools) {
+    throw "Inf2Cat.exe not found."
+}
+else {
+    Write-BytesVector -RelativePath "catalog\catalog-probe.cat" -Bytes ([System.Text.Encoding]::ASCII.GetBytes("psign catalog placeholder`r`n")) -Id "generated-catalog-probe-cat" -Family "catalog" -Extension ".cat" -State "probe" -ExpectedNative "catalog-verify-probe" -ExpectedRustSip "catalog-cms-if-signed" -Tooling "windows-sdk"
+}
 
 if ($IncludeSdkPackages) {
     $makeAppx = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter MakeAppx.exe -ErrorAction SilentlyContinue |
@@ -474,11 +544,14 @@ foreach ($ext in @(".wim", ".esd")) {
     $h = New-Object byte[] 208
     [System.Text.Encoding]::ASCII.GetBytes("MSWIM") | ForEach-Object -Begin { $i = 0 } -Process { $h[$i] = $_; $i++ }
     Write-BytesVector -RelativePath "wim-esd\unsigned-header$ext" -Bytes $h -Id "generated-wim-esd-unsigned-header-$($ext.TrimStart('.'))" -Family "wim-esd" -Extension $ext -State "unsigned-header-negative" -ExpectedNative "reject" -ExpectedRustSip "negative-ok"
+    if ($preservedWimEsd.ContainsKey($ext)) {
+        Write-BytesVector -RelativePath "wim-esd\tiny$ext" -Bytes $preservedWimEsd[$ext] -Id "generated-wim-esd-tiny-$($ext.TrimStart('.'))" -Family "wim-esd" -Extension $ext -State "unsigned" -ExpectedNative "sign-ok" -ExpectedRustSip "esd-trust-after-sign" -Tooling "dism"
+    }
 }
 
 Write-BytesVector -RelativePath "detached\content.bin" -Bytes ([System.Text.Encoding]::ASCII.GetBytes("psign detached binary content fixture`r`n")) -Id "generated-detached-content-bin" -Family "detached-pkcs7" -Extension ".bin" -State "content" -ExpectedNative "detached-sign-probe" -ExpectedRustSip "trust-verify-detached-if-signed" -Tooling "signtool"
 foreach ($encoding in @("utf8", "utf16le-bom")) {
-    Write-TextVector -RelativePath "detached\content-$encoding.txt" -Text "psign detached text content fixture`r`n" -Id "generated-detached-content-txt-$encoding" -Family "detached-pkcs7" -Extension ".txt" -Encoding $encoding -LineEndings "crlf" -ExpectedNative "detached-sign-probe" -ExpectedRustSip "trust-verify-detached-if-signed" -Tooling "signtool"
+    Write-TextVector -RelativePath "detached\content-$encoding.txt" -Text "psign detached text content fixture`r`n" -Id "generated-detached-content-txt-$encoding" -Family "detached-pkcs7" -Extension ".txt" -Encoding $encoding -LineEndings "crlf" -State "content" -ExpectedNative "detached-sign-probe" -ExpectedRustSip "trust-verify-detached-if-signed" -Tooling "signtool"
 }
 Write-BytesVector -RelativePath "detached\signature-placeholder.p7" -Bytes ([System.Text.Encoding]::ASCII.GetBytes("CI replaces this with detached PKCS#7`r`n")) -Id "generated-detached-placeholder-p7" -Family "detached-pkcs7" -Extension ".p7" -State "ci-generated-signature" -ExpectedNative "detached-sign-probe" -ExpectedRustSip "trust-verify-detached-if-signed" -Tooling "signtool"
 

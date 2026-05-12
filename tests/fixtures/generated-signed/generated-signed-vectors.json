@@ -845,6 +845,46 @@
                        "sha256":  "85585737c775e3951c34386685410a63488f5d49c19cb728edb7ede35f12a0f7"
                    },
                    {
+                       "id":  "generated-wsh-probe-jse-utf8",
+                       "family":  "wsh-script",
+                       "extension":  ".jse",
+                       "state":  "signed",
+                       "source_path":  "tests\\fixtures\\generated-unsigned\\scripts\\wsh-probe\\jse\\utf8-crlf.jse",
+                       "path":  "tests\\fixtures\\generated-signed\\scripts\\wsh-probe\\jse\\utf8-crlf.jse",
+                       "size_bytes":  2696,
+                       "sha256":  "b126ee634dac06543fd8c3607312260daad6512d9700e5daf0d2219f51de2add"
+                   },
+                   {
+                       "id":  "generated-wsh-probe-jse-utf16le-bom",
+                       "family":  "wsh-script",
+                       "extension":  ".jse",
+                       "state":  "signed",
+                       "source_path":  "tests\\fixtures\\generated-unsigned\\scripts\\wsh-probe\\jse\\utf16le-bom-crlf.jse",
+                       "path":  "tests\\fixtures\\generated-signed\\scripts\\wsh-probe\\jse\\utf16le-bom-crlf.jse",
+                       "size_bytes":  5394,
+                       "sha256":  "1d0448d4a6e988f88e54941374eba19b5a99efc6354592b7adb9ce6d4dd1f0be"
+                   },
+                   {
+                       "id":  "generated-wsh-probe-vbe-utf8",
+                       "family":  "wsh-script",
+                       "extension":  ".vbe",
+                       "state":  "signed",
+                       "source_path":  "tests\\fixtures\\generated-unsigned\\scripts\\wsh-probe\\vbe\\utf8-crlf.vbe",
+                       "path":  "tests\\fixtures\\generated-signed\\scripts\\wsh-probe\\vbe\\utf8-crlf.vbe",
+                       "size_bytes":  2694,
+                       "sha256":  "fdbe53e8e664860c0bea8b4d0b3a9da0b357ae641fa3365ca99790d240ec9a76"
+                   },
+                   {
+                       "id":  "generated-wsh-probe-vbe-utf16le-bom",
+                       "family":  "wsh-script",
+                       "extension":  ".vbe",
+                       "state":  "signed",
+                       "source_path":  "tests\\fixtures\\generated-unsigned\\scripts\\wsh-probe\\vbe\\utf16le-bom-crlf.vbe",
+                       "path":  "tests\\fixtures\\generated-signed\\scripts\\wsh-probe\\vbe\\utf16le-bom-crlf.vbe",
+                       "size_bytes":  5390,
+                       "sha256":  "43a44231ad7af45e7e5ff68b90189b0562e454fd7c5e3896815b9f0db9e0b2c8"
+                   },
+                   {
                        "id":  "generated-cab-unsigned",
                        "family":  "cab",
                        "extension":  ".cab",
@@ -852,7 +892,7 @@
                        "source_path":  "tests\\fixtures\\generated-unsigned\\cab\\sample.cab",
                        "path":  "tests\\fixtures\\generated-signed\\cab\\sample.cab",
                        "size_bytes":  1675,
-                       "sha256":  "4524075ef2cd882e4188d2cef3bb2ecac85cb597e60070e3be97798170a78e5e"
+                       "sha256":  "bb90618d7c8d6bfa172f7201b9be6433265afbfeb6fef06a364de5437c41014d"
                    },
                    {
                        "id":  "generated-installer-tiny-msi",
@@ -862,7 +902,7 @@
                        "source_path":  "tests\\fixtures\\generated-unsigned\\installer\\tiny.msi",
                        "path":  "tests\\fixtures\\generated-signed\\installer\\tiny.msi",
                        "size_bytes":  32768,
-                       "sha256":  "693533bc3d851b459387fb0c44930c47804aa49d9bff2fed2e5b269de32dc115"
+                       "sha256":  "105bec289be1664577d6fb1572d154ff74b3cab8f497965baa99b5b0e752e6f8"
                    },
                    {
                        "id":  "generated-installer-tiny-msp",
@@ -872,7 +912,17 @@
                        "source_path":  "tests\\fixtures\\generated-unsigned\\installer\\tiny-patch.msp",
                        "path":  "tests\\fixtures\\generated-signed\\installer\\tiny-patch.msp",
                        "size_bytes":  24576,
-                       "sha256":  "f5d12624c88205dbd369c3a395fbd8d09787737a1cbe59021e29aab4f0bbc92d"
+                       "sha256":  "e50eb18ff49461f4099c4260231153b11dbc7082c47f416b3c4ac1305f0a7bd9"
+                   },
+                   {
+                       "id":  "generated-catalog-sample-cat",
+                       "family":  "catalog",
+                       "extension":  ".cat",
+                       "state":  "signed",
+                       "source_path":  "tests\\fixtures\\generated-unsigned\\catalog\\sample.cat",
+                       "path":  "tests\\fixtures\\generated-signed\\catalog\\sample.cat",
+                       "size_bytes":  2429,
+                       "sha256":  "120c5c7ef1e8a428918fecf36f8fa0d8d0248ffecc99cbcd40bb39f55f37c49e"
                    },
                    {
                        "id":  "generated-msix-msix",
@@ -881,8 +931,8 @@
                        "state":  "signed",
                        "source_path":  "tests\\fixtures\\generated-unsigned\\msix\\sample.msix",
                        "path":  "tests\\fixtures\\generated-signed\\msix\\sample.msix",
-                       "size_bytes":  5786,
-                       "sha256":  "d7ffaaf045b296a863f9c2dbcf4474893cf2aceb32ada64e8b8bca72504a1a47"
+                       "size_bytes":  5783,
+                       "sha256":  "ec1679cd4c42030a87aeb045e2e76c444818b7adf00ea9ffce7b4ded92edaa4c"
                    },
                    {
                        "id":  "generated-msix-appx",
@@ -891,8 +941,8 @@
                        "state":  "signed",
                        "source_path":  "tests\\fixtures\\generated-unsigned\\msix\\sample.appx",
                        "path":  "tests\\fixtures\\generated-signed\\msix\\sample.appx",
-                       "size_bytes":  5791,
-                       "sha256":  "bf4e9dd0e51a15c239035cb154704c16160b0ae13f8907975f8a408e21850568"
+                       "size_bytes":  5784,
+                       "sha256":  "7013bb334a4fb44d473c074ae073e67041c53de4afea7fcb84358516309a8aca"
                    },
                    {
                        "id":  "generated-msix-msixbundle",
@@ -901,8 +951,8 @@
                        "state":  "signed",
                        "source_path":  "tests\\fixtures\\generated-unsigned\\msix\\sample.msixbundle",
                        "path":  "tests\\fixtures\\generated-signed\\msix\\sample.msixbundle",
-                       "size_bytes":  8980,
-                       "sha256":  "c1a992e64ad45081a02213f4d34d401adc13a5b7c813332001e087d53637475a"
+                       "size_bytes":  8978,
+                       "sha256":  "b3008614b63d119cf34c5cf8f1be79eabe1b3285681dc20e373c109d6b0ae0dc"
                    },
                    {
                        "id":  "generated-msix-appxbundle",
@@ -911,8 +961,28 @@
                        "state":  "signed",
                        "source_path":  "tests\\fixtures\\generated-unsigned\\msix\\sample.appxbundle",
                        "path":  "tests\\fixtures\\generated-signed\\msix\\sample.appxbundle",
-                       "size_bytes":  8975,
-                       "sha256":  "cf1a8bc1bfc0e8b1b4f1be22d80405622b656dfa3e81dcbd9e10273695f7fc16"
+                       "size_bytes":  8977,
+                       "sha256":  "f107831cf91930b94215caa830b11efbadc854039390cfb1b10fb042e63b2102"
+                   },
+                   {
+                       "id":  "generated-wim-esd-tiny-wim",
+                       "family":  "wim-esd",
+                       "extension":  ".wim",
+                       "state":  "signed",
+                       "source_path":  "tests\\fixtures\\generated-unsigned\\wim-esd\\tiny.wim",
+                       "path":  "tests\\fixtures\\generated-signed\\wim-esd\\tiny.wim",
+                       "size_bytes":  3098,
+                       "sha256":  "a5fc246591c1935b6f1863e213c12138eea1ff58bf7cb4a559f9d598df5a7619"
+                   },
+                   {
+                       "id":  "generated-wim-esd-tiny-esd",
+                       "family":  "wim-esd",
+                       "extension":  ".esd",
+                       "state":  "signed",
+                       "source_path":  "tests\\fixtures\\generated-unsigned\\wim-esd\\tiny.esd",
+                       "path":  "tests\\fixtures\\generated-signed\\wim-esd\\tiny.esd",
+                       "size_bytes":  3104,
+                       "sha256":  "0e0eb8568e2174156c29b6ba8ba33ddb6b7f4f27dea1c20431d77b8f496ef731"
                    },
                    {
                        "id":  "generated-detached-content-bin",
@@ -923,6 +993,26 @@
                        "path":  "tests\\fixtures\\generated-signed\\detached\\content\\content.bin.p7",
                        "size_bytes":  1324,
                        "sha256":  "40f9b5e1560839b4503ed07c375fe54068e99980a24af7abf3ef570038b210f0"
+                   },
+                   {
+                       "id":  "generated-detached-content-txt-utf8",
+                       "family":  "detached-pkcs7",
+                       "extension":  ".txt",
+                       "state":  "detached-signed",
+                       "source_path":  "tests\\fixtures\\generated-unsigned\\detached\\content-utf8.txt",
+                       "path":  "tests\\fixtures\\generated-signed\\detached\\content-utf8\\content-utf8.txt.p7",
+                       "size_bytes":  1324,
+                       "sha256":  "5fc5346b47ab1afa1199ed8e6792e1deee32846479ed847694a0008b1cd9864c"
+                   },
+                   {
+                       "id":  "generated-detached-content-txt-utf16le-bom",
+                       "family":  "detached-pkcs7",
+                       "extension":  ".txt",
+                       "state":  "detached-signed",
+                       "source_path":  "tests\\fixtures\\generated-unsigned\\detached\\content-utf16le-bom.txt",
+                       "path":  "tests\\fixtures\\generated-signed\\detached\\content-utf16le-bom\\content-utf16le-bom.txt.p7",
+                       "size_bytes":  1324,
+                       "sha256":  "8669b2f07aee0e66ac1538b40d1aed36486a7c34e603c2b8694d5aa9a67648bc"
                    }
                ],
     "skipped":  [
@@ -1046,52 +1136,24 @@
                         "message":  "Done Adding Additional Store\nError information: \"Error: SignerSign() failed.\" (-2147024883/0x8007000d)\nSignTool Error: An unexpected internal error has occurred."
                     },
                     {
-                        "id":  "generated-wsh-probe-jse-utf8",
-                        "family":  "wsh-script",
-                        "extension":  ".jse",
-                        "state":  "skipped",
-                        "source_path":  "tests\\fixtures\\generated-unsigned\\scripts\\wsh-probe\\jse\\utf8-crlf.jse"
-                    },
-                    {
-                        "id":  "generated-wsh-probe-jse-utf16le-bom",
-                        "family":  "wsh-script",
-                        "extension":  ".jse",
-                        "state":  "skipped",
-                        "source_path":  "tests\\fixtures\\generated-unsigned\\scripts\\wsh-probe\\jse\\utf16le-bom-crlf.jse"
-                    },
-                    {
-                        "id":  "generated-wsh-probe-vbe-utf8",
-                        "family":  "wsh-script",
-                        "extension":  ".vbe",
-                        "state":  "skipped",
-                        "source_path":  "tests\\fixtures\\generated-unsigned\\scripts\\wsh-probe\\vbe\\utf8-crlf.vbe"
-                    },
-                    {
-                        "id":  "generated-wsh-probe-vbe-utf16le-bom",
-                        "family":  "wsh-script",
-                        "extension":  ".vbe",
-                        "state":  "skipped",
-                        "source_path":  "tests\\fixtures\\generated-unsigned\\scripts\\wsh-probe\\vbe\\utf16le-bom-crlf.vbe"
-                    },
-                    {
                         "id":  "generated-wsh-probe-wsc-utf8",
                         "family":  "wsh-script",
                         "extension":  ".wsc",
-                        "state":  "skipped",
+                        "state":  "native-sign-rejected",
                         "source_path":  "tests\\fixtures\\generated-unsigned\\scripts\\wsh-probe\\wsc\\utf8-crlf.wsc"
                     },
                     {
                         "id":  "generated-wsh-probe-wsc-utf16le-bom",
                         "family":  "wsh-script",
                         "extension":  ".wsc",
-                        "state":  "skipped",
+                        "state":  "native-sign-rejected",
                         "source_path":  "tests\\fixtures\\generated-unsigned\\scripts\\wsh-probe\\wsc\\utf16le-bom-crlf.wsc"
                     },
                     {
                         "id":  "generated-installer-tiny-mst",
                         "family":  "installer",
                         "extension":  ".mst",
-                        "state":  "skipped",
+                        "state":  "native-pa-verify-rejected",
                         "source_path":  "tests\\fixtures\\generated-unsigned\\installer\\tiny-transform.mst"
                     },
                     {
@@ -1100,13 +1162,6 @@
                         "extension":  ".sys",
                         "state":  "skipped",
                         "source_path":  "tests\\fixtures\\generated-unsigned\\catalog\\member.sys"
-                    },
-                    {
-                        "id":  "generated-catalog-probe-cat",
-                        "family":  "catalog",
-                        "extension":  ".cat",
-                        "state":  "skipped",
-                        "source_path":  "tests\\fixtures\\generated-unsigned\\catalog\\catalog-probe.cat"
                     },
                     {
                         "id":  "generated-encrypted-negative-eappx",
@@ -1163,27 +1218,6 @@
                         "extension":  ".esd",
                         "state":  "skipped",
                         "source_path":  "tests\\fixtures\\generated-unsigned\\wim-esd\\unsigned-header.esd"
-                    },
-                    {
-                        "id":  "generated-detached-content-bin",
-                        "family":  "detached-pkcs7",
-                        "extension":  ".bin",
-                        "state":  "skipped",
-                        "source_path":  "tests\\fixtures\\generated-unsigned\\detached\\content.bin"
-                    },
-                    {
-                        "id":  "generated-detached-content-txt-utf8",
-                        "family":  "detached-pkcs7",
-                        "extension":  ".txt",
-                        "state":  "skipped",
-                        "source_path":  "tests\\fixtures\\generated-unsigned\\detached\\content-utf8.txt"
-                    },
-                    {
-                        "id":  "generated-detached-content-txt-utf16le-bom",
-                        "family":  "detached-pkcs7",
-                        "extension":  ".txt",
-                        "state":  "skipped",
-                        "source_path":  "tests\\fixtures\\generated-unsigned\\detached\\content-utf16le-bom.txt"
                     },
                     {
                         "id":  "generated-detached-placeholder-p7",

@@ -27,7 +27,7 @@ struct SignedCorpusEntry {
 fn committed_signed_corpus_verifies_with_psign() {
     let repo = repo_root();
     let manifest = signed_manifest();
-    assert_eq!(manifest.signed.len(), 92, "signed corpus coverage changed");
+    assert_eq!(manifest.signed.len(), 101, "signed corpus coverage changed");
 
     for entry in &manifest.signed {
         if entry.state == "detached-signed" {
@@ -46,7 +46,7 @@ fn committed_signed_corpus_verifies_with_psign() {
 fn committed_signed_corpus_matches_portable_supported_verification() {
     let repo = repo_root();
     let manifest = signed_manifest();
-    assert_eq!(manifest.signed.len(), 92, "signed corpus coverage changed");
+    assert_eq!(manifest.signed.len(), 101, "signed corpus coverage changed");
 
     let mut parity_count = 0usize;
     for entry in &manifest.signed {
@@ -72,7 +72,7 @@ fn committed_signed_corpus_matches_portable_supported_verification() {
         parity_count += 1;
     }
 
-    assert_eq!(parity_count, 92, "portable parity coverage changed");
+    assert_eq!(parity_count, 101, "portable parity coverage changed");
 }
 
 #[test]
@@ -108,41 +108,42 @@ fn unsigned_corpus_freshly_signed_with_native_signtool_verifies_with_psign() {
         signed_count += 1;
     }
 
-    let detached = manifest
+    for detached in manifest
         .signed
         .iter()
-        .find(|entry| entry.state == "detached-signed")
-        .expect("detached signed corpus entry");
-    let p7_dir = temp.path().join("detached");
-    std::fs::create_dir_all(&p7_dir).expect("create detached output dir");
-    let content = repo_path(&repo, &detached.source_path);
-    let sign = Command::new(&signtool)
-        .args(["sign", "/fd", "SHA256", "/f"])
-        .arg(test_pfx_path(&repo))
-        .args([
-            "/p",
-            TEST_PFX_PASSWORD,
-            "/p7",
-            p7_dir.to_str().expect("p7 dir is utf-8"),
-            "/p7ce",
-            "DetachedSignedData",
-            "/p7co",
-            "1.2.840.113549.1.7.2",
-        ])
-        .arg(&content)
-        .output()
-        .expect("run signtool detached sign");
-    assert_success(sign, "native signtool detached sign");
-    let p7 = std::fs::read_dir(&p7_dir)
-        .expect("read detached output dir")
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .find(|path| path.is_file())
-        .expect("detached PKCS#7 output");
-    verify_detached_with_psign(&content, &p7, &detached.id);
-    signed_count += 1;
+        .filter(|entry| entry.state == "detached-signed")
+    {
+        let p7_dir = temp.path().join("detached").join(&detached.id);
+        std::fs::create_dir_all(&p7_dir).expect("create detached output dir");
+        let content = repo_path(&repo, &detached.source_path);
+        let sign = Command::new(&signtool)
+            .args(["sign", "/fd", "SHA256", "/f"])
+            .arg(test_pfx_path(&repo))
+            .args([
+                "/p",
+                TEST_PFX_PASSWORD,
+                "/p7",
+                p7_dir.to_str().expect("p7 dir is utf-8"),
+                "/p7ce",
+                "DetachedSignedData",
+                "/p7co",
+                "1.2.840.113549.1.7.2",
+            ])
+            .arg(&content)
+            .output()
+            .expect("run signtool detached sign");
+        assert_success(sign, "native signtool detached sign");
+        let p7 = std::fs::read_dir(&p7_dir)
+            .expect("read detached output dir")
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|path| path.is_file())
+            .expect("detached PKCS#7 output");
+        verify_detached_with_psign(&content, &p7, &detached.id);
+        signed_count += 1;
+    }
 
-    assert_eq!(signed_count, 92, "fresh native signing coverage changed");
+    assert_eq!(signed_count, 101, "fresh native signing coverage changed");
 }
 
 #[test]
@@ -166,7 +167,7 @@ fn unsigned_corpus_freshly_signed_with_psign_verifies_with_psign() {
         .iter()
         .filter(|entry| entry.state == "signed" && entry.family != "msix")
         .collect();
-    assert_eq!(signable.len(), 87, "psign fresh-sign coverage changed");
+    assert_eq!(signable.len(), 94, "psign fresh-sign coverage changed");
 
     for entry in signable {
         let dest = temp.path().join(format!("{}{}", entry.id, entry.extension));
@@ -285,6 +286,18 @@ fn portable_args_for_entry(
         ],
         "cab" => vec![
             "trust-verify-cab".to_owned(),
+            path,
+            "--anchor-dir".to_owned(),
+            anchor,
+        ],
+        "catalog" => vec![
+            "trust-verify-catalog".to_owned(),
+            path,
+            "--anchor-dir".to_owned(),
+            anchor,
+        ],
+        "wim-esd" => vec![
+            "trust-verify-esd".to_owned(),
             path,
             "--anchor-dir".to_owned(),
             anchor,

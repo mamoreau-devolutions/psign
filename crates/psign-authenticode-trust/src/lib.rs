@@ -17,6 +17,7 @@ pub mod trust_pkcs7;
 pub mod trust_verify_cab;
 pub mod trust_verify_catalog;
 pub mod trust_verify_detached;
+pub mod trust_verify_esd;
 pub mod trust_verify_msi;
 pub mod trust_verify_pe;
 pub mod verification_instant;
@@ -29,6 +30,7 @@ pub use policy::AuthenticodeTrustPolicy;
 pub use trust_verify_cab::trust_verify_cab_bytes;
 pub use trust_verify_catalog::trust_verify_catalog_bytes;
 pub use trust_verify_detached::trust_verify_detached_bytes;
+pub use trust_verify_esd::trust_verify_wim_esd_path;
 pub use trust_verify_msi::trust_verify_msi_bytes;
 pub use trust_verify_pe::{
     TrustVerifyPeOptions, TrustVerifyPeReport, load_trust_material, pe_first_pkcs7_terminal_root,
