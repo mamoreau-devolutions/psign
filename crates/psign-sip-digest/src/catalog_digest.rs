@@ -9,7 +9,6 @@
 
 use super::pe_digest::PeAuthenticodeHashKind;
 use anyhow::{Result, anyhow};
-use cms::content_info::ContentInfo;
 use cms::signed_data::SignedData;
 use der::asn1::ObjectIdentifier;
 use der::{Decode, SliceReader};
@@ -18,6 +17,7 @@ use std::path::Path;
 
 const ID_SIGNED_DATA: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.7.2");
 const ID_MESSAGE_DIGEST: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.9.4");
+const ID_MS_CTL: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.4.1.311.10.1");
 
 const OID_SHA1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.14.3.2.26");
 const OID_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.1");
@@ -84,6 +84,11 @@ fn pkcs9_message_digest_matches(
         }
         for val in attr.values.iter() {
             let payload = val.value();
+            if let Ok(oct) = val.decode_as::<der::asn1::OctetString>()
+                && oct.as_bytes() == computed
+            {
+                return Ok(());
+            }
             if blob_contains_octet_string_digest(payload, computed) {
                 return Ok(());
             }
@@ -109,10 +114,10 @@ pub fn catalog_rsa_sha256_signer_prehash_digest(
     crate::pkcs7::signed_data_rsa_sha256_signer_prehash_digest(&sd, signer_index)
 }
 
-/// Verify each `SignerInfo`'s PKCS#9 `messageDigest` matches the CMS digest over encapsulated `eContent`.
-pub fn verify_catalog_digest_consistency_bytes(data: &[u8]) -> Result<()> {
+fn catalog_signed_data(data: &[u8]) -> Result<SignedData> {
     let mut r = SliceReader::new(data).map_err(|_| anyhow!("empty catalog file"))?;
-    let ci = ContentInfo::decode(&mut r).map_err(|e| anyhow!("catalog PKCS#7 ContentInfo: {e}"))?;
+    let ci = cms::content_info::ContentInfo::decode(&mut r)
+        .map_err(|e| anyhow!("catalog PKCS#7 ContentInfo: {e}"))?;
     if ci.content_type != ID_SIGNED_DATA {
         return Err(anyhow!(
             "catalog root content type is not SignedData (got {})",
@@ -123,7 +128,37 @@ pub fn verify_catalog_digest_consistency_bytes(data: &[u8]) -> Result<()> {
         .content
         .decode_as()
         .map_err(|e| anyhow!("catalog SignedData: {e}"))?;
+    if sd.encap_content_info.econtent_type != ID_MS_CTL {
+        return Err(anyhow!(
+            "catalog encapsulated content type is not Microsoft CTL (got {})",
+            sd.encap_content_info.econtent_type
+        ));
+    }
+    Ok(sd)
+}
 
+/// Compute the CMS digest over encapsulated catalog `eContent`, using the first signer digest algorithm.
+pub fn catalog_econtent_digest(data: &[u8]) -> Result<Vec<u8>> {
+    let sd = catalog_signed_data(data)?;
+    let si = sd
+        .signer_infos
+        .0
+        .as_slice()
+        .first()
+        .ok_or_else(|| anyhow!("catalog SignedData has no SignerInfo"))?;
+    let kind = digest_kind_from_digest_alg_oid(si.digest_alg.oid)?;
+    let econtent = sd
+        .encap_content_info
+        .econtent
+        .as_ref()
+        .map(|a| a.value())
+        .unwrap_or_default();
+    Ok(hash_econtent(kind, econtent))
+}
+
+/// Verify each `SignerInfo`'s PKCS#9 `messageDigest` matches the CMS digest over encapsulated `eContent`.
+pub fn verify_catalog_digest_consistency_bytes(data: &[u8]) -> Result<()> {
+    let sd = catalog_signed_data(data)?;
     if sd.digest_algorithms.len() != 1 {
         return Err(anyhow!(
             "expected one digest algorithm in SignedData, got {}",

@@ -157,19 +157,52 @@ pub fn verify_signed_data_authenticode_indirect_digest_and_rsa_sha256_pkcs1v15_s
     signer_index: usize,
     expected_subject_digest: &[u8],
 ) -> Result<()> {
-    use rsa::pkcs1v15::{Signature, VerifyingKey};
-    use rsa::pkcs8::DecodePublicKey;
-    use rsa::signature::hazmat::PrehashVerifier;
-    use sha2::Sha256;
-
-    const RSA_ENCRYPTION_OID: &str = "1.2.840.113549.1.1.1";
-
     let indirect = signed_data_spc_indirect_message_digest_octets(sd)?;
     if indirect.as_slice() != expected_subject_digest {
         return Err(anyhow!(
             "SpcIndirectData messageDigest does not match expected subject digest"
         ));
     }
+    verify_signed_data_rsa_sha256_pkcs1v15_signature(sd, signer_index)
+}
+
+/// Match PKCS#9 **`messageDigest`** against `expected_content_digest`, then verify **RSA PKCS#1 v1.5**
+/// over authenticated **`signedAttrs`** (**SHA-256** **`SignerInfo.digestAlgorithm`** only).
+pub fn verify_signed_data_pkcs9_message_digest_and_rsa_sha256_pkcs1v15_signature(
+    sd: &SignedData,
+    signer_index: usize,
+    expected_content_digest: &[u8],
+) -> Result<()> {
+    let si = sd
+        .signer_infos
+        .0
+        .as_slice()
+        .get(signer_index)
+        .ok_or_else(|| {
+            anyhow!(
+                "SignerInfo index {signer_index} out of range (len {})",
+                sd.signer_infos.0.len()
+            )
+        })?;
+    let md = signer_info_pkcs9_message_digest_octets(si)?;
+    if md.as_slice() != expected_content_digest {
+        return Err(anyhow!(
+            "PKCS#9 messageDigest does not match expected content digest"
+        ));
+    }
+    verify_signed_data_rsa_sha256_pkcs1v15_signature(sd, signer_index)
+}
+
+fn verify_signed_data_rsa_sha256_pkcs1v15_signature(
+    sd: &SignedData,
+    signer_index: usize,
+) -> Result<()> {
+    use rsa::pkcs1v15::{Signature, VerifyingKey};
+    use rsa::pkcs8::DecodePublicKey;
+    use rsa::signature::hazmat::PrehashVerifier;
+    use sha2::Sha256;
+
+    const RSA_ENCRYPTION_OID: &str = "1.2.840.113549.1.1.1";
 
     let si = sd
         .signer_infos

@@ -6,6 +6,8 @@
 //! - `WimFileHashReadLoop` hashes from file offset 0 for **`total`** bytes: `total` is the QWORD at header offset **188**
 //!   (`0xBC`) when non-zero; otherwise `GetHashDataOffset`.
 //! - `EsdSipGetSignature` reads PKCS#7 bytes at file offset QWORD **188**, length DWORD **180** (`0xB4`).
+//! - `EsdSipCreateHash` hashes the signed prefix with the 8-byte signature-length/reserved region
+//!   at **0xB4..0xBC** zeroed; the signature offset at **0xBC** remains part of the hash.
 //! - `EsdSipIsMyFileType` requires the first QWORD to match `MSWIM\\0\\0\\0` and `dwHeaderSize` at offset 8 to be **208** (`0xD0`).
 
 use super::pe_digest::PeAuthenticodeHashKind;
@@ -149,8 +151,19 @@ pub fn compute_wim_image_digest_from_header(
     validate_wim_header_prefix(header)?;
     let total = wim_hash_byte_count(header)?;
     let mut f = File::open(path)?;
-    f.seek(std::io::SeekFrom::Start(0))?;
-    hash_prefix(f, total, kind)
+    let mut hash_header = *header;
+    hash_header[OFF_PKCS7_CB..OFF_HASH_END_OR_SIG_OFF].fill(0);
+    if total <= WIM_HEADER_PACKED_SIZE as u64 {
+        return hash_prefix(&hash_header[..total as usize], total, kind);
+    }
+    f.seek(std::io::SeekFrom::Start(WIM_HEADER_PACKED_SIZE as u64))?;
+    hash_prefix(
+        hash_header
+            .as_slice()
+            .chain(f.take(total - WIM_HEADER_PACKED_SIZE as u64)),
+        total,
+        kind,
+    )
 }
 
 /// PKCS#7 blob embedded after the hashed prefix (`EsdSipGetSignature`).

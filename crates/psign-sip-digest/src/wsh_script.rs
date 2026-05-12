@@ -18,9 +18,9 @@ use base64::Engine;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WshKind {
-    /// `.vbs` — `OID_VBSSIP`
+    /// `.vbs` / `.vbe` — `OID_VBSSIP`
     Vbs,
-    /// `.js` — `OID_JSSIP`
+    /// `.js` / `.jse` — `OID_JSSIP`
     Js,
     /// `.wsf`
     Wsf,
@@ -28,8 +28,8 @@ pub enum WshKind {
 
 pub fn wsh_kind_from_ext(ext: &str) -> Option<WshKind> {
     match ext.to_ascii_lowercase().as_str() {
-        "vbs" => Some(WshKind::Vbs),
-        "js" => Some(WshKind::Js),
+        "vbs" | "vbe" => Some(WshKind::Vbs),
+        "js" | "jse" => Some(WshKind::Js),
         "wsf" => Some(WshKind::Wsf),
         _ => None,
     }
@@ -191,7 +191,10 @@ fn extract_pkcs7_der(units: &[u16], kind: WshKind) -> Result<Vec<u8>> {
 pub fn verify_wsh_digest_consistency(raw: &[u8], ext: &str) -> Result<()> {
     let kind =
         wsh_kind_from_ext(ext).ok_or_else(|| anyhow!("not a WSH script extension .{ext}"))?;
-    let units = file_utf16_units(raw);
+    let mut units = file_utf16_units(raw);
+    if raw.starts_with(&[0xef, 0xbb, 0xbf]) && units.first() == Some(&(0xfeff_u16)) {
+        units.remove(0);
+    }
     let pkcs7 = extract_pkcs7_der(&units, kind)?;
     let sig = AuthenticodeSignature::from_bytes(&pkcs7)
         .map_err(|e| anyhow!("Authenticode PKCS#7 parse failed: {e}"))?;

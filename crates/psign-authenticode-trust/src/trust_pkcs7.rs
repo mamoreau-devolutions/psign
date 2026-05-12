@@ -15,6 +15,7 @@ use picky::x509::pkcs7::authenticode::AuthenticodeSignature;
 use psign_sip_digest::pkcs7::{
     parse_pkcs7_signed_data_der, signed_data_certificate_for_signer_identifier,
     verify_signed_data_authenticode_indirect_digest_and_rsa_sha256_pkcs1v15_signature,
+    verify_signed_data_pkcs9_message_digest_and_rsa_sha256_pkcs1v15_signature,
 };
 use psign_sip_digest::pkcs7_wire::normalize_pkcs7_der_for_authenticode;
 use x509_cert::Certificate;
@@ -102,14 +103,18 @@ fn verify_trust_chain_verbose(
     Ok(())
 }
 
-/// When **`picky`** cannot deserialize **`SpcIndirectData`** (e.g. CAB **`SpcCabinetData`**), validate PKCS#9
-/// **`messageDigest`**, **RSA/SHA-256** **`SignerInfo`** signature over **`signedAttrs`**, then run the same
-/// explicit-anchor chain walk as the picky path.
+enum CmsDigestCheck<'a> {
+    AuthenticodeIndirect(&'a [u8]),
+    Pkcs9MessageDigest(&'a [u8]),
+}
+
+/// When **`picky`** cannot deserialize the content, validate the relevant digest binding, **RSA/SHA-256**
+/// **`SignerInfo`** signature over **`signedAttrs`**, then run the same explicit-anchor chain walk as the picky path.
 #[allow(clippy::too_many_arguments)] // CMS fallback mirrors picky path parameters; grouping would obscure control flow.
-fn verify_authenticode_pkcs7_trust_cms_rsa_sha256_fallback(
+fn verify_pkcs7_trust_cms_rsa_sha256_fallback(
     slice: &[u8],
     pkcs7_index: usize,
-    subject_digest: &[u8],
+    digest_check: CmsDigestCheck<'_>,
     anchors: &AnchorStore,
     anchor_certs: &[Cert],
     policy: &AuthenticodeTrustPolicy,
@@ -119,12 +124,28 @@ fn verify_authenticode_pkcs7_trust_cms_rsa_sha256_fallback(
     let sd = parse_pkcs7_signed_data_der(slice)
         .map_err(|e| anyhow!("CMS SignedData decode (non-PE SpcIndirectData PKCS#7): {e}"))?;
 
-    verify_signed_data_authenticode_indirect_digest_and_rsa_sha256_pkcs1v15_signature(
-        &sd,
-        0,
-        subject_digest,
-    )
-    .map_err(|e| anyhow!("CMS RSA/SHA-256 Authenticode fallback (PKCS#7 {pkcs7_index}): {e}"))?;
+    match digest_check {
+        CmsDigestCheck::AuthenticodeIndirect(subject_digest) => {
+            verify_signed_data_authenticode_indirect_digest_and_rsa_sha256_pkcs1v15_signature(
+                &sd,
+                0,
+                subject_digest,
+            )
+            .map_err(|e| {
+                anyhow!("CMS RSA/SHA-256 Authenticode fallback (PKCS#7 {pkcs7_index}): {e}")
+            })?;
+        }
+        CmsDigestCheck::Pkcs9MessageDigest(content_digest) => {
+            verify_signed_data_pkcs9_message_digest_and_rsa_sha256_pkcs1v15_signature(
+                &sd,
+                0,
+                content_digest,
+            )
+            .map_err(|e| {
+                anyhow!("CMS RSA/SHA-256 detached fallback (PKCS#7 {pkcs7_index}): {e}")
+            })?;
+        }
+    }
 
     let si = sd
         .signer_infos
@@ -241,10 +262,10 @@ pub fn verify_authenticode_pkcs7_trust(
     let picky_sig = match picky_sig_result {
         Ok(sig) => sig,
         Err(_) => {
-            return verify_authenticode_pkcs7_trust_cms_rsa_sha256_fallback(
+            return verify_pkcs7_trust_cms_rsa_sha256_fallback(
                 slice,
                 pkcs7_index,
-                subject_digest,
+                CmsDigestCheck::AuthenticodeIndirect(subject_digest),
                 anchors,
                 anchor_certs,
                 policy,
@@ -299,6 +320,32 @@ pub fn verify_authenticode_pkcs7_trust(
         &chain_vec,
         root,
         &root_thumb,
+        verification_instant,
+        verbose_chain,
+    )
+}
+
+/// Verify CMS/PKCS#7 where PKCS#9 `messageDigest` binds the signature to an external content digest.
+#[allow(clippy::too_many_arguments)]
+pub fn verify_pkcs9_message_digest_pkcs7_trust(
+    pkcs7_der: &[u8],
+    pkcs7_index: usize,
+    content_digest: &[u8],
+    anchors: &AnchorStore,
+    anchor_certs: &[Cert],
+    policy: &AuthenticodeTrustPolicy,
+    verification_instant: &UtcDate,
+    verbose_chain: bool,
+) -> Result<()> {
+    let normalized = normalize_pkcs7_der_for_authenticode(pkcs7_der);
+    let slice = normalized.as_ref();
+    verify_pkcs7_trust_cms_rsa_sha256_fallback(
+        slice,
+        pkcs7_index,
+        CmsDigestCheck::Pkcs9MessageDigest(content_digest),
+        anchors,
+        anchor_certs,
+        policy,
         verification_instant,
         verbose_chain,
     )

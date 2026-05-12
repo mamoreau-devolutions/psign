@@ -25,15 +25,15 @@ const DIGITAL_SIGNATURE_ENTRY: &str = "\u{5}DigitalSignature";
 const EXTENDED_SIGNATURE_ENTRY: &str = "\u{5}MsiDigitalSignatureEx";
 
 /// FILETIME ticks between 1601-01-01 UTC and 1970-01-01 UTC (100 ns units).
-const FILETIME_UNIX_EPOCH: u64 = 11_644_473_600_000_000;
+const FILETIME_UNIX_EPOCH: u64 = 116_444_736_000_000_000;
 
 fn root_stream(name: &str) -> PathBuf {
     Path::new("/").join(name)
 }
 
 fn cmp_utf16_name(a: &str, b: &str) -> Ordering {
-    let ae: Vec<u16> = a.encode_utf16().collect();
-    let be: Vec<u16> = b.encode_utf16().collect();
+    let ae: Vec<u8> = a.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let be: Vec<u8> = b.encode_utf16().flat_map(u16::to_le_bytes).collect();
     ae.cmp(&be)
 }
 
@@ -199,6 +199,16 @@ fn compute_msi_fingerprint<F: Read + Seek>(
     })
 }
 
+/// Compute the Windows Installer Authenticode SIP fingerprint for MSI-like OLE packages.
+pub fn compute_msi_authenticode_digest(
+    data: &[u8],
+    kind: PeAuthenticodeHashKind,
+) -> Result<Vec<u8>> {
+    let cur = std::io::Cursor::new(data);
+    let mut cfb = CompoundFile::open(cur).map_err(|e| anyhow!("open as OLE compound file: {e}"))?;
+    compute_msi_fingerprint(&mut cfb, kind)
+}
+
 fn read_stream_all<F: Read + Seek>(cfb: &mut CompoundFile<F>, path: &Path) -> Result<Vec<u8>> {
     let mut s = cfb.open_stream(path)?;
     let mut v = Vec::new();
@@ -295,5 +305,18 @@ mod msi_pkcs7_tests {
     #[test]
     fn msi_rsa_sha256_signer_prehash_errors_when_not_ole() {
         assert!(msi_rsa_sha256_signer_prehash_digest(b"not an msi", 0).is_err());
+    }
+
+    #[test]
+    fn generated_signed_installer_fixtures_match_msi_sip_digest() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for rel in [
+            "tests/fixtures/generated-signed/installer/tiny.msi",
+            "tests/fixtures/generated-signed/installer/tiny-patch.msp",
+        ] {
+            let path = root.join(rel);
+            verify_msi_digest_consistency(&path)
+                .unwrap_or_else(|e| panic!("verify {rel} MSI SIP digest: {e:#}"));
+        }
     }
 }

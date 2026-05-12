@@ -20,8 +20,8 @@ enum MarkerFamily {
 
 fn marker_family(ext: &str) -> Result<MarkerFamily> {
     match ext.to_ascii_lowercase().as_str() {
-        "ps1" | "psd1" => Ok(MarkerFamily::Hash),
-        "psm1" | "ps1xml" | "psc1" | "cdxml" => Ok(MarkerFamily::Xml),
+        "ps1" | "psd1" | "psm1" => Ok(MarkerFamily::Hash),
+        "ps1xml" | "psc1" | "cdxml" => Ok(MarkerFamily::Xml),
         "mof" => Ok(MarkerFamily::Mof),
         _ => Err(anyhow!(
             "extension .{ext} is not handled by pwrshsip-style markers"
@@ -147,9 +147,13 @@ fn looks_like_b64_token(s: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
 }
 
-/// Extract PKCS#7 DER from the ASCII signature block (UTF-8 view — base64 lines).
+/// Extract PKCS#7 DER from a BOM-aware UTF-16 view of the signature block.
 fn extract_pkcs7_der_from_script(raw: &[u8], family: MarkerFamily) -> Result<Vec<u8>> {
-    let text = String::from_utf8_lossy(raw);
+    let mut units = file_utf16_units(raw);
+    if raw.starts_with(&[0xff, 0xfe]) {
+        units.insert(0, 0xfeff_u16);
+    }
+    let text = String::from_utf16_lossy(&units);
     let (begin_pat, end_pat) = match family {
         MarkerFamily::Hash => (
             "# SIG # Begin signature block",
@@ -225,7 +229,10 @@ pub fn extension_supported(ext: &str) -> bool {
 }
 
 pub fn is_wsh_extension(ext: &str) -> bool {
-    matches!(ext.to_ascii_lowercase().as_str(), "js" | "vbs" | "wsf")
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "js" | "jse" | "vbs" | "vbe" | "wsf"
+    )
 }
 
 /// Compare PKCS#7 indirect digest with a heuristic UTF-16 hash over the file excluding the sig block.
@@ -242,7 +249,10 @@ pub(crate) fn verify_powershell_class_digest(raw: &[u8], ext: &str) -> Result<()
         .map_err(|e| anyhow!("Authenticode PKCS#7 parse failed: {e}"))?;
     let embedded = sig.digest();
     let kind = PeAuthenticodeHashKind::from_digest_byte_len(embedded.len())?;
-    let units = file_utf16_units(raw);
+    let mut units = file_utf16_units(raw);
+    if raw.starts_with(&[0xff, 0xfe]) {
+        units.insert(0, 0xfeff_u16);
+    }
     let stripped = strip_signature_region_utf16(&units, family)?;
     let payload = utf16le_bytes(&stripped);
     let computed = hash_payload(kind, &payload)?;

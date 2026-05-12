@@ -11,7 +11,7 @@ use psign_authenticode_trust::{
     AuthenticodeTrustPolicy, TrustVerifyPeOptions, TrustVerifyPeReport,
     inspect_authenticode_pkcs7_der, inspect_pe_authenticode, parse_verification_date_ymd,
     trust_verify_cab_bytes, trust_verify_catalog_bytes, trust_verify_detached_bytes,
-    trust_verify_pe_bytes,
+    trust_verify_msi_bytes, trust_verify_pe_bytes, trust_verify_wim_esd_path,
 };
 #[cfg(feature = "azure-kv-sign-portable")]
 use psign_azure_kv_rest::{
@@ -360,6 +360,18 @@ enum Command {
     },
     /// Same trust pipeline as **`trust-verify-pe`** after CAB SIP digest consistency (**`verify-cab`**).
     TrustVerifyCab {
+        path: PathBuf,
+        #[command(flatten)]
+        shared: TrustVerifySharedArgs,
+    },
+    /// Same trust pipeline as **`trust-verify-pe`** after MSI/MSP SIP digest consistency (**`verify-msi`**).
+    TrustVerifyMsi {
+        path: PathBuf,
+        #[command(flatten)]
+        shared: TrustVerifySharedArgs,
+    },
+    /// Same trust pipeline as **`trust-verify-pe`** after WIM/ESD SIP digest consistency (**`verify-esd`**).
+    TrustVerifyEsd {
         path: PathBuf,
         #[command(flatten)]
         shared: TrustVerifySharedArgs,
@@ -1084,6 +1096,19 @@ fn run() -> Result<()> {
             let report = trust_verify_cab_bytes(&bytes, &opts)
                 .with_context(|| format!("trust-verify-cab {}", path.display()))?;
             print_trust_ok("trust-verify-cab", &report);
+        }
+        Command::TrustVerifyMsi { path, shared } => {
+            let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+            let opts = trust_verify_options_from_shared(&shared)?;
+            let report = trust_verify_msi_bytes(&bytes, &opts)
+                .with_context(|| format!("trust-verify-msi {}", path.display()))?;
+            print_trust_ok("trust-verify-msi", &report);
+        }
+        Command::TrustVerifyEsd { path, shared } => {
+            let opts = trust_verify_options_from_shared(&shared)?;
+            let report = trust_verify_wim_esd_path(&path, &opts)
+                .with_context(|| format!("trust-verify-esd {}", path.display()))?;
+            print_trust_ok("trust-verify-esd", &report);
         }
         Command::TrustVerifyCatalog { path, shared } => {
             let bytes = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
