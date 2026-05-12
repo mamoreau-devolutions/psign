@@ -27,7 +27,7 @@ struct SignedCorpusEntry {
 fn committed_signed_corpus_verifies_with_psign() {
     let repo = repo_root();
     let manifest = signed_manifest();
-    assert_eq!(manifest.signed.len(), 90, "signed corpus coverage changed");
+    assert_eq!(manifest.signed.len(), 92, "signed corpus coverage changed");
 
     for entry in &manifest.signed {
         if entry.state == "detached-signed" {
@@ -46,7 +46,7 @@ fn committed_signed_corpus_verifies_with_psign() {
 fn committed_signed_corpus_matches_portable_supported_verification() {
     let repo = repo_root();
     let manifest = signed_manifest();
-    assert_eq!(manifest.signed.len(), 90, "signed corpus coverage changed");
+    assert_eq!(manifest.signed.len(), 92, "signed corpus coverage changed");
 
     let mut parity_count = 0usize;
     for entry in &manifest.signed {
@@ -72,7 +72,7 @@ fn committed_signed_corpus_matches_portable_supported_verification() {
         parity_count += 1;
     }
 
-    assert_eq!(parity_count, 90, "portable parity coverage changed");
+    assert_eq!(parity_count, 92, "portable parity coverage changed");
 }
 
 #[test]
@@ -142,7 +142,7 @@ fn unsigned_corpus_freshly_signed_with_native_signtool_verifies_with_psign() {
     verify_detached_with_psign(&content, &p7, &detached.id);
     signed_count += 1;
 
-    assert_eq!(signed_count, 90, "fresh native signing coverage changed");
+    assert_eq!(signed_count, 92, "fresh native signing coverage changed");
 }
 
 #[test]
@@ -166,7 +166,7 @@ fn unsigned_corpus_freshly_signed_with_psign_verifies_with_psign() {
         .iter()
         .filter(|entry| entry.state == "signed" && entry.family != "msix")
         .collect();
-    assert_eq!(signable.len(), 85, "psign fresh-sign coverage changed");
+    assert_eq!(signable.len(), 87, "psign fresh-sign coverage changed");
 
     for entry in signable {
         let dest = temp.path().join(format!("{}{}", entry.id, entry.extension));
@@ -285,6 +285,12 @@ fn portable_args_for_entry(
         ],
         "cab" => vec![
             "trust-verify-cab".to_owned(),
+            path,
+            "--anchor-dir".to_owned(),
+            anchor,
+        ],
+        "installer" => vec![
+            "trust-verify-msi".to_owned(),
             path,
             "--anchor-dir".to_owned(),
             anchor,

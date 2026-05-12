@@ -132,7 +132,7 @@ function Should-SignEmbedded {
             return @(".msix", ".appx", ".msixbundle", ".appxbundle") -contains [string]$Vector.extension
         }
         "installer" {
-            return @(".msi", ".msp", ".mst") -contains [string]$Vector.extension
+            return @(".msi", ".msp") -contains [string]$Vector.extension
         }
         default { return $false }
     }
@@ -217,7 +217,7 @@ foreach ($content in $unsigned.vectors | Where-Object { $_.family -eq "detached-
 }
 
 $signedManifest = Join-Path $SignedDir "generated-signed-vectors.json"
-[ordered]@{
+$signedJson = [ordered]@{
     generated_by = "scripts/ci/build-code-signing-vector-corpus.ps1"
     signing_tool = "signtool.exe"
     pfx = (Resolve-Path -LiteralPath $PfxPath -Relative)
@@ -225,7 +225,8 @@ $signedManifest = Join-Path $SignedDir "generated-signed-vectors.json"
     signed = $signedEntries
     skipped = $skippedEntries
     failed = $failedEntries
-} | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $signedManifest -Encoding utf8
+} | ConvertTo-Json -Depth 10
+[System.IO.File]::WriteAllText($signedManifest, $signedJson + "`r`n", [System.Text.UTF8Encoding]::new($false))
 
 Write-Host "Unsigned vectors: $($unsigned.vectors.Count)"
 Write-Host "Signed vectors:   $($signedEntries.Count)"

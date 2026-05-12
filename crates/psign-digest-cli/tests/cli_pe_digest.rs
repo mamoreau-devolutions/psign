@@ -83,7 +83,7 @@ fn generated_signed_corpus_verifies_with_portable_cli() {
     let signed = manifest["signed"]
         .as_array()
         .expect("signed corpus entries");
-    assert_eq!(signed.len(), 90, "signed corpus coverage changed");
+    assert_eq!(signed.len(), 92, "signed corpus coverage changed");
 
     let mut verified = 0usize;
     for entry in signed {
@@ -125,6 +125,12 @@ fn generated_signed_corpus_verifies_with_portable_cli() {
             "powershell-script" | "wsh-script" => {
                 cmd.arg("verify-script").arg(path);
             }
+            "installer" => {
+                cmd.arg("trust-verify-msi")
+                    .arg(path)
+                    .arg("--anchor-dir")
+                    .arg(anchor_dir(&repo));
+            }
             _ => panic!("unexpected signed corpus family for portable test: {family} ({id})"),
         }
         cmd.assert().success();
@@ -132,7 +138,7 @@ fn generated_signed_corpus_verifies_with_portable_cli() {
     }
 
     assert_eq!(
-        verified, 90,
+        verified, 92,
         "portable corpus verification coverage changed"
     );
 }

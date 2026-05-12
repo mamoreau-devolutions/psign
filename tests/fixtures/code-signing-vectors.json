@@ -267,11 +267,11 @@
       "id": "generated-installer-probe-matrix",
       "family": "installer",
       "extensions": [".msi", ".msp", ".mst"],
-      "states": ["unsigned-probe"],
+      "states": ["unsigned", "unsigned-probe"],
       "storage": "generated",
-      "tooling": "optional-wix-or-msi-builder",
-      "expected_native": ["sign-probe"],
-      "expected_rust_sip": ["msi-digest-if-signed", "synthetic-extract-only"]
+      "tooling": "wix-and-windows-sdk",
+      "expected_native": ["sign-ok", "sign-probe", "verify-after-sign"],
+      "expected_rust_sip": ["msi-digest-if-signed"]
     },
     {
       "id": "generated-cab-matrix",

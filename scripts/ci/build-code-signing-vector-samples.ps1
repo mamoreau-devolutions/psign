@@ -45,6 +45,21 @@ foreach ($pe in @($Pe32Source, $Pe64Source)) {
     if (-not (Test-Path -LiteralPath $pe)) { throw "PE source not found: $pe" }
 }
 
+function Resolve-Tool {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [string[]]$Candidates = @()
+    )
+    foreach ($candidate in $Candidates) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate)) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+    $cmd = Get-Command $Name -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    return $null
+}
+
 if ((Test-Path -LiteralPath $OutputDir) -and -not $Force) {
     throw "Output directory already exists: $OutputDir. Pass -Force to replace it."
 }
@@ -275,10 +290,122 @@ elseif ($RequireSdkTools) {
     throw "makecab.exe not found."
 }
 
-$msiStub = Join-Path $WorkspaceRoot "tests\fixtures\msi-authenticode-upstream\tiny-pkcs7-stub.msi"
-foreach ($ext in @(".msi", ".msp", ".mst")) {
-    if (Test-Path -LiteralPath $msiStub) {
-        Copy-Vector -Source $msiStub -RelativePath "installer\synthetic-probe$ext" -Id "generated-installer-probe-$($ext.TrimStart('.'))" -Family "installer" -Extension $ext -State "synthetic-probe" -ExpectedNative "sign-probe" -ExpectedRustSip "synthetic-extract-only" -Tooling "optional-wix-or-msi-builder"
+function Write-TinyInstallerWxs {
+    param(
+        [Parameter(Mandatory)][string]$Directory,
+        [Parameter(Mandatory)][string]$Version,
+        [Parameter(Mandatory)][string]$Payload
+    )
+    New-Item -ItemType Directory -Force -Path $Directory | Out-Null
+    [System.IO.File]::WriteAllBytes((Join-Path $Directory "payload.txt"), [System.Text.Encoding]::ASCII.GetBytes($Payload))
+    @"
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Id="Psign.Tiny.Installer" ProductCode="44444444-4444-4444-4444-444444444444" Name="Psign Tiny Installer" Manufacturer="Devolutions" Version="$Version" UpgradeCode="11111111-1111-1111-1111-111111111111">
+    <MediaTemplate EmbedCab="yes" />
+    <Feature Id="Main" Title="Main" Level="1">
+      <ComponentGroupRef Id="Files" />
+    </Feature>
+  </Package>
+  <Fragment>
+    <StandardDirectory Id="ProgramFilesFolder">
+      <Directory Id="INSTALLFOLDER" Name="PsignTiny" />
+    </StandardDirectory>
+  </Fragment>
+  <Fragment>
+    <ComponentGroup Id="Files" Directory="INSTALLFOLDER">
+      <Component Id="PayloadComponent" Guid="22222222-2222-2222-2222-222222222222">
+        <File Id="Payload" Source="payload.txt" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>
+"@ | Set-Content -LiteralPath (Join-Path $Directory "tiny.wxs") -Encoding utf8
+}
+
+function Invoke-WixBuild {
+    param(
+        [Parameter(Mandatory)][string]$Wix,
+        [Parameter(Mandatory)][string]$Directory,
+        [Parameter(Mandatory)][string]$Output
+    )
+    Push-Location $Directory
+    try {
+        & $Wix build tiny.wxs -out $Output -arch x64 -nologo -pdbtype none | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "wix build failed with exit $LASTEXITCODE" }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+$wix = Resolve-Tool -Name "wix.exe" -Candidates @(
+    (Join-Path $env:ProgramFiles "WiX Toolset v7.0\bin\wix.exe"),
+    (Join-Path $env:ProgramFiles "WiX Toolset v6.0\bin\wix.exe")
+)
+$msiTran = Resolve-Tool -Name "MsiTran.exe" -Candidates @(
+    (Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin\10.0.26100.0\x86\MsiTran.exe")
+)
+
+if ($wix -and $msiTran) {
+    $installerWork = Join-Path $OutputDir "_installer-work"
+    $installerOut = Join-Path $OutputDir "installer"
+    $baseDir = Join-Path $installerWork "base"
+    $updateDir = Join-Path $installerWork "update"
+    New-Item -ItemType Directory -Force -Path $installerOut | Out-Null
+
+    Write-TinyInstallerWxs -Directory $baseDir -Version "1.0.0.0" -Payload "x"
+    Write-TinyInstallerWxs -Directory $updateDir -Version "1.0.1.0" -Payload "y"
+
+    $baseMsi = Join-Path $baseDir "tiny.msi"
+    $updateMsi = Join-Path $updateDir "tiny.msi"
+    Invoke-WixBuild -Wix $wix -Directory $baseDir -Output $baseMsi
+    Invoke-WixBuild -Wix $wix -Directory $updateDir -Output $updateMsi
+
+    $mst = Join-Path $installerOut "tiny-transform.mst"
+    & $msiTran -g $baseMsi $updateMsi $mst | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "MsiTran.exe failed with exit $LASTEXITCODE" }
+
+    $patchWxs = Join-Path $installerWork "tiny-patch.wxs"
+    @"
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Patch Id="33333333-3333-3333-3333-333333333333" Classification="Update" Description="Psign tiny patch" DisplayName="Psign Tiny Patch" Manufacturer="Devolutions" TargetProductName="Psign Tiny Installer" AllowRemoval="yes">
+    <Media Id="1" Cabinet="tiny-patch.cab">
+      <PatchBaseline Id="RTM" BaselineFile="$baseMsi" UpdateFile="$updateMsi" />
+    </Media>
+    <PatchFamily Id="TinyPatchFamily" Version="1.0.1.0" Supersede="yes">
+      <ComponentRef Id="PayloadComponent" />
+    </PatchFamily>
+  </Patch>
+</Wix>
+"@ | Set-Content -LiteralPath $patchWxs -Encoding utf8
+
+    $msp = Join-Path $installerOut "tiny-patch.msp"
+    Push-Location $installerWork
+    try {
+        & $wix build $patchWxs -out $msp -arch x64 -nologo -pdbtype none | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "wix patch build failed with exit $LASTEXITCODE" }
+    }
+    finally {
+        Pop-Location
+    }
+
+    $msi = Join-Path $installerOut "tiny.msi"
+    Copy-Item -LiteralPath $baseMsi -Destination $msi -Force
+
+    Add-GeneratedEntry -Id "generated-installer-tiny-msi" -Family "installer" -Path $msi -Extension ".msi" -State "unsigned" -ExpectedNative "sign-ok" -ExpectedRustSip "msi-digest-after-sign" -Tooling "wix"
+    Add-GeneratedEntry -Id "generated-installer-tiny-msp" -Family "installer" -Path $msp -Extension ".msp" -State "unsigned" -ExpectedNative "sign-ok" -ExpectedRustSip "msi-digest-after-sign" -Tooling "wix"
+    Add-GeneratedEntry -Id "generated-installer-tiny-mst" -Family "installer" -Path $mst -Extension ".mst" -State "unsigned-probe" -ExpectedNative "sign-probe" -ExpectedRustSip "msi-digest-if-signed" -Tooling "wix-msitran"
+    Remove-Item -LiteralPath $installerWork -Recurse -Force
+}
+elseif ($RequireSdkTools) {
+    throw "WiX Toolset wix.exe and Windows SDK MsiTran.exe are required for installer fixtures."
+}
+else {
+    $msiStub = Join-Path $WorkspaceRoot "tests\fixtures\msi-authenticode-upstream\tiny-pkcs7-stub.msi"
+    foreach ($ext in @(".msi", ".msp", ".mst")) {
+        if (Test-Path -LiteralPath $msiStub) {
+            Copy-Vector -Source $msiStub -RelativePath "installer\synthetic-probe$ext" -Id "generated-installer-probe-$($ext.TrimStart('.'))" -Family "installer" -Extension $ext -State "synthetic-probe" -ExpectedNative "sign-probe" -ExpectedRustSip "synthetic-extract-only" -Tooling "optional-wix-or-msi-builder"
+        }
     }
 }
 
@@ -362,12 +489,13 @@ foreach ($ext in @(".vsix", ".vsto", ".application", ".deploy", ".manifest", ".d
 }
 
 $generatedManifest = Join-Path $OutputDir "generated-vectors.json"
-@{
+$generatedJson = @{
     generated_by = "scripts/ci/build-code-signing-vector-samples.ps1"
     source_pe32  = (Resolve-Path -LiteralPath $Pe32Source -Relative)
     source_pe64  = (Resolve-Path -LiteralPath $Pe64Source -Relative)
     vectors      = $entries
-} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $generatedManifest -Encoding utf8
+} | ConvertTo-Json -Depth 8
+[System.IO.File]::WriteAllText($generatedManifest, $generatedJson + "`r`n", [System.Text.UTF8Encoding]::new($false))
 
 if ($ArchivePath) {
     if (Test-Path -LiteralPath $ArchivePath) {
