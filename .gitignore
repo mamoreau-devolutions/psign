@@ -6,8 +6,6 @@
 # Local API / ABI notes under docs/ (filename contains *-api-map.md)
 /docs/*-api-map.md
 /tests/fixtures/private/
-/tests/fixtures/generated-unsigned/
-/tests/fixtures/generated-signed/
 .env
 # Local CI artifact unpack / agent scratch dirs
 tmp-ci-*/

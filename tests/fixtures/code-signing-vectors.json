@@ -1,19 +1,35 @@
 {
-  "schema_version": 1,
-  "description": "Inventory of reusable and generated code-signing test vectors. Committed entries are stable bytes in this repository; generated entries are produced by scripts/ci/build-code-signing-vector-samples.ps1.",
+  "schema_version": 2,
+  "description": "Reusable committed vectors plus the generated matrix for code-signable file families exercised by psign.",
   "generated_output": {
     "directory": "tests/fixtures/generated-unsigned",
     "archive": "tests/fixtures/generated-unsigned.zip",
+    "manifest": "tests/fixtures/generated-unsigned/generated-vectors.json",
     "gitignored_directories": [
       "tests/fixtures/generated-unsigned",
       "tests/fixtures/generated-signed"
     ]
   },
-  "vectors": [
+  "required_axes": {
+    "pe_extensions": [".exe", ".dll", ".sys", ".ocx", ".scr", ".cpl", ".efi", ".mui"],
+    "winmd_extensions": [".winmd"],
+    "pe_sources": ["tiny32", "tiny64"],
+    "powershell_extensions": [".ps1", ".psd1", ".psm1", ".ps1xml", ".psc1", ".cdxml", ".mof"],
+    "wsh_extensions": [".js", ".vbs", ".wsf"],
+    "script_encodings": ["utf8", "utf8-bom", "utf16le-bom", "utf16be-bom"],
+    "script_line_endings": ["crlf", "lf"],
+    "wsh_native_probe_extensions": [".jse", ".vbe", ".wsc"],
+    "installer_extensions": [".msi", ".msp", ".mst"],
+    "cleartext_package_extensions": [".msix", ".appx", ".msixbundle", ".appxbundle"],
+    "encrypted_package_extensions": [".eappx", ".eappxbundle", ".emsix", ".emsixbundle"],
+    "wim_esd_extensions": [".wim", ".esd"],
+    "optional_provider_extensions": [".vsix", ".vsto", ".application", ".deploy", ".manifest", ".docm", ".xlsm", ".pptm", ".xlam"]
+  },
+  "committed_vectors": [
     {
       "id": "pe-tiny32-efi-unsigned",
       "family": "pe",
-      "extensions": [".efi"],
+      "extension": ".efi",
       "state": "unsigned",
       "storage": "committed",
       "path": "tests/fixtures/pe-authenticode-upstream/tiny32.efi",
@@ -25,19 +41,19 @@
     {
       "id": "pe-tiny64-efi-unsigned",
       "family": "pe",
-      "extensions": [".efi"],
+      "extension": ".efi",
       "state": "unsigned",
       "storage": "committed",
       "path": "tests/fixtures/pe-authenticode-upstream/tiny64.efi",
       "size_bytes": 2048,
       "sha256": "8c8f199ecc03d889a6f4a23f515fd73035f9ebc2e692fe93be895bbf90ed0e50",
       "operations": ["sign-input", "pe-digest-source"],
-      "notes": "Upstream tiny PE/EFI sample; preferred source for WinMD/MSIX package generation because CI uses x64."
+      "notes": "Upstream tiny PE/EFI sample; preferred source for x64 package payloads."
     },
     {
       "id": "pe-tiny32-efi-signed",
       "family": "pe",
-      "extensions": [".efi"],
+      "extension": ".efi",
       "state": "signed",
       "storage": "committed",
       "path": "tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi",
@@ -49,7 +65,7 @@
     {
       "id": "pe-tiny64-efi-signed",
       "family": "pe",
-      "extensions": [".efi"],
+      "extension": ".efi",
       "state": "signed",
       "storage": "committed",
       "path": "tests/fixtures/pe-authenticode-upstream/tiny64.signed.efi",
@@ -61,7 +77,7 @@
     {
       "id": "cab-tiny-signed",
       "family": "cab",
-      "extensions": [".cab"],
+      "extension": ".cab",
       "state": "signed",
       "storage": "committed",
       "path": "tests/fixtures/cab-authenticode-upstream/tiny-signed.cab",
@@ -73,7 +89,7 @@
     {
       "id": "catalog-tiny32-pe-pkcs7",
       "family": "catalog",
-      "extensions": [".cat"],
+      "extension": ".cat",
       "state": "signed-synthetic",
       "storage": "committed",
       "path": "tests/fixtures/catalog-authenticode-upstream/tiny32-content.cat",
@@ -84,8 +100,8 @@
     },
     {
       "id": "msi-tiny-pkcs7-stub",
-      "family": "msi",
-      "extensions": [".msi"],
+      "family": "installer",
+      "extension": ".msi",
       "state": "signed-synthetic",
       "storage": "committed",
       "path": "tests/fixtures/msi-authenticode-upstream/tiny-pkcs7-stub.msi",
@@ -97,7 +113,7 @@
     {
       "id": "msix-minimal-layout",
       "family": "msix",
-      "extensions": [".msix", ".appx"],
+      "extension": ".msix",
       "state": "unsigned-layout",
       "storage": "committed",
       "path": "tests/fixtures/msix-minimal/AppxManifest.xml",
@@ -109,7 +125,7 @@
     {
       "id": "script-ps1-unsigned",
       "family": "powershell-script",
-      "extensions": [".ps1"],
+      "extension": ".ps1",
       "state": "unsigned",
       "storage": "committed",
       "path": "tests/fixtures/unsigned-sample.ps1",
@@ -121,7 +137,7 @@
     {
       "id": "script-psm1-unsigned",
       "family": "powershell-script",
-      "extensions": [".psm1"],
+      "extension": ".psm1",
       "state": "unsigned",
       "storage": "committed",
       "path": "tests/fixtures/unsigned-sample.psm1",
@@ -133,7 +149,7 @@
     {
       "id": "script-psd1-unsigned",
       "family": "powershell-script",
-      "extensions": [".psd1"],
+      "extension": ".psd1",
       "state": "unsigned",
       "storage": "committed",
       "path": "tests/fixtures/unsigned-sample.psd1",
@@ -145,7 +161,7 @@
     {
       "id": "script-js-unsigned",
       "family": "wsh-script",
-      "extensions": [".js"],
+      "extension": ".js",
       "state": "unsigned",
       "storage": "committed",
       "path": "tests/fixtures/unsigned-sample.js",
@@ -157,7 +173,7 @@
     {
       "id": "script-vbs-unsigned",
       "family": "wsh-script",
-      "extensions": [".vbs"],
+      "extension": ".vbs",
       "state": "unsigned",
       "storage": "committed",
       "path": "tests/fixtures/unsigned-sample.vbs",
@@ -169,7 +185,7 @@
     {
       "id": "script-wsf-unsigned",
       "family": "wsh-script",
-      "extensions": [".wsf"],
+      "extension": ".wsf",
       "state": "unsigned",
       "storage": "committed",
       "path": "tests/fixtures/unsigned-sample.wsf",
@@ -181,7 +197,7 @@
     {
       "id": "rfc3161-granted-response",
       "family": "timestamp",
-      "extensions": [".der"],
+      "extension": ".der",
       "state": "signed-token",
       "storage": "committed",
       "path": "tests/fixtures/rfc3161/ts_resp_granted_outer_len81.der",
@@ -189,49 +205,157 @@
       "sha256": "6bd4e95765b2634a831944d52816adbdffe0dc4b07d7277e638fd71266b8f1f6",
       "operations": ["rfc3161-response-parse"],
       "notes": "Parser fixture, not a file-format Authenticode signature vector."
-    },
+    }
+  ],
+  "matrix_groups": [
     {
-      "id": "generated-pe-extension-aliases",
+      "id": "generated-pe-alias-matrix",
       "family": "pe",
       "extensions": [".exe", ".dll", ".sys", ".ocx", ".scr", ".cpl", ".efi", ".mui"],
-      "state": "unsigned",
+      "sources": ["tiny32", "tiny64"],
+      "states": ["unsigned"],
       "storage": "generated",
-      "generator": "scripts/ci/build-code-signing-vector-samples.ps1",
-      "source": "tests/fixtures/pe-authenticode-upstream/tiny64.efi",
-      "operations": ["sign-input", "verify-after-sign", "rust-sip-pe-digest-gate"],
-      "notes": "Copies the tiny64 PE/EFI bytes under common PE-like extensions for extension matrix parity."
+      "tooling": "none",
+      "expected_native": ["sign-ok", "verify-after-sign"],
+      "expected_rust_sip": ["pe-digest-source", "digest-after-sign"]
     },
     {
-      "id": "generated-winmd-pe-copy",
+      "id": "generated-winmd-matrix",
       "family": "winmd",
       "extensions": [".winmd"],
-      "state": "unsigned",
+      "sources": ["tiny32", "tiny64"],
+      "states": ["unsigned"],
       "storage": "generated",
-      "generator": "scripts/ci/build-code-signing-vector-samples.ps1",
-      "source": "tests/fixtures/pe-authenticode-upstream/tiny64.efi",
-      "operations": ["sign-input", "verify-after-sign", "rust-sip-pe-digest-gate"],
-      "notes": "Mirrors the current CI approach: PE bytes selected by .winmd extension."
+      "tooling": "none",
+      "expected_native": ["sign-ok", "verify-after-sign"],
+      "expected_rust_sip": ["pe-digest-source", "digest-after-sign"]
     },
     {
-      "id": "generated-cab-unsigned",
+      "id": "generated-powershell-script-encoding-matrix",
+      "family": "powershell-script",
+      "extensions": [".ps1", ".psd1", ".psm1", ".ps1xml", ".psc1", ".cdxml", ".mof"],
+      "encodings": ["utf8", "utf8-bom", "utf16le-bom", "utf16be-bom"],
+      "line_endings": ["crlf", "lf"],
+      "states": ["unsigned"],
+      "storage": "generated",
+      "tooling": "none",
+      "expected_native": ["sign-probe", "verify-after-sign"],
+      "expected_rust_sip": ["script-digest-after-sign", "unsigned-marker-negative"]
+    },
+    {
+      "id": "generated-wsh-script-encoding-matrix",
+      "family": "wsh-script",
+      "extensions": [".js", ".vbs", ".wsf"],
+      "encodings": ["utf8", "utf8-bom", "utf16le-bom", "utf16be-bom"],
+      "line_endings": ["crlf", "lf"],
+      "states": ["unsigned"],
+      "storage": "generated",
+      "tooling": "none",
+      "expected_native": ["sign-probe", "verify-after-sign"],
+      "expected_rust_sip": ["script-digest-after-sign", "unsigned-marker-negative"]
+    },
+    {
+      "id": "generated-wsh-native-probe-matrix",
+      "family": "wsh-script",
+      "extensions": [".jse", ".vbe", ".wsc"],
+      "encodings": ["utf8", "utf16le-bom"],
+      "line_endings": ["crlf"],
+      "states": ["unsigned"],
+      "storage": "generated",
+      "tooling": "none",
+      "expected_native": ["sign-probe"],
+      "expected_rust_sip": ["unsupported"]
+    },
+    {
+      "id": "generated-installer-probe-matrix",
+      "family": "installer",
+      "extensions": [".msi", ".msp", ".mst"],
+      "states": ["unsigned-probe"],
+      "storage": "generated",
+      "tooling": "optional-wix-or-msi-builder",
+      "expected_native": ["sign-probe"],
+      "expected_rust_sip": ["msi-digest-if-signed", "synthetic-extract-only"]
+    },
+    {
+      "id": "generated-cab-matrix",
       "family": "cab",
       "extensions": [".cab"],
-      "state": "unsigned",
+      "states": ["unsigned"],
       "storage": "generated",
-      "generator": "scripts/ci/build-code-signing-vector-samples.ps1",
-      "operations": ["sign-input", "verify-cab-negative-before-sign"],
-      "notes": "Generated with makecab.exe when available."
+      "tooling": "makecab",
+      "expected_native": ["sign-ok", "verify-after-sign"],
+      "expected_rust_sip": ["cab-digest-after-sign"]
     },
     {
-      "id": "generated-msix-appx-unsigned",
-      "family": "msix",
-      "extensions": [".msix", ".appx"],
-      "state": "unsigned",
+      "id": "generated-catalog-matrix",
+      "family": "catalog",
+      "extensions": [".cat"],
+      "states": ["member-and-catalog-probe"],
       "storage": "generated",
-      "generator": "scripts/ci/build-code-signing-vector-samples.ps1 -IncludeSdkPackages",
-      "source": "tests/fixtures/msix-minimal",
-      "operations": ["sign-input", "verify-after-sign", "rust-sip-msix-digest-gate"],
-      "notes": "Generated with MakeAppx.exe when SDK package tooling is available."
+      "tooling": "windows-sdk",
+      "expected_native": ["catalog-verify-probe"],
+      "expected_rust_sip": ["catalog-cms-if-signed"]
+    },
+    {
+      "id": "generated-cleartext-package-matrix",
+      "family": "msix",
+      "extensions": [".msix", ".appx", ".msixbundle", ".appxbundle"],
+      "states": ["unsigned"],
+      "storage": "generated",
+      "tooling": "makeappx",
+      "expected_native": ["sign-ok", "verify-after-sign"],
+      "expected_rust_sip": ["msix-digest-after-sign"]
+    },
+    {
+      "id": "generated-encrypted-package-negative-matrix",
+      "family": "msix",
+      "extensions": [".eappx", ".eappxbundle", ".emsix", ".emsixbundle"],
+      "states": ["negative"],
+      "storage": "generated",
+      "tooling": "none",
+      "expected_native": ["wintrust-only-or-reject"],
+      "expected_rust_sip": ["unsupported-encrypted-package"]
+    },
+    {
+      "id": "generated-wim-esd-negative-matrix",
+      "family": "wim-esd",
+      "extensions": [".wim", ".esd"],
+      "states": ["bad-magic-negative", "unsigned-header-negative"],
+      "storage": "generated",
+      "tooling": "none",
+      "expected_native": ["reject"],
+      "expected_rust_sip": ["negative-ok"]
+    },
+    {
+      "id": "generated-wim-esd-valid-probe-matrix",
+      "family": "wim-esd",
+      "extensions": [".wim", ".esd"],
+      "states": ["unsigned-probe"],
+      "storage": "generated",
+      "tooling": "dism",
+      "expected_native": ["sign-probe"],
+      "expected_rust_sip": ["esd-digest-if-signed"]
+    },
+    {
+      "id": "generated-detached-matrix",
+      "family": "detached-pkcs7",
+      "extensions": [".bin", ".txt", ".p7"],
+      "encodings": ["binary", "utf8", "utf16le-bom"],
+      "states": ["content", "ci-generated-signature"],
+      "storage": "generated",
+      "tooling": "signtool",
+      "expected_native": ["detached-sign-probe"],
+      "expected_rust_sip": ["trust-verify-detached-if-signed"]
+    },
+    {
+      "id": "optional-provider-probe-matrix",
+      "family": "optional-provider",
+      "extensions": [".vsix", ".vsto", ".application", ".deploy", ".manifest", ".docm", ".xlsm", ".pptm", ".xlam"],
+      "states": ["unsigned-probe"],
+      "storage": "generated",
+      "tooling": "machine-local-sip-or-app-tooling",
+      "expected_native": ["provider-probe"],
+      "expected_rust_sip": ["unsupported"]
     }
   ]
 }
