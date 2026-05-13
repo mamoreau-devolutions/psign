@@ -122,8 +122,10 @@ fn resolve_with_subsystem(
         if hcatinfo == 0 {
             break;
         }
-        let mut catinfo = CATALOG_INFO::default();
-        catinfo.cbStruct = std::mem::size_of::<CATALOG_INFO>() as u32;
+        let mut catinfo = CATALOG_INFO {
+            cbStruct: std::mem::size_of::<CATALOG_INFO>() as u32,
+            ..Default::default()
+        };
         let info_ok = unsafe { CryptCATCatalogInfoFromContext(hcatinfo, &mut catinfo, 0).is_ok() };
         unsafe {
             let _ = CryptCATAdminReleaseCatalogContext(hcatadmin, hcatinfo, 0);

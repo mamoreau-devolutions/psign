@@ -39,7 +39,7 @@ flowchart TB
   WT --> IH
 ```
 
-**WINTRUST** routes a subject file to the correct **CryptSIP** implementation (by file type / GUID), orchestrates **PKCS#7** / **Authenticode** verification, and uses **catalog** and policy logic. **mssign32** implements **SignerSignEx3** and related APIs used for signing and timestamping. **imagehlp** supplies the PE **Authenticode image digest** stream and **WIN_CERTIFICATE** / certificate table operations. **crypt32** provides **CryptMsg***, **Cert***, and related primitives.
+**WINTRUST** routes a subject file to the correct **CryptSIP** implementation (by file type / GUID), orchestrates **PKCS#7** / **Authenticode** verification, and uses **catalog** and policy logic. Its inbox **CryptSIP*** dispatcher rejects undersized **SIP_SUBJECTINFO** structures (current path expects at least `0x58` bytes), normalizes old `dwIntVersion` values to `0x200`, and then delegates get/put/remove/create/verify calls through a per-subject **SIPObject** vtable. **mssign32** implements **SignerSignEx3** and related APIs used for signing and timestamping. **imagehlp** supplies the PE **Authenticode image digest** stream and **WIN_CERTIFICATE** / certificate table operations. **crypt32** provides **CryptMsg***, **Cert***, and related primitives.
 
 ## Executables (short list)
 
@@ -52,9 +52,9 @@ flowchart TB
 
 | Module | Role |
 |--------|------|
-| **mssign32.dll** | Signing entry points (**SignerSignEx3**, **SignerTimeStampEx3**, …); bridges callers to CSP/KSP and SIP providers. |
+| **mssign32.dll** | Signing entry points (**SignerSignEx3**, **SignerTimeStampEx3**, …); bridges callers to CSP/KSP and SIP providers. Decompilation shows the exported legacy wrappers funnel into newer entry points, subject validation checks `SIGNER_SUBJECT_INFO` size/choice and file/Blob shapes before SIP dispatch, `I_GetSIPFromSubj` opens file subjects or copies supplied subject GUIDs, then calls **CryptSIPLoad**. **SignerTimeStampEx3** rejects calls unless exactly one timestamp mode flag is selected. |
 | **crypt32.dll** | Message encoding (**CryptMsg***), certificate stores, OID decoding—central to PKCS#7 and chain handling. |
-| **WINTRUST.dll** | **WinVerifyTrust**, **CryptSIPGetSignedDataMsg** / **CryptSIPPutSignedDataMsg** dispatch, catalog integration, trust policy. |
+| **WINTRUST.dll** | **WinVerifyTrust**, **CryptSIPGetSignedDataMsg** / **CryptSIPPutSignedDataMsg** dispatch, catalog integration, trust policy. **mssip32.dll** is a tiny forwarder layer whose exported **CryptSIP*** names jump to the corresponding **Wintrust.CryptSIP*** exports. |
 | **imagehlp.dll** | **ImageGetDigestStream** (PE Authenticode digest ranges), **ImageEnumerateCertificates** / **ImageRemoveCertificate** / … for embedded signatures. |
 
 ## Subject Interface Package (SIP) DLLs — formats
@@ -66,7 +66,7 @@ These DLLs implement **CryptSIPDll*** exports for specific **Authenticode** subj
 | **AppxSip.dll** | MSIX/Appx family (flat **.msix** / **.appx**, bundles, encrypted siblings, …) | Cleartext OPC/ZIP packaging SIP for standard packages: indirect data, PKCS#7 placement; COM helpers for manifest identity vs signer (**VerifySigningSubjectName**). Related exports cover bundles and encrypted variants. |
 | **MSISIP.DLL** | **.msi** | OLE structured-storage digest (**DigestStorageMetadataHelper** / **DigestStorageContentHelper**), MSI PKCS#7 stream read/write, installer policy hooks (**DisableSizeVerification**, **DisableLegacyVerification**). |
 | **pwrshsip.dll** | **.ps1**, **.psm1**, **.psd1**, … | PowerShell script SIP: UTF-16 line hashing with `#` / XML / MOF signature block markers. |
-| **wshext.dll** | **.js**, **.vbs**, **.wsf**, … | WSH script SIP: marker stripping + **HashFile**-style payload hashing (UTF-16 LE). |
+| **wshext.dll** | **.js**, **.vbs**, **.wsf**, … | WSH script SIP: marker stripping + **HashFile**-style payload hashing (UTF-16 LE). Decompilation confirms `.vbs`/`.vbe`, `.js`/`.jse`, and `.wsf` classification, last begin-marker selection, strict end-marker lookup, strict signature-line comment prefixes, ASCII base64 decode, and hashing of the stripped BSTR plus the begin-marker wchar offset. |
 | **EsdSip.dll** | **.wim**, **.esd** | WIM header prefix hash + trailing PKCS#7 layout (**GetHashDataOffset** semantics). |
 | **mso.dll** (often Office path) | Office macros | Delegates macro Authenticode hashing to **VBE7.DLL** (**DllVbeGetHashOfCodeProjectEx**, …)—not reimplemented in-tree. |
 

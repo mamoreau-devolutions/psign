@@ -34,6 +34,12 @@ fn to_hex_upper(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02X}")).collect::<String>()
 }
 
+type CatalogVerifyResult = (
+    VerifyChainSummary,
+    Option<(String, Option<String>)>,
+    Vec<String>,
+);
+
 fn calculate_member_hash(path: &std::path::Path) -> Result<Vec<u8>> {
     let file = std::fs::File::open(path)?;
     let hfile = windows::Win32::Foundation::HANDLE(file.as_raw_handle() as *mut _);
@@ -78,11 +84,7 @@ pub fn verify_with_catalog(
     member_path: &std::path::Path,
     catalog: &std::path::Path,
     mut action: windows::core::GUID,
-) -> Result<(
-    VerifyChainSummary,
-    Option<(String, Option<String>)>,
-    Vec<String>,
-)> {
+) -> Result<CatalogVerifyResult> {
     if !catalog.exists() {
         return Err(anyhow!("catalog not found: {}", catalog.display()));
     }

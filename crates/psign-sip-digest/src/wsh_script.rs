@@ -240,4 +240,40 @@ mod tests {
             "unexpected: {msg}"
         );
     }
+
+    #[test]
+    fn strip_wsh_block_rejects_missing_end_marker() {
+        let mut units = u16s_from_str("before");
+        units.extend_from_slice(&u16s_from_str(beg_marker(WshKind::Vbs)));
+        units.extend_from_slice(&u16s_from_str("'' SIG '' QUJD"));
+
+        let err = strip_wsh_signature_units(&units, WshKind::Vbs).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("end signature marker"), "{msg}");
+    }
+
+    #[test]
+    fn extract_wsh_base64_rejects_missing_prefix_non_ascii_and_empty_payload() {
+        let err = extract_base64_ascii(&u16s_from_str("QUJD"), WshKind::Js).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("missing"), "{msg}");
+
+        let non_ascii = u16s_from_str("// SIG // \u{0100}\r\n");
+        let err = extract_base64_ascii(&non_ascii, WshKind::Js).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("non-ASCII"), "{msg}");
+
+        let empty = u16s_from_str("// SIG // \r\n");
+        let err = extract_base64_ascii(&empty, WshKind::Js).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("empty"), "{msg}");
+    }
+
+    #[test]
+    fn wsh_extension_classification_is_case_insensitive_and_limited() {
+        assert_eq!(wsh_kind_from_ext("VBE"), Some(WshKind::Vbs));
+        assert_eq!(wsh_kind_from_ext("JSE"), Some(WshKind::Js));
+        assert_eq!(wsh_kind_from_ext("WSF"), Some(WshKind::Wsf));
+        assert_eq!(wsh_kind_from_ext("ps1"), None);
+    }
 }

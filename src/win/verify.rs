@@ -176,16 +176,18 @@ fn build_provider_flags(
     f
 }
 
-fn verify_embedded_once(
-    target: &Path,
-    args: &VerifyArgs,
-    signature_settings: Option<&mut WINTRUST_SIGNATURE_SETTINGS>,
-) -> Result<(
+type EmbeddedVerifyResult = (
     i32,
     Option<VerifyChainSummary>,
     Vec<String>,
     Option<(String, Option<String>)>,
-)> {
+);
+
+fn verify_embedded_once(
+    target: &Path,
+    args: &VerifyArgs,
+    signature_settings: Option<&mut WINTRUST_SIGNATURE_SETTINGS>,
+) -> Result<EmbeddedVerifyResult> {
     let wide = to_wide(target);
     let mut file_info = WINTRUST_FILE_INFO {
         cbStruct: size_of::<WINTRUST_FILE_INFO>() as u32,
@@ -240,14 +242,53 @@ fn verify_embedded_once(
         )
     };
 
-    if status == 0 {
-        if let Some(needle) = args.chain_root_subject.as_deref() {
-            let chain_ok = if let Some(leaf) = leaf_cert_from_state(data.hWVTStateData) {
-                chain_root_subject_contains(leaf, needle).map_err(|e| anyhow!("{e}"))?
-            } else {
-                false
+    if status == 0
+        && let Some(needle) = args.chain_root_subject.as_deref()
+    {
+        let chain_ok = if let Some(leaf) = leaf_cert_from_state(data.hWVTStateData) {
+            chain_root_subject_contains(leaf, needle).map_err(|e| anyhow!("{e}"))?
+        } else {
+            false
+        };
+        if !chain_ok {
+            data.dwStateAction = WTD_STATEACTION_CLOSE;
+            let _ = unsafe {
+                WinVerifyTrust(
+                    HWND(std::ptr::null_mut()),
+                    &mut action,
+                    &mut data as *mut _ as *mut c_void,
+                )
             };
-            if !chain_ok {
+            return Err(anyhow!(
+                "signing certificate chain does not match requested root subject '{needle}'"
+            ));
+        }
+    }
+
+    let mut post_warnings = Vec::new();
+    if status == 0
+        && let Some(leaf) = leaf_cert_from_state(data.hWVTStateData)
+    {
+        let constraints = (|| -> Result<Vec<String>> {
+            verify_signer_thumbprints_allowed(leaf, &args.signer_thumbprint_sha1)?;
+            if !intermediate_ca_thumbprints_match(leaf, &args.intermediate_ca_sha1)? {
+                return Err(anyhow!(
+                    "Verification failed: no intermediate CA certificate matched /ca thumbprints"
+                ));
+            }
+            let mut w = warn_missing_eku_messages(leaf, &args.warn_if_missing_eku)?;
+            w.extend(pca_2010_warning_message_lines(
+                leaf,
+                matches!(args.policy, VerifyPolicy::Default),
+                args.kernel_policy,
+                args.warn_pca_2010,
+                args.no_warn_pca_2010,
+            )?);
+            Ok(w)
+        })();
+        match constraints {
+            Ok(w) => post_warnings = w,
+            Err(e) => {
                 data.dwStateAction = WTD_STATEACTION_CLOSE;
                 let _ = unsafe {
                     WinVerifyTrust(
@@ -256,46 +297,7 @@ fn verify_embedded_once(
                         &mut data as *mut _ as *mut c_void,
                     )
                 };
-                return Err(anyhow!(
-                    "signing certificate chain does not match requested root subject '{needle}'"
-                ));
-            }
-        }
-    }
-
-    let mut post_warnings = Vec::new();
-    if status == 0 {
-        if let Some(leaf) = leaf_cert_from_state(data.hWVTStateData) {
-            let constraints = (|| -> Result<Vec<String>> {
-                verify_signer_thumbprints_allowed(leaf, &args.signer_thumbprint_sha1)?;
-                if !intermediate_ca_thumbprints_match(leaf, &args.intermediate_ca_sha1)? {
-                    return Err(anyhow!(
-                        "Verification failed: no intermediate CA certificate matched /ca thumbprints"
-                    ));
-                }
-                let mut w = warn_missing_eku_messages(leaf, &args.warn_if_missing_eku)?;
-                w.extend(pca_2010_warning_message_lines(
-                    leaf,
-                    matches!(args.policy, VerifyPolicy::Default),
-                    args.kernel_policy,
-                    args.warn_pca_2010,
-                    args.no_warn_pca_2010,
-                )?);
-                Ok(w)
-            })();
-            match constraints {
-                Ok(w) => post_warnings = w,
-                Err(e) => {
-                    data.dwStateAction = WTD_STATEACTION_CLOSE;
-                    let _ = unsafe {
-                        WinVerifyTrust(
-                            HWND(std::ptr::null_mut()),
-                            &mut action,
-                            &mut data as *mut _ as *mut c_void,
-                        )
-                    };
-                    return Err(e);
-                }
+                return Err(e);
             }
         }
     }

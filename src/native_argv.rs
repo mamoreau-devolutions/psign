@@ -489,6 +489,30 @@ mod tests {
     }
 
     #[test]
+    fn translate_verify_value_switches_and_defaults() {
+        for (key, value, flag) in [
+            ("ag", "{F750E6C3-38EE-11d1-85E5-00C04FC295EE}", "--ag"),
+            ("c", "driver.cat", "--c"),
+            ("r", "Microsoft Root", "--r"),
+            ("sha1", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "--sha1"),
+            ("ca", "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", "--ca"),
+            ("u", "1.3.6.1.5.5.7.3.3", "--u"),
+            ("p7content", "payload.bin", "--p7content"),
+        ] {
+            let (v, e) = translate_slash_switch(Verb::Verify, key, Some(value), None);
+            assert_eq!(e, 1, "{key}");
+            assert_eq!(v, vec![flag, value], "{key}");
+        }
+
+        let (hash, eh) = translate_slash_switch(Verb::Verify, "hash", None, None);
+        assert_eq!(eh, 1);
+        assert_eq!(hash, vec!["--hash", "sha256"]);
+        let (ds, eds) = translate_slash_switch(Verb::Verify, "ds", None, None);
+        assert_eq!(eds, 1);
+        assert_eq!(ds, vec!["--ds", "0"]);
+    }
+
+    #[test]
     fn translate_timestamp_force_flags() {
         let (f, ef) = translate_slash_switch(Verb::Timestamp, "force", None, None);
         assert_eq!(ef, 0);
@@ -496,6 +520,28 @@ mod tests {
         let (n, en) = translate_slash_switch(Verb::Timestamp, "nosealwarn", None, None);
         assert_eq!(en, 0);
         assert_eq!(n, vec!["--nosealwarn"]);
+    }
+
+    #[test]
+    fn translate_timestamp_p7_td_tp_and_catdb_flags() {
+        let (p7, ep7) = translate_slash_switch(Verb::Timestamp, "p7", None, None);
+        assert_eq!(ep7, 0);
+        assert_eq!(p7, vec!["--p7"]);
+        let (td, etd) = translate_slash_switch(Verb::Timestamp, "td", None, None);
+        assert_eq!(etd, 1);
+        assert_eq!(td, vec!["--td", "sha256"]);
+        let (tp, etp) = translate_slash_switch(Verb::Timestamp, "tp", Some("2"), None);
+        assert_eq!(etp, 1);
+        assert_eq!(tp, vec!["--tp", "2"]);
+
+        for (key, flag) in [("d", "--d"), ("r", "--r"), ("u", "--u")] {
+            let (v, e) = translate_slash_switch(Verb::Catdb, key, None, None);
+            assert_eq!(e, 0, "{key}");
+            assert_eq!(v, vec![flag], "{key}");
+        }
+        let (g, eg) = translate_slash_switch(Verb::Catdb, "g", Some("{GUID}"), None);
+        assert_eq!(eg, 1);
+        assert_eq!(g, vec!["--g", "{GUID}"]);
     }
 
     #[test]
@@ -528,6 +574,45 @@ mod tests {
         let (v2, e2) = translate_slash_switch(Verb::Sign, "tr", Some("http://ts/x"), None);
         assert_eq!(e2, 1);
         assert_eq!(v2, vec!["--tr", "http://ts/x"]);
+    }
+
+    #[test]
+    fn translate_sign_value_switches_and_p7_modes() {
+        for (key, value, flag) in [
+            ("f", "cert.pfx", "--f"),
+            ("p", "secret", "--p"),
+            ("n", "Subject", "--n"),
+            ("i", "Issuer", "--i"),
+            ("sha1", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "--sha1"),
+            (
+                "csp",
+                "Microsoft Enhanced RSA and AES Cryptographic Provider",
+                "--csp",
+            ),
+            ("kc", "container", "--kc"),
+            ("s", "MY", "--s"),
+            ("td", "sha384", "--td"),
+            ("d", "Description", "--d"),
+            ("du", "https://example.invalid", "--du"),
+            ("ac", "extra.cer", "--ac"),
+            ("r", "Root", "--r"),
+            ("u", "1.3.6.1.5.5.7.3.3", "--u"),
+            ("dlib", "Azure.CodeSigning.Dlib.dll", "--dlib"),
+            ("dmdf", "metadata.json", "--dmdf"),
+            ("dg", "digest-dir", "--dg"),
+            ("di", "signed-digest.p7", "--di"),
+            ("p7", "out-dir", "--p7"),
+            ("p7co", "1.3.6.1.4.1.311.2.1.4", "--p7co"),
+            ("p7ce", "DetachedSignedData", "--p7ce"),
+        ] {
+            let (v, e) = translate_slash_switch(Verb::Sign, key, Some(value), None);
+            assert_eq!(e, 1, "{key}");
+            assert_eq!(v, vec![flag, value], "{key}");
+        }
+
+        let (store, es) = translate_slash_switch(Verb::Sign, "s", None, None);
+        assert_eq!(es, 1);
+        assert_eq!(store, vec!["--s", "MY"]);
     }
 
     #[test]

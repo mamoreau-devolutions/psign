@@ -8,6 +8,7 @@ Source of truth for tiers and per-flag notes: [`psign-cli-matrix.json`](psign-cl
 
 | Area | Native switches | Rust status |
 |------|-------------------|-------------|
+| Strict digest option requirements | Missing sign `/fd`; missing RFC3161 `/td` with sign `/tr` or timestamp `/tr` | Native `signtool.exe` throws explicit `No /fd flag specified` / `No /td flag specified`; `psign` currently defaults to SHA-256 for compatibility |
 | Split digest pipeline | `/dg`, `/di`, `/ds`, `/dxml` | Parsed; execution returns explicit error — use atomic sign or native `signtool` |
 | Verify shim | `/ms` (`--multiple-semantics`) | Accepted; documented compatibility note |
 | Timestamp | `/p7` (timestamp PKCS#7 files), `/force`, `/nosealwarn` | Explicit not-implemented errors |

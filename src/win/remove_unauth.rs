@@ -406,12 +406,11 @@ fn repack_pkcs_signed_win_certificate(
     w_certificate_type: u16,
     new_pkcs: &[u8],
 ) -> Vec<u8> {
-    let mut body = Vec::with_capacity(8 + new_pkcs.len());
-    body.resize(8 + new_pkcs.len(), 0);
+    let mut body = vec![0; 8 + new_pkcs.len()];
     body[4..6].copy_from_slice(&w_revision.to_le_bytes());
     body[6..8].copy_from_slice(&w_certificate_type.to_le_bytes());
     body[8..].copy_from_slice(new_pkcs);
-    while body.len() % 8 != 0 {
+    while !body.len().is_multiple_of(8) {
         body.push(0);
     }
     let total = body.len() as u32;
