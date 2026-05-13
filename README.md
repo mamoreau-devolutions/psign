@@ -26,6 +26,30 @@ cargo build
 
 At the repo root, **`cargo build`** targets **`default-members`** only (**portable digest crates**). On Windows, build the **`psign-tool`** executable with **`cargo windows-bin`** or **`cargo build -p psign --bin psign-tool`** (see [`.cargo/config.toml`](.cargo/config.toml)). Optional Cargo features: **`azure-kv-sign`** (Key Vault digest callback), **`artifact-signing-rest`** (**`artifact-signing-submit`** LRO against **`*.codesigning.azure.net`**).
 
+## Dotnet tool package (.NET 10+)
+
+`psign-tool` can be distributed as a RID-specific dotnet tool package:
+
+```powershell
+dotnet tool install -g Devolutions.Psign.Tool
+psign-tool --help
+```
+
+One-shot execution:
+
+```powershell
+dotnet tool exec Devolutions.Psign.Tool -- --help
+dnx Devolutions.Psign.Tool --help
+```
+
+Create local dotnet tool packages from prebuilt release artifacts:
+
+```powershell
+pwsh ./nuget/pack-psign-dotnet-tool.ps1 -Version 0.1.0 -ArtifactsRoot ./dist -OutputDir ./dist/nuget
+```
+
+The package is built from native `psign-tool` artifacts for `win-x64`, `win-arm64`, `linux-x64`, `linux-arm64`, `osx-x64`, and `osx-arm64`, plus an `any` fallback package for unsupported runtimes.
+
 ## Linux / portable digest tooling
 
 The canonical **`psign-tool`** CLI (package **`psign`**) supports an optional backend selector: **`--mode auto|windows|portable`**. When omitted, **`auto`** is used; **`PSIGN_TOOL_MODE`** can set the same default for parity automation. Windows mode uses Win32 APIs and registered SIP DLLs. Portable mode and the **`psign-tool portable ...`** namespace use the cross-platform Rust implementations from **`psign-sip-digest`** and **`psign-authenticode-trust`** without **`WinVerifyTrust`**.
