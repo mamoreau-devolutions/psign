@@ -27,7 +27,7 @@ jobs:
       - name: CAB RS256 prehash + extract (signed fixture + unsigned errors)
         run: cargo test -p psign-digest-cli --locked cab_rs256_
 
-      - name: CAB RS256 prehash helper (library: signed fixture + unsigned rejection)
+      - name: "CAB RS256 prehash helper (library: signed fixture + unsigned rejection)"
         run: cargo test -p psign-sip-digest --lib cab_rsa_sha256_signer_prehash --locked
 
       - name: MSI PKCS#7 extract + RS256 prehash CLI (OLE stub vs PE parity)
@@ -58,12 +58,22 @@ jobs:
         run: cargo test -p psign-authenticode-trust --lib detached_trust_ --locked
 
       - name: RFC3161 TimeStampReq/Resp + timestamp policy (library + CLI)
-        run: cargo test -p psign-sip-digest --lib timestamp:: --locked && cargo test -p psign-authenticode-trust --lib tiny32_upstream --locked && cargo test -p psign-authenticode-trust --lib tiny64_upstream_pe_pkcs7_pkcs9_signing_time_extracts --locked && cargo test -p psign-authenticode-trust --lib tiny64_upstream_bare_signed --locked && cargo test -p psign-authenticode-trust --lib nested_tstinfo --locked && cargo test -p psign-authenticode-trust --lib time_rejects --locked && cargo test -p psign-authenticode-trust --lib resolve_verification_ --locked && cargo test -p psign-digest-cli --locked trust_verify_pe_ok_require_valid_timestamp_pkcs9_signing_time_on_tiny32 && cargo test -p psign-digest-cli --locked trust_verify_pe_ok_require_valid_timestamp_pkcs9_signing_time_on_tiny64 && cargo test -p psign-digest-cli --locked portable_rfc3161_timestamp
+        run: |
+          cargo test -p psign-sip-digest --lib timestamp:: --locked
+          cargo test -p psign-authenticode-trust --lib tiny32_upstream --locked
+          cargo test -p psign-authenticode-trust --lib tiny64_upstream_pe_pkcs7_pkcs9_signing_time_extracts --locked
+          cargo test -p psign-authenticode-trust --lib tiny64_upstream_bare_signed --locked
+          cargo test -p psign-authenticode-trust --lib nested_tstinfo --locked
+          cargo test -p psign-authenticode-trust --lib time_rejects --locked
+          cargo test -p psign-authenticode-trust --lib resolve_verification_ --locked
+          cargo test -p psign-digest-cli --locked trust_verify_pe_ok_require_valid_timestamp_pkcs9_signing_time_on_tiny32
+          cargo test -p psign-digest-cli --locked trust_verify_pe_ok_require_valid_timestamp_pkcs9_signing_time_on_tiny64
+          cargo test -p psign-digest-cli --locked portable_rfc3161_timestamp
 
       - name: Build psign-tool portable (timestamp-http feature, compile-only)
         run: cargo build -p psign-digest-cli --features timestamp-http --locked
 
-      - name: Artifact Signing REST (library + mock :sign LRO)
+      - name: "Artifact Signing REST (library + mock :sign LRO)"
         run: cargo test -p psign-codesigning-rest --locked
 
       - name: Azure Key Vault REST helpers (library unit tests)
