@@ -113,12 +113,24 @@ struct AppxBlockMapFile {
     normalized_name: String,
     declared_size: u64,
     lfh_size: Option<u64>,
-    block_hashes: Vec<Vec<u8>>,
+    blocks: Vec<AppxBlockMapBlock>,
+}
+
+#[derive(Clone, Debug)]
+struct AppxBlockMapBlock {
+    hash: Vec<u8>,
+    compressed_size: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug)]
 struct AppxPackageInventory {
     has_code_integrity: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+struct AppxContentTypes {
+    defaults: HashMap<String, String>,
+    overrides: HashMap<String, String>,
 }
 
 enum RunningHasher {
@@ -322,7 +334,7 @@ fn parse_block_map_xml(xml: &[u8]) -> Result<(PeAuthenticodeHashKind, Vec<AppxBl
                     normalized_name,
                     declared_size,
                     lfh_size,
-                    block_hashes: Vec::new(),
+                    blocks: Vec::new(),
                 });
             }
             Event::Empty(e) if e.local_name().as_ref() == b"File" => {
@@ -343,7 +355,7 @@ fn parse_block_map_xml(xml: &[u8]) -> Result<(PeAuthenticodeHashKind, Vec<AppxBl
                     normalized_name,
                     declared_size,
                     lfh_size,
-                    block_hashes: Vec::new(),
+                    blocks: Vec::new(),
                 });
             }
             Event::Start(e) | Event::Empty(e) if e.local_name().as_ref() == b"Block" => {
@@ -354,7 +366,11 @@ fn parse_block_map_xml(xml: &[u8]) -> Result<(PeAuthenticodeHashKind, Vec<AppxBl
                 let hash = base64::engine::general_purpose::STANDARD
                     .decode(encoded.as_bytes())
                     .map_err(|e| anyhow!("AppxBlockMap.xml Block Hash is not base64: {e}"))?;
-                file.block_hashes.push(hash);
+                let compressed_size = optional_u64_xml_attr(&reader, &e, b"Size")?;
+                file.blocks.push(AppxBlockMapBlock {
+                    hash,
+                    compressed_size,
+                });
             }
             Event::End(e) if e.local_name().as_ref() == b"BlockMap" => {
                 if current.is_some() {
@@ -386,12 +402,12 @@ fn parse_block_map_xml(xml: &[u8]) -> Result<(PeAuthenticodeHashKind, Vec<AppxBl
     let kind = kind.ok_or_else(|| anyhow!("AppxBlockMap.xml missing HashMethod"))?;
     let expected_len = kind.digest_output_len();
     for file in &files {
-        for hash in &file.block_hashes {
-            if hash.len() != expected_len {
+        for block in &file.blocks {
+            if block.hash.len() != expected_len {
                 return Err(anyhow!(
                     "AppxBlockMap.xml File `{}` has {}-byte block hash, expected {expected_len}",
                     file.name,
-                    hash.len()
+                    block.hash.len()
                 ));
             }
         }
@@ -399,15 +415,14 @@ fn parse_block_map_xml(xml: &[u8]) -> Result<(PeAuthenticodeHashKind, Vec<AppxBl
     Ok((kind, files))
 }
 
-fn validate_content_types_xml(xml: &[u8]) -> Result<()> {
+fn validate_content_types_xml(xml: &[u8]) -> Result<AppxContentTypes> {
     let mut reader = Reader::from_reader(Cursor::new(xml));
     reader.config_mut().trim_text(true);
 
     let mut buf = Vec::new();
     let mut in_types = false;
     let mut saw_types = false;
-    let mut defaults = HashSet::new();
-    let mut overrides = HashSet::new();
+    let mut content_types = AppxContentTypes::default();
 
     loop {
         match reader
@@ -444,7 +459,7 @@ fn validate_content_types_xml(xml: &[u8]) -> Result<()> {
                     ));
                 }
                 let key = extension.to_ascii_lowercase();
-                if !defaults.insert(key) {
+                if content_types.defaults.insert(key, content_type).is_some() {
                     return Err(anyhow!(
                         "duplicate [Content_Types].xml Default for extension `{extension}`"
                     ));
@@ -468,7 +483,7 @@ fn validate_content_types_xml(xml: &[u8]) -> Result<()> {
                 }
                 let normalized = normalize_appx_part_name(&part_name[1..])?;
                 let key = normalized.to_ascii_lowercase();
-                if !overrides.insert(key) {
+                if content_types.overrides.insert(key, content_type).is_some() {
                     return Err(anyhow!(
                         "duplicate [Content_Types].xml Override for part `{part_name}`"
                     ));
@@ -503,6 +518,73 @@ fn validate_content_types_xml(xml: &[u8]) -> Result<()> {
     }
     if in_types {
         return Err(anyhow!("unterminated [Content_Types].xml Types root"));
+    }
+    Ok(content_types)
+}
+
+fn content_type_for_part<'a>(content_types: &'a AppxContentTypes, part: &str) -> Option<&'a str> {
+    let normalized = normalize_appx_part_name(part).ok()?;
+    let folded = normalized.to_ascii_lowercase();
+    if let Some(content_type) = content_types.overrides.get(&folded) {
+        return Some(content_type);
+    }
+    let extension = normalized.rsplit_once('.')?.1.to_ascii_lowercase();
+    content_types.defaults.get(&extension).map(String::as_str)
+}
+
+fn require_content_type(
+    content_types: &AppxContentTypes,
+    part: &'static [u8],
+    expected: &str,
+) -> Result<()> {
+    let part = ascii_part(part);
+    let Some(actual) = content_type_for_part(content_types, part) else {
+        return Err(anyhow!(
+            "[Content_Types].xml does not declare a content type for `{part}`"
+        ));
+    };
+    if !actual.eq_ignore_ascii_case(expected) {
+        return Err(anyhow!(
+            "[Content_Types].xml content type for `{part}` is `{actual}`, expected `{expected}`"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_reserved_content_types(
+    content_types: &AppxContentTypes,
+    inventory: AppxPackageInventory,
+    ext: &str,
+) -> Result<()> {
+    require_content_type(
+        content_types,
+        BLOCK_MAP,
+        "application/vnd.ms-appx.blockmap+xml",
+    )?;
+    require_content_type(
+        content_types,
+        APP_SIGNATURE,
+        "application/vnd.ms-appx.signature",
+    )?;
+    if inventory.has_code_integrity {
+        require_content_type(
+            content_types,
+            CODE_INTEGRITY,
+            "application/vnd.ms-pkiseccat",
+        )?;
+    }
+    if matches!(ext, "msixbundle" | "appxbundle") {
+        require_content_type(
+            content_types,
+            BUNDLE_MANIFEST,
+            "application/vnd.ms-appx.bundlemanifest+xml",
+        )?;
+    } else {
+        require_content_type(
+            content_types,
+            APP_MANIFEST,
+            "application/vnd.ms-appx.manifest+xml",
+        )?;
     }
     Ok(())
 }
@@ -1675,7 +1757,7 @@ fn validate_block_map_file_hashes(
             ));
         }
         if data.is_empty() {
-            if !block_file.block_hashes.is_empty() {
+            if !block_file.blocks.is_empty() {
                 return Err(anyhow!(
                     "AppxBlockMap.xml File `{}` is empty but has block hashes",
                     block_file.name
@@ -1683,7 +1765,7 @@ fn validate_block_map_file_hashes(
             }
             continue;
         }
-        if block_file.block_hashes.is_empty() {
+        if block_file.blocks.is_empty() {
             return Err(anyhow!(
                 "AppxBlockMap.xml File `{}` has content but no block hashes",
                 block_file.name
@@ -1691,7 +1773,7 @@ fn validate_block_map_file_hashes(
         }
 
         let mut offset = 0usize;
-        for (block_index, expected) in block_file.block_hashes.iter().enumerate() {
+        for (block_index, block) in block_file.blocks.iter().enumerate() {
             if offset >= data.len() {
                 return Err(anyhow!(
                     "AppxBlockMap.xml File `{}` has too many block hashes",
@@ -1700,9 +1782,17 @@ fn validate_block_map_file_hashes(
             }
             let end = offset.saturating_add(APPX_BLOCK_SIZE).min(data.len());
             let actual = hash_bytes(kind, &data[offset..end]);
-            if actual != *expected {
+            if actual.as_slice() != block.hash.as_slice() {
                 return Err(anyhow!(
                     "AppxBlockMap.xml File `{}` block {block_index} hash mismatch",
+                    block_file.name
+                ));
+            }
+            if let Some(compressed_size) = block.compressed_size
+                && compressed_size == 0
+            {
+                return Err(anyhow!(
+                    "AppxBlockMap.xml File `{}` block {block_index} has zero Size",
                     block_file.name
                 ));
             }
@@ -1809,7 +1899,8 @@ fn verify_msix_digest_consistency_bytes(buf: &[u8], ext: &str) -> Result<()> {
     let block_map_bytes = read_zip_entry_raw(&mut archive, std::str::from_utf8(BLOCK_MAP)?)?;
     let (kind, block_map_files) = parse_block_map_xml(&block_map_bytes)?;
     let ct_raw = read_zip_entry_raw(&mut archive, std::str::from_utf8(CONTENT_TYPES)?)?;
-    validate_content_types_xml(&ct_raw)?;
+    let content_types = validate_content_types_xml(&ct_raw)?;
+    validate_reserved_content_types(&content_types, inventory, ext)?;
     let expected_piece = kind.digest_output_len();
     if piece_len != expected_piece {
         return Err(anyhow!(
@@ -2088,6 +2179,24 @@ mod tests {
         let err = validate_content_types_xml(duplicate_default).unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("duplicate"), "{msg}");
+    }
+
+    #[test]
+    fn content_types_validation_rejects_reserved_content_type_mismatch() {
+        let xml = br#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/AppxBlockMap.xml" ContentType="application/xml"/><Override PartName="/AppxSignature.p7x" ContentType="application/vnd.ms-appx.signature"/></Types>"#;
+        let content_types = validate_content_types_xml(xml).unwrap();
+        let inventory = AppxPackageInventory {
+            has_code_integrity: false,
+        };
+        let err = validate_reserved_content_types(&content_types, inventory, "appx").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("AppxBlockMap.xml"), "{msg}");
+
+        let missing_manifest_type = br#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/AppxBlockMap.xml" ContentType="application/vnd.ms-appx.blockmap+xml"/><Override PartName="/AppxSignature.p7x" ContentType="application/vnd.ms-appx.signature"/></Types>"#;
+        let content_types = validate_content_types_xml(missing_manifest_type).unwrap();
+        let err = validate_reserved_content_types(&content_types, inventory, "appx").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("AppxManifest.xml"), "{msg}");
     }
 
     #[test]
@@ -2409,6 +2518,30 @@ mod tests {
         let err = validate_block_map_file_hashes(&zip, kind, &files).unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("LfhSize"), "{msg}");
+    }
+
+    #[test]
+    fn block_map_validation_rejects_bad_block_size_attribute() {
+        let payload = b"abc";
+        let hash = hash_bytes(PeAuthenticodeHashKind::Sha256, payload);
+        let hash_b64 = base64::engine::general_purpose::STANDARD.encode(hash);
+        let bad_size = format!(
+            r#"<BlockMap HashMethod="{HASH_SHA256}"><File Name="payload.txt" Size="{}"><Block Hash="{hash_b64}" Size="not-a-number"/></File></BlockMap>"#,
+            payload.len()
+        );
+        let err = parse_block_map_xml(bad_size.as_bytes()).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("invalid `Size`"), "{msg}");
+
+        let zero_size = format!(
+            r#"<BlockMap HashMethod="{HASH_SHA256}"><File Name="payload.txt" Size="{}"><Block Hash="{hash_b64}" Size="0"/></File></BlockMap>"#,
+            payload.len()
+        );
+        let (kind, files) = parse_block_map_xml(zero_size.as_bytes()).unwrap();
+        let zip = zip_with_entries(&[("payload.txt", payload)]);
+        let err = validate_block_map_file_hashes(&zip, kind, &files).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("zero Size"), "{msg}");
     }
 
     #[test]
