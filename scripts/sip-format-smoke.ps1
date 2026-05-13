@@ -1,5 +1,5 @@
 # SIP-backed format smoke checklist: native signtool.exe vs psign on the same machine.
-# Uses optional SIGNTOOL_RS_* fixtures when set (same variables as scripts/run-parity-diff.ps1).
+# Uses optional PSIGN_* fixtures when set (same variables as scripts/run-parity-diff.ps1).
 #
 # Format inventory (sign/timestamp/embedded-verify delegate to OS CryptSIP DLLs via SignerSignEx3 / WinVerifyTrust):
 #   PE        .exe .dll .sys .ocx .scr .cpl .efi .mui  — Image* APIs apply for remove /s
@@ -13,7 +13,7 @@
 #
 # Usage:
 #   ./scripts/sip-format-smoke.ps1
-#   ./scripts/sip-format-smoke.ps1 -WorkspaceRoot D:\dev\signtool-rs
+#   ./scripts/sip-format-smoke.ps1 -WorkspaceRoot D:\\dev\\psign
 param(
     [string]$WorkspaceRoot = ""
 )
@@ -46,10 +46,10 @@ function Test-RsEnvPresent([string]$Name) {
 }
 
 $native = Resolve-NativeSignTool
-$rustBin = Join-Path $WorkspaceRoot "target\debug\psign-tool-windows.exe"
+$rustBin = Join-Path $WorkspaceRoot "target\debug\psign-tool.exe"
 if (-not (Test-Path -LiteralPath $rustBin)) {
-    Write-Host "Building psign-tool-windows (debug)..."
-    & cargo build -p psign --bin psign-tool-windows | Out-Null
+    Write-Host "Building psign-tool (debug)..."
+    & cargo build -p psign --bin psign-tool | Out-Null
 }
 
 Write-Host "Native: $native"
@@ -75,42 +75,42 @@ Copy-Item -LiteralPath $native -Destination $tmpPe -Force
 Invoke-Pair "verify_pa_pe" @("verify", "/pa", $tmpPe) @("verify", "--policy", "pa", $tmpPe)
 Remove-Item -LiteralPath $tmpPe -Force -ErrorAction SilentlyContinue
 
-if ((Test-RsEnvPresent "SIGNTOOL_RS_UNSIGNED_FIXTURE") -and (Test-RsEnvPresent "SIGNTOOL_RS_TEST_PFX")) {
-    $u = $env:SIGNTOOL_RS_UNSIGNED_FIXTURE
-    $pfx = $env:SIGNTOOL_RS_TEST_PFX
+if ((Test-RsEnvPresent "PSIGN_UNSIGNED_FIXTURE") -and (Test-RsEnvPresent "PSIGN_TEST_PFX")) {
+    $u = $env:PSIGN_UNSIGNED_FIXTURE
+    $pfx = $env:PSIGN_TEST_PFX
     $tmpSign = Join-Path $env:TEMP "psign_sip_smoke_unsigned.exe"
     Copy-Item -LiteralPath $u -Destination $tmpSign -Force
     $nativeSign = @("sign", "/fd", "SHA256", "/f", $pfx, $tmpSign)
     $rustSign = @("sign", "--pfx", $pfx, "--digest", "sha256", $tmpSign)
-    if (Test-RsEnvPresent "SIGNTOOL_RS_TEST_PFX_PASSWORD") {
-        $nativeSign = @("sign", "/fd", "SHA256", "/f", $pfx, "/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, $tmpSign)
-        $rustSign = @("sign", "--pfx", $pfx, "--password", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, "--digest", "sha256", $tmpSign)
+    if (Test-RsEnvPresent "PSIGN_TEST_PFX_PASSWORD") {
+        $nativeSign = @("sign", "/fd", "SHA256", "/f", $pfx, "/p", $env:PSIGN_TEST_PFX_PASSWORD, $tmpSign)
+        $rustSign = @("sign", "--pfx", $pfx, "--password", $env:PSIGN_TEST_PFX_PASSWORD, "--digest", "sha256", $tmpSign)
     }
     Invoke-Pair "sign_then_verify_pe" $nativeSign $rustSign
     $rustSignRustSip = $rustSign + @("--rust-sip", "pe")
     Invoke-Pair "sign_then_verify_pe_rust_sip_digest_gate" $nativeSign $rustSignRustSip
     Invoke-Pair "verify_signed_pe" @("verify", "/pa", $tmpSign) @("verify", "--policy", "pa", $tmpSign)
     Remove-Item -LiteralPath $tmpSign -Force -ErrorAction SilentlyContinue
-    Write-Host "(PE fixture smoke used SIGNTOOL_RS_UNSIGNED_FIXTURE)"
+    Write-Host "(PE fixture smoke used PSIGN_UNSIGNED_FIXTURE)"
 } else {
-    Write-Host "[skip] PE sign smoke: set SIGNTOOL_RS_UNSIGNED_FIXTURE and SIGNTOOL_RS_TEST_PFX"
+    Write-Host "[skip] PE sign smoke: set PSIGN_UNSIGNED_FIXTURE and PSIGN_TEST_PFX"
 }
 
-if ((Test-RsEnvPresent "SIGNTOOL_RS_WINMD_UNSIGNED_FIXTURE") -and (Test-RsEnvPresent "SIGNTOOL_RS_TEST_PFX")) {
-    $w = $env:SIGNTOOL_RS_WINMD_UNSIGNED_FIXTURE
+if ((Test-RsEnvPresent "PSIGN_WINMD_UNSIGNED_FIXTURE") -and (Test-RsEnvPresent "PSIGN_TEST_PFX")) {
+    $w = $env:PSIGN_WINMD_UNSIGNED_FIXTURE
     if (Test-Path -LiteralPath $w) {
-        $pfx = $env:SIGNTOOL_RS_TEST_PFX
+        $pfx = $env:PSIGN_TEST_PFX
         $tmpW = Join-Path $env:TEMP "psign_sip_smoke.winmd"
         Copy-Item -LiteralPath $w -Destination $tmpW -Force
         $nativeSign = @("sign", "/fd", "SHA256", "/f", $pfx, $tmpW)
         $rustSign = @("sign", "--pfx", $pfx, "--digest", "sha256", $tmpW)
-        if (Test-RsEnvPresent "SIGNTOOL_RS_TEST_PFX_PASSWORD") {
-            $nativeSign = @("sign", "/fd", "SHA256", "/f", $pfx, "/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, $tmpW)
-            $rustSign = @("sign", "--pfx", $pfx, "--password", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, "--digest", "sha256", $tmpW)
+        if (Test-RsEnvPresent "PSIGN_TEST_PFX_PASSWORD") {
+            $nativeSign = @("sign", "/fd", "SHA256", "/f", $pfx, "/p", $env:PSIGN_TEST_PFX_PASSWORD, $tmpW)
+            $rustSign = @("sign", "--pfx", $pfx, "--password", $env:PSIGN_TEST_PFX_PASSWORD, "--digest", "sha256", $tmpW)
         }
-        if (Test-RsEnvPresent "SIGNTOOL_RS_WINMD_TIMESTAMP_URL") {
-            $nativeSign += @("/tr", $env:SIGNTOOL_RS_WINMD_TIMESTAMP_URL, "/td", "SHA256")
-            $rustSign += @("--timestamp-url", $env:SIGNTOOL_RS_WINMD_TIMESTAMP_URL, "--timestamp-digest", "sha256")
+        if (Test-RsEnvPresent "PSIGN_WINMD_TIMESTAMP_URL") {
+            $nativeSign += @("/tr", $env:PSIGN_WINMD_TIMESTAMP_URL, "/td", "SHA256")
+            $rustSign += @("--timestamp-url", $env:PSIGN_WINMD_TIMESTAMP_URL, "--timestamp-digest", "sha256")
         }
         Invoke-Pair "sign_then_verify_winmd" $nativeSign $rustSign
         $rustWinmdRustSip = $rustSign + @("--rust-sip", "pe")
@@ -119,7 +119,7 @@ if ((Test-RsEnvPresent "SIGNTOOL_RS_WINMD_UNSIGNED_FIXTURE") -and (Test-RsEnvPre
         Remove-Item -LiteralPath $tmpW -Force -ErrorAction SilentlyContinue
     }
 } else {
-    Write-Host "[skip] WinMD smoke: set SIGNTOOL_RS_WINMD_UNSIGNED_FIXTURE (+ SIGNTOOL_RS_TEST_PFX)"
+    Write-Host "[skip] WinMD smoke: set PSIGN_WINMD_UNSIGNED_FIXTURE (+ PSIGN_TEST_PFX)"
 }
 
 Write-Host ""

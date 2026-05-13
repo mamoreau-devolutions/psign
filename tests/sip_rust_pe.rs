@@ -17,12 +17,12 @@ fn upstream_signed_tiny64_digest_consistency() {
 }
 
 #[test]
-#[ignore = "set SIGNTOOL_RS_SIGNED_FIXTURE to a WinTrust-verifiable signed PE"]
+#[ignore = "set PSIGN_SIGNED_FIXTURE to a WinTrust-verifiable signed PE"]
 fn signed_fixture_digest_check_after_trust() {
-    let path = std::env::var_os("SIGNTOOL_RS_SIGNED_FIXTURE")
-        .expect("SIGNTOOL_RS_SIGNED_FIXTURE must be set when running this ignored test");
+    let path = std::env::var_os("PSIGN_SIGNED_FIXTURE")
+        .expect("PSIGN_SIGNED_FIXTURE must be set when running this ignored test");
     let path = std::path::Path::new(&path);
-    let mut verify = assert_cmd::Command::cargo_bin("psign-tool-windows").expect("binary");
+    let mut verify = assert_cmd::Command::cargo_bin("psign-tool").expect("binary");
     verify.args([
         "verify",
         "--policy",

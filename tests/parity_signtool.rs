@@ -20,14 +20,14 @@ fn verify_matches_native_exit_code_for_known_signed_binary() {
         .output()
         .expect("failed to execute native signtool");
 
-    let rust = Command::cargo_bin("psign-tool-windows")
+    let rust = Command::cargo_bin("psign-tool")
         .expect("binary available")
         .arg("verify")
         .arg("--policy")
         .arg("pa")
         .arg(fixture)
         .output()
-        .expect("failed to execute psign-tool-windows");
+        .expect("failed to execute psign-tool");
 
     assert_eq!(native.status.success(), rust.status.success());
 }
@@ -47,14 +47,14 @@ fn verify_default_policy_matches_native_failure() {
         .output()
         .expect("failed to execute native signtool");
 
-    let rust = Command::cargo_bin("psign-tool-windows")
+    let rust = Command::cargo_bin("psign-tool")
         .expect("binary available")
         .arg("verify")
         .arg("--policy")
         .arg("default")
         .arg(fixture)
         .output()
-        .expect("failed to execute psign-tool-windows");
+        .expect("failed to execute psign-tool");
 
     assert_eq!(native.status.success(), rust.status.success());
 }
@@ -89,21 +89,21 @@ fn native_signtool_optional_path() -> Option<PathBuf> {
 }
 
 #[test]
-#[ignore = "requires SIGNTOOL_RS_UNSIGNED_FIXTURE,SIGNTOOL_RS_TEST_PFX,SIGNTOOL_RS_TEST_PFX_PASSWORD"]
+#[ignore = "requires PSIGN_UNSIGNED_FIXTURE,PSIGN_TEST_PFX,PSIGN_TEST_PFX_PASSWORD"]
 fn sign_semantic_parity_creates_verifiable_signature() {
-    let unsigned = match env_path("SIGNTOOL_RS_UNSIGNED_FIXTURE") {
+    let unsigned = match env_path("PSIGN_UNSIGNED_FIXTURE") {
         Some(v) => v,
         None => return,
     };
-    let pfx = match env_path("SIGNTOOL_RS_TEST_PFX") {
+    let pfx = match env_path("PSIGN_TEST_PFX") {
         Some(v) => v,
         None => return,
     };
-    let pfx_password = env_path("SIGNTOOL_RS_TEST_PFX_PASSWORD");
+    let pfx_password = env_path("PSIGN_TEST_PFX_PASSWORD");
     let signed_out = std::env::temp_dir().join("psign_signed_semantic.exe");
     let _ = std::fs::copy(&unsigned, &signed_out).expect("copy unsigned fixture");
 
-    let mut rust = Command::cargo_bin("psign-tool-windows").expect("binary available");
+    let mut rust = Command::cargo_bin("psign-tool").expect("binary available");
     rust.arg("sign")
         .arg("--pfx")
         .arg(&pfx)
@@ -113,7 +113,7 @@ fn sign_semantic_parity_creates_verifiable_signature() {
     if let Some(p) = pfx_password {
         rust.arg("--password").arg(p);
     }
-    let rust_out = rust.output().expect("run psign-tool-windows sign");
+    let rust_out = rust.output().expect("run psign-tool sign");
     assert!(
         rust_out.status.success(),
         "{}",
@@ -134,20 +134,20 @@ fn sign_semantic_parity_creates_verifiable_signature() {
 }
 
 #[test]
-#[ignore = "requires SIGNTOOL_RS_SIGNED_FIXTURE and SIGNTOOL_RS_TIMESTAMP_URL"]
+#[ignore = "requires PSIGN_SIGNED_FIXTURE and PSIGN_TIMESTAMP_URL"]
 fn timestamp_semantic_parity_adds_countersignature() {
-    let signed_fixture = match env_path("SIGNTOOL_RS_SIGNED_FIXTURE") {
+    let signed_fixture = match env_path("PSIGN_SIGNED_FIXTURE") {
         Some(v) => v,
         None => return,
     };
-    let tsa = match env_path("SIGNTOOL_RS_TIMESTAMP_URL") {
+    let tsa = match env_path("PSIGN_TIMESTAMP_URL") {
         Some(v) => v,
         None => return,
     };
     let ts_out = std::env::temp_dir().join("psign_timestamp_semantic.exe");
     let _ = std::fs::copy(&signed_fixture, &ts_out).expect("copy signed fixture");
 
-    let rust = Command::cargo_bin("psign-tool-windows")
+    let rust = Command::cargo_bin("psign-tool")
         .expect("binary available")
         .arg("timestamp")
         .arg("--rfc3161-url")
@@ -156,7 +156,7 @@ fn timestamp_semantic_parity_adds_countersignature() {
         .arg("sha256")
         .arg(&ts_out)
         .output()
-        .expect("run psign-tool-windows timestamp");
+        .expect("run psign-tool timestamp");
     assert!(
         rust.status.success(),
         "{}",
@@ -180,17 +180,17 @@ fn timestamp_semantic_parity_adds_countersignature() {
 }
 
 #[test]
-#[ignore = "requires SIGNTOOL_RS_DETACHED_CONTENT and SIGNTOOL_RS_DETACHED_PKCS7"]
+#[ignore = "requires PSIGN_DETACHED_CONTENT and PSIGN_DETACHED_PKCS7"]
 fn detached_semantic_parity_matches_native_integrity() {
-    let content = match env_path("SIGNTOOL_RS_DETACHED_CONTENT") {
+    let content = match env_path("PSIGN_DETACHED_CONTENT") {
         Some(v) => v,
         None => return,
     };
-    let sig = match env_path("SIGNTOOL_RS_DETACHED_PKCS7") {
+    let sig = match env_path("PSIGN_DETACHED_PKCS7") {
         Some(v) => v,
         None => return,
     };
-    let rust = Command::cargo_bin("psign-tool-windows")
+    let rust = Command::cargo_bin("psign-tool")
         .expect("binary available")
         .args(["verify", "--policy", "pa", "--allow-test-root"])
         .arg(&content)
@@ -206,17 +206,17 @@ fn detached_semantic_parity_matches_native_integrity() {
 }
 
 #[test]
-#[ignore = "requires SIGNTOOL_RS_CATALOG_TARGET and SIGNTOOL_RS_CATALOG_FILE"]
+#[ignore = "requires PSIGN_CATALOG_TARGET and PSIGN_CATALOG_FILE"]
 fn catalog_semantic_path_executes_in_rust() {
-    let target = match env_path("SIGNTOOL_RS_CATALOG_TARGET") {
+    let target = match env_path("PSIGN_CATALOG_TARGET") {
         Some(v) => v,
         None => return,
     };
-    let catalog = match env_path("SIGNTOOL_RS_CATALOG_FILE") {
+    let catalog = match env_path("PSIGN_CATALOG_FILE") {
         Some(v) => v,
         None => return,
     };
-    let rust = Command::cargo_bin("psign-tool-windows")
+    let rust = Command::cargo_bin("psign-tool")
         .expect("binary available")
         .arg("verify")
         .arg(&target)
@@ -230,7 +230,7 @@ fn catalog_semantic_path_executes_in_rust() {
         String::from_utf8_lossy(&rust.stderr)
     );
 
-    let rust_os = Command::cargo_bin("psign-tool-windows")
+    let rust_os = Command::cargo_bin("psign-tool")
         .expect("binary available")
         .args(["verify", "--os-version-check", "386:10.0.26100.0"])
         .arg(&target)
@@ -246,14 +246,14 @@ fn catalog_semantic_path_executes_in_rust() {
 }
 
 #[test]
-#[ignore = "requires SIGNTOOL_RS_RDP_TEST_CERT_SHA256; optional SIGNTOOL_RS_RDP_UNSIGNED_FIXTURE"]
+#[ignore = "requires PSIGN_RDP_TEST_CERT_SHA256; optional PSIGN_RDP_UNSIGNED_FIXTURE"]
 fn rdp_sign_writes_native_signature_records() {
-    let thumbprint = match env_path("SIGNTOOL_RS_RDP_TEST_CERT_SHA256") {
+    let thumbprint = match env_path("PSIGN_RDP_TEST_CERT_SHA256") {
         Some(v) => v,
         None => return,
     };
     let out = std::env::temp_dir().join("psign_rdp_signed_fixture.rdp");
-    if let Some(fixture) = env_path("SIGNTOOL_RS_RDP_UNSIGNED_FIXTURE") {
+    if let Some(fixture) = env_path("PSIGN_RDP_UNSIGNED_FIXTURE") {
         std::fs::copy(fixture, &out).expect("copy rdp fixture");
     } else {
         std::fs::write(
@@ -263,14 +263,14 @@ fn rdp_sign_writes_native_signature_records() {
         .expect("write rdp fixture");
     }
 
-    let rust = Command::cargo_bin("psign-tool-windows")
+    let rust = Command::cargo_bin("psign-tool")
         .expect("binary available")
         .arg("rdp")
         .arg("--sha256")
         .arg(&thumbprint)
         .arg(&out)
         .output()
-        .expect("run psign-tool-windows rdp");
+        .expect("run psign-tool rdp");
     assert!(
         rust.status.success(),
         "{}{}",
@@ -285,13 +285,13 @@ fn rdp_sign_writes_native_signature_records() {
 }
 
 #[test]
-#[ignore = "requires SIGNTOOL_RS_MULTISIG_FIXTURE"]
+#[ignore = "requires PSIGN_MULTISIG_FIXTURE"]
 fn multisig_verify_path_executes_in_rust() {
-    let fixture = match env_path("SIGNTOOL_RS_MULTISIG_FIXTURE") {
+    let fixture = match env_path("PSIGN_MULTISIG_FIXTURE") {
         Some(v) => v,
         None => return,
     };
-    let rust = Command::cargo_bin("psign-tool-windows")
+    let rust = Command::cargo_bin("psign-tool")
         .expect("binary available")
         .arg("verify")
         .arg(fixture)
@@ -306,13 +306,13 @@ fn multisig_verify_path_executes_in_rust() {
 }
 
 #[test]
-#[ignore = "requires SIGNTOOL_RS_REVOCATION_FIXTURE"]
+#[ignore = "requires PSIGN_REVOCATION_FIXTURE"]
 fn revocation_policy_path_executes() {
-    let fixture = match env_path("SIGNTOOL_RS_REVOCATION_FIXTURE") {
+    let fixture = match env_path("PSIGN_REVOCATION_FIXTURE") {
         Some(v) => v,
         None => return,
     };
-    let rust = Command::cargo_bin("psign-tool-windows")
+    let rust = Command::cargo_bin("psign-tool")
         .expect("binary available")
         .arg("verify")
         .arg(fixture)
@@ -325,25 +325,25 @@ fn revocation_policy_path_executes() {
 }
 
 #[test]
-#[ignore = "requires SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE,SIGNTOOL_RS_MSIX_TEST_PFX,SIGNTOOL_RS_MSIX_TIMESTAMP_URL"]
+#[ignore = "requires PSIGN_MSIX_UNSIGNED_FIXTURE,PSIGN_MSIX_TEST_PFX,PSIGN_MSIX_TIMESTAMP_URL"]
 fn msix_sign_with_rfc3161_timestamp_executes() {
-    let unsigned_msix = match env_path("SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE") {
+    let unsigned_msix = match env_path("PSIGN_MSIX_UNSIGNED_FIXTURE") {
         Some(v) => v,
         None => return,
     };
-    let pfx = match env_path("SIGNTOOL_RS_MSIX_TEST_PFX") {
+    let pfx = match env_path("PSIGN_MSIX_TEST_PFX") {
         Some(v) => v,
         None => return,
     };
-    let tsa = match env_path("SIGNTOOL_RS_MSIX_TIMESTAMP_URL") {
+    let tsa = match env_path("PSIGN_MSIX_TIMESTAMP_URL") {
         Some(v) => v,
         None => return,
     };
-    let pfx_password = env_path("SIGNTOOL_RS_MSIX_TEST_PFX_PASSWORD");
+    let pfx_password = env_path("PSIGN_MSIX_TEST_PFX_PASSWORD");
     let out = std::env::temp_dir().join("psign_msix_semantic.msix");
     let _ = std::fs::copy(&unsigned_msix, &out).expect("copy unsigned msix");
 
-    let mut rust = Command::cargo_bin("psign-tool-windows").expect("binary available");
+    let mut rust = Command::cargo_bin("psign-tool").expect("binary available");
     rust.arg("sign")
         .arg("--pfx")
         .arg(&pfx)
@@ -357,7 +357,7 @@ fn msix_sign_with_rfc3161_timestamp_executes() {
         rust.arg("--password").arg(pw);
     }
     rust.arg(&out);
-    let rust_out = rust.output().expect("run psign-tool-windows msix sign");
+    let rust_out = rust.output().expect("run psign-tool msix sign");
     assert!(
         rust_out.status.success(),
         "{}",
@@ -366,19 +366,19 @@ fn msix_sign_with_rfc3161_timestamp_executes() {
 }
 
 #[test]
-#[ignore = "requires SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE and SIGNTOOL_RS_MSIX_TEST_PFX"]
+#[ignore = "requires PSIGN_MSIX_UNSIGNED_FIXTURE and PSIGN_MSIX_TEST_PFX"]
 fn msix_sign_requires_timestamp_url() {
-    let unsigned_msix = match env_path("SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE") {
+    let unsigned_msix = match env_path("PSIGN_MSIX_UNSIGNED_FIXTURE") {
         Some(v) => v,
         None => return,
     };
-    let pfx = match env_path("SIGNTOOL_RS_MSIX_TEST_PFX") {
+    let pfx = match env_path("PSIGN_MSIX_TEST_PFX") {
         Some(v) => v,
         None => return,
     };
     let out = std::env::temp_dir().join("psign_msix_notimestamp.msix");
     let _ = std::fs::copy(&unsigned_msix, &out).expect("copy unsigned msix");
-    let rust = Command::cargo_bin("psign-tool-windows")
+    let rust = Command::cargo_bin("psign-tool")
         .expect("binary available")
         .arg("sign")
         .arg("--pfx")
@@ -387,38 +387,38 @@ fn msix_sign_requires_timestamp_url() {
         .arg("sha256")
         .arg(&out)
         .output()
-        .expect("run psign-tool-windows msix sign without timestamp");
+        .expect("run psign-tool msix sign without timestamp");
     assert!(!rust.status.success());
 }
 
 #[test]
-#[ignore = "requires SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE,SIGNTOOL_RS_MSIX_TEST_PFX,SIGNTOOL_RS_MSIX_TIMESTAMP_URL,SIGNTOOL_RS_MSIX_DLIB,SIGNTOOL_RS_MSIX_DMDF"]
+#[ignore = "requires PSIGN_MSIX_UNSIGNED_FIXTURE,PSIGN_MSIX_TEST_PFX,PSIGN_MSIX_TIMESTAMP_URL,PSIGN_MSIX_DLIB,PSIGN_MSIX_DMDF"]
 fn msix_dlib_dmdf_path_executes() {
-    let unsigned_msix = match env_path("SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE") {
+    let unsigned_msix = match env_path("PSIGN_MSIX_UNSIGNED_FIXTURE") {
         Some(v) => v,
         None => return,
     };
-    let pfx = match env_path("SIGNTOOL_RS_MSIX_TEST_PFX") {
+    let pfx = match env_path("PSIGN_MSIX_TEST_PFX") {
         Some(v) => v,
         None => return,
     };
-    let tsa = match env_path("SIGNTOOL_RS_MSIX_TIMESTAMP_URL") {
+    let tsa = match env_path("PSIGN_MSIX_TIMESTAMP_URL") {
         Some(v) => v,
         None => return,
     };
-    let dlib = match env_path("SIGNTOOL_RS_MSIX_DLIB") {
+    let dlib = match env_path("PSIGN_MSIX_DLIB") {
         Some(v) => v,
         None => return,
     };
-    let dmdf = match env_path("SIGNTOOL_RS_MSIX_DMDF") {
+    let dmdf = match env_path("PSIGN_MSIX_DMDF") {
         Some(v) => v,
         None => return,
     };
-    let pfx_password = env_path("SIGNTOOL_RS_MSIX_TEST_PFX_PASSWORD");
+    let pfx_password = env_path("PSIGN_MSIX_TEST_PFX_PASSWORD");
     let out = std::env::temp_dir().join("psign_msix_decoupled.msix");
     let _ = std::fs::copy(&unsigned_msix, &out).expect("copy unsigned msix");
 
-    let mut rust = Command::cargo_bin("psign-tool-windows").expect("binary available");
+    let mut rust = Command::cargo_bin("psign-tool").expect("binary available");
     rust.arg("sign")
         .arg("--pfx")
         .arg(&pfx)
@@ -437,9 +437,7 @@ fn msix_dlib_dmdf_path_executes() {
         rust.arg("--password").arg(pw);
     }
     rust.arg(&out);
-    let rust_out = rust
-        .output()
-        .expect("run psign-tool-windows msix dlib/dmdf sign");
+    let rust_out = rust.output().expect("run psign-tool msix dlib/dmdf sign");
     assert!(
         rust_out.status.success(),
         "{}",
@@ -448,34 +446,34 @@ fn msix_dlib_dmdf_path_executes() {
 }
 
 #[test]
-#[ignore = "requires SIGNTOOL_RS_ARTIFACT_SIGNING_UNSIGNED_PE,SIGNTOOL_RS_ARTIFACT_SIGNING_METADATA,SIGNTOOL_RS_ARTIFACT_SIGNING_TIMESTAMP_URL,SIGNTOOL_RS_ARTIFACT_SIGNING_TEST_PFX and SIGNTOOL_RS_ARTIFACT_SIGNING_DLIB or SIGNTOOL_RS_ARTIFACT_SIGNING_DLIB_ROOT"]
+#[ignore = "requires PSIGN_ARTIFACT_SIGNING_UNSIGNED_PE,PSIGN_ARTIFACT_SIGNING_METADATA,PSIGN_ARTIFACT_SIGNING_TIMESTAMP_URL,PSIGN_ARTIFACT_SIGNING_TEST_PFX and PSIGN_ARTIFACT_SIGNING_DLIB or PSIGN_ARTIFACT_SIGNING_DLIB_ROOT"]
 fn artifact_signing_decoupled_pe_executes() {
-    let unsigned_pe = match env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_UNSIGNED_PE") {
+    let unsigned_pe = match env_path("PSIGN_ARTIFACT_SIGNING_UNSIGNED_PE") {
         Some(v) => v,
         None => return,
     };
-    let metadata = match env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_METADATA") {
+    let metadata = match env_path("PSIGN_ARTIFACT_SIGNING_METADATA") {
         Some(v) => v,
         None => return,
     };
-    let tsa = match env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_TIMESTAMP_URL") {
+    let tsa = match env_path("PSIGN_ARTIFACT_SIGNING_TIMESTAMP_URL") {
         Some(v) => v,
         None => return,
     };
-    let pfx = match env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_TEST_PFX") {
+    let pfx = match env_path("PSIGN_ARTIFACT_SIGNING_TEST_PFX") {
         Some(v) => v,
         None => return,
     };
-    let dlib = env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_DLIB");
-    let dlib_root = env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_DLIB_ROOT");
+    let dlib = env_path("PSIGN_ARTIFACT_SIGNING_DLIB");
+    let dlib_root = env_path("PSIGN_ARTIFACT_SIGNING_DLIB_ROOT");
     if dlib.is_none() && dlib_root.is_none() {
         return;
     }
-    let pfx_password = env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_TEST_PFX_PASSWORD");
+    let pfx_password = env_path("PSIGN_ARTIFACT_SIGNING_TEST_PFX_PASSWORD");
     let out = std::env::temp_dir().join("psign_artifact_signing_decoupled.exe");
     let _ = std::fs::copy(&unsigned_pe, &out).expect("copy unsigned pe");
 
-    let mut rust = Command::cargo_bin("psign-tool-windows").expect("binary available");
+    let mut rust = Command::cargo_bin("psign-tool").expect("binary available");
     rust.arg("sign")
         .arg("--pfx")
         .arg(&pfx)
@@ -499,7 +497,7 @@ fn artifact_signing_decoupled_pe_executes() {
     rust.arg(&out);
     let rust_out = rust
         .output()
-        .expect("run psign-tool-windows artifact signing decoupled sign");
+        .expect("run psign-tool artifact signing decoupled sign");
     assert!(
         rust_out.status.success(),
         "{}",
@@ -508,27 +506,27 @@ fn artifact_signing_decoupled_pe_executes() {
 }
 
 #[test]
-#[ignore = "requires SIGNTOOL_RS_UNSIGNED_FIXTURE,SIGNTOOL_RS_TEST_PFX,SIGNTOOL_RS_TIMESTAMP_URL"]
+#[ignore = "requires PSIGN_UNSIGNED_FIXTURE,PSIGN_TEST_PFX,PSIGN_TIMESTAMP_URL"]
 fn append_signature_pe_nested_pkcs7_visible_to_inspector() {
-    let unsigned = match env_path("SIGNTOOL_RS_UNSIGNED_FIXTURE") {
+    let unsigned = match env_path("PSIGN_UNSIGNED_FIXTURE") {
         Some(v) => v,
         None => return,
     };
-    let pfx = match env_path("SIGNTOOL_RS_TEST_PFX") {
+    let pfx = match env_path("PSIGN_TEST_PFX") {
         Some(v) => v,
         None => return,
     };
-    let tsa = match env_path("SIGNTOOL_RS_TIMESTAMP_URL") {
+    let tsa = match env_path("PSIGN_TIMESTAMP_URL") {
         Some(v) => v,
         None => return,
     };
-    let pfx_password = env_path("SIGNTOOL_RS_TEST_PFX_PASSWORD");
+    let pfx_password = env_path("PSIGN_TEST_PFX_PASSWORD");
     let first = std::env::temp_dir().join("psign_append_inspect_a.exe");
     let second = std::env::temp_dir().join("psign_append_inspect_b.exe");
     let _ = std::fs::copy(&unsigned, &first).expect("copy unsigned first");
     let _ = std::fs::copy(&unsigned, &second).expect("copy unsigned second");
 
-    let mut one = Command::cargo_bin("psign-tool-windows").expect("binary available");
+    let mut one = Command::cargo_bin("psign-tool").expect("binary available");
     one.arg("sign")
         .arg("--pfx")
         .arg(&pfx)
@@ -551,7 +549,7 @@ fn append_signature_pe_nested_pkcs7_visible_to_inspector() {
     );
     let _ = std::fs::copy(&first, &second).expect("copy signed to second before append");
 
-    let mut two = Command::cargo_bin("psign-tool-windows").expect("binary available");
+    let mut two = Command::cargo_bin("psign-tool").expect("binary available");
     two.arg("sign")
         .arg("--pfx")
         .arg(&pfx)
@@ -586,16 +584,16 @@ fn append_signature_pe_nested_pkcs7_visible_to_inspector() {
 /// PowerShell `.ps1`: same Windows SIP stack as native (`SignerSignEx3`). Bytes may differ (PKCS#7
 /// encoding); native `verify /pa` must accept the Rust-signed file.
 #[test]
-#[ignore = "requires SIGNTOOL_RS_TEST_PFX; native signtool.exe; optional SIGNTOOL_RS_TEST_PFX_PASSWORD and SIGNTOOL_RS_PS1_UNSIGNED_FIXTURE"]
+#[ignore = "requires PSIGN_TEST_PFX; native signtool.exe; optional PSIGN_TEST_PFX_PASSWORD and PSIGN_PS1_UNSIGNED_FIXTURE"]
 fn ps1_sign_aligns_with_native_sip_stack() {
-    let pfx = match env_path("SIGNTOOL_RS_TEST_PFX") {
+    let pfx = match env_path("PSIGN_TEST_PFX") {
         Some(v) => v,
         None => return,
     };
     let Some(native_exe) = native_signtool_optional_path() else {
         return;
     };
-    let ps1_src = env_path("SIGNTOOL_RS_PS1_UNSIGNED_FIXTURE")
+    let ps1_src = env_path("PSIGN_PS1_UNSIGNED_FIXTURE")
         .map(PathBuf::from)
         .filter(|p| p.exists())
         .unwrap_or_else(|| {
@@ -609,7 +607,7 @@ fn ps1_sign_aligns_with_native_sip_stack() {
     let _ = std::fs::copy(&ps1_src, &tmp_nat).expect("copy native ps1 temp");
     let _ = std::fs::copy(&ps1_src, &tmp_rust).expect("copy rust ps1 temp");
 
-    let pw = env_path("SIGNTOOL_RS_TEST_PFX_PASSWORD");
+    let pw = env_path("PSIGN_TEST_PFX_PASSWORD");
 
     let mut native_cmd = Command::new(&native_exe);
     native_cmd
@@ -629,7 +627,7 @@ fn ps1_sign_aligns_with_native_sip_stack() {
         String::from_utf8_lossy(&native_out.stderr)
     );
 
-    let mut rust_cmd = Command::cargo_bin("psign-tool-windows").expect("binary available");
+    let mut rust_cmd = Command::cargo_bin("psign-tool").expect("binary available");
     rust_cmd
         .arg("sign")
         .arg("--pfx")
@@ -679,16 +677,16 @@ fn ps1_sign_aligns_with_native_sip_stack() {
 
 /// PowerShell `.psm1`: same Windows SIP as `.ps1`.
 #[test]
-#[ignore = "requires SIGNTOOL_RS_TEST_PFX; native signtool.exe; optional SIGNTOOL_RS_TEST_PFX_PASSWORD and SIGNTOOL_RS_PSM1_UNSIGNED_FIXTURE"]
+#[ignore = "requires PSIGN_TEST_PFX; native signtool.exe; optional PSIGN_TEST_PFX_PASSWORD and PSIGN_PSM1_UNSIGNED_FIXTURE"]
 fn psm1_sign_aligns_with_native_sip_stack() {
-    let pfx = match env_path("SIGNTOOL_RS_TEST_PFX") {
+    let pfx = match env_path("PSIGN_TEST_PFX") {
         Some(v) => v,
         None => return,
     };
     let Some(native_exe) = native_signtool_optional_path() else {
         return;
     };
-    let src = env_path("SIGNTOOL_RS_PSM1_UNSIGNED_FIXTURE")
+    let src = env_path("PSIGN_PSM1_UNSIGNED_FIXTURE")
         .map(PathBuf::from)
         .filter(|p| p.exists())
         .unwrap_or_else(|| {
@@ -702,7 +700,7 @@ fn psm1_sign_aligns_with_native_sip_stack() {
     let _ = std::fs::copy(&src, &tmp_nat).expect("copy native psm1 temp");
     let _ = std::fs::copy(&src, &tmp_rust).expect("copy rust psm1 temp");
 
-    let pw = env_path("SIGNTOOL_RS_TEST_PFX_PASSWORD");
+    let pw = env_path("PSIGN_TEST_PFX_PASSWORD");
 
     let mut native_cmd = Command::new(&native_exe);
     native_cmd
@@ -722,7 +720,7 @@ fn psm1_sign_aligns_with_native_sip_stack() {
         String::from_utf8_lossy(&native_out.stderr)
     );
 
-    let mut rust_cmd = Command::cargo_bin("psign-tool-windows").expect("binary available");
+    let mut rust_cmd = Command::cargo_bin("psign-tool").expect("binary available");
     rust_cmd
         .arg("sign")
         .arg("--pfx")
@@ -772,16 +770,16 @@ fn psm1_sign_aligns_with_native_sip_stack() {
 
 /// PowerShell manifest `.psd1`: same Windows SIP as `.ps1`.
 #[test]
-#[ignore = "requires SIGNTOOL_RS_TEST_PFX; native signtool.exe; optional SIGNTOOL_RS_TEST_PFX_PASSWORD and SIGNTOOL_RS_PSD1_UNSIGNED_FIXTURE"]
+#[ignore = "requires PSIGN_TEST_PFX; native signtool.exe; optional PSIGN_TEST_PFX_PASSWORD and PSIGN_PSD1_UNSIGNED_FIXTURE"]
 fn psd1_sign_aligns_with_native_sip_stack() {
-    let pfx = match env_path("SIGNTOOL_RS_TEST_PFX") {
+    let pfx = match env_path("PSIGN_TEST_PFX") {
         Some(v) => v,
         None => return,
     };
     let Some(native_exe) = native_signtool_optional_path() else {
         return;
     };
-    let src = env_path("SIGNTOOL_RS_PSD1_UNSIGNED_FIXTURE")
+    let src = env_path("PSIGN_PSD1_UNSIGNED_FIXTURE")
         .map(PathBuf::from)
         .filter(|p| p.exists())
         .unwrap_or_else(|| {
@@ -795,7 +793,7 @@ fn psd1_sign_aligns_with_native_sip_stack() {
     let _ = std::fs::copy(&src, &tmp_nat).expect("copy native psd1 temp");
     let _ = std::fs::copy(&src, &tmp_rust).expect("copy rust psd1 temp");
 
-    let pw = env_path("SIGNTOOL_RS_TEST_PFX_PASSWORD");
+    let pw = env_path("PSIGN_TEST_PFX_PASSWORD");
 
     let mut native_cmd = Command::new(&native_exe);
     native_cmd
@@ -815,7 +813,7 @@ fn psd1_sign_aligns_with_native_sip_stack() {
         String::from_utf8_lossy(&native_out.stderr)
     );
 
-    let mut rust_cmd = Command::cargo_bin("psign-tool-windows").expect("binary available");
+    let mut rust_cmd = Command::cargo_bin("psign-tool").expect("binary available");
     rust_cmd
         .arg("sign")
         .arg("--pfx")
@@ -865,16 +863,16 @@ fn psd1_sign_aligns_with_native_sip_stack() {
 
 /// Windows Installer `.msi`: OS SIP (`msisip.dll`); same `SignerSignEx3` / `WinVerifyTrust` stack as native.
 #[test]
-#[ignore = "requires SIGNTOOL_RS_MSI_UNSIGNED_FIXTURE and SIGNTOOL_RS_TEST_PFX; native signtool.exe; optional SIGNTOOL_RS_TEST_PFX_PASSWORD and SIGNTOOL_RS_MSI_TIMESTAMP_URL"]
+#[ignore = "requires PSIGN_MSI_UNSIGNED_FIXTURE and PSIGN_TEST_PFX; native signtool.exe; optional PSIGN_TEST_PFX_PASSWORD and PSIGN_MSI_TIMESTAMP_URL"]
 fn msi_sign_aligns_with_native_sip_stack() {
-    let msi_src = match env_path("SIGNTOOL_RS_MSI_UNSIGNED_FIXTURE") {
+    let msi_src = match env_path("PSIGN_MSI_UNSIGNED_FIXTURE") {
         Some(v) => PathBuf::from(v),
         None => return,
     };
     if !msi_src.exists() {
         return;
     }
-    let pfx = match env_path("SIGNTOOL_RS_TEST_PFX") {
+    let pfx = match env_path("PSIGN_TEST_PFX") {
         Some(v) => v,
         None => return,
     };
@@ -886,8 +884,8 @@ fn msi_sign_aligns_with_native_sip_stack() {
     let _ = std::fs::copy(&msi_src, &tmp_nat).expect("copy native msi temp");
     let _ = std::fs::copy(&msi_src, &tmp_rust).expect("copy rust msi temp");
 
-    let pw = env_path("SIGNTOOL_RS_TEST_PFX_PASSWORD");
-    let ts = env_path("SIGNTOOL_RS_MSI_TIMESTAMP_URL");
+    let pw = env_path("PSIGN_TEST_PFX_PASSWORD");
+    let ts = env_path("PSIGN_MSI_TIMESTAMP_URL");
 
     let mut native_cmd = Command::new(&native_exe);
     native_cmd
@@ -910,7 +908,7 @@ fn msi_sign_aligns_with_native_sip_stack() {
         String::from_utf8_lossy(&native_out.stderr)
     );
 
-    let mut rust_cmd = Command::cargo_bin("psign-tool-windows").expect("binary available");
+    let mut rust_cmd = Command::cargo_bin("psign-tool").expect("binary available");
     rust_cmd
         .arg("sign")
         .arg("--pfx")
@@ -967,16 +965,16 @@ fn msi_sign_aligns_with_native_sip_stack() {
 
 /// Windows metadata `.winmd`: PE-based CLI assembly; OS Authenticode SIP (`SignerSignEx3` / `WinVerifyTrust`).
 #[test]
-#[ignore = "requires SIGNTOOL_RS_WINMD_UNSIGNED_FIXTURE and SIGNTOOL_RS_TEST_PFX; native signtool.exe; optional SIGNTOOL_RS_TEST_PFX_PASSWORD and SIGNTOOL_RS_WINMD_TIMESTAMP_URL"]
+#[ignore = "requires PSIGN_WINMD_UNSIGNED_FIXTURE and PSIGN_TEST_PFX; native signtool.exe; optional PSIGN_TEST_PFX_PASSWORD and PSIGN_WINMD_TIMESTAMP_URL"]
 fn winmd_sign_aligns_with_native_sip_stack() {
-    let winmd_src = match env_path("SIGNTOOL_RS_WINMD_UNSIGNED_FIXTURE") {
+    let winmd_src = match env_path("PSIGN_WINMD_UNSIGNED_FIXTURE") {
         Some(v) => PathBuf::from(v),
         None => return,
     };
     if !winmd_src.exists() {
         return;
     }
-    let pfx = match env_path("SIGNTOOL_RS_TEST_PFX") {
+    let pfx = match env_path("PSIGN_TEST_PFX") {
         Some(v) => v,
         None => return,
     };
@@ -988,8 +986,8 @@ fn winmd_sign_aligns_with_native_sip_stack() {
     let _ = std::fs::copy(&winmd_src, &tmp_nat).expect("copy native winmd temp");
     let _ = std::fs::copy(&winmd_src, &tmp_rust).expect("copy rust winmd temp");
 
-    let pw = env_path("SIGNTOOL_RS_TEST_PFX_PASSWORD");
-    let ts = env_path("SIGNTOOL_RS_WINMD_TIMESTAMP_URL");
+    let pw = env_path("PSIGN_TEST_PFX_PASSWORD");
+    let ts = env_path("PSIGN_WINMD_TIMESTAMP_URL");
 
     let mut native_cmd = Command::new(&native_exe);
     native_cmd
@@ -1012,7 +1010,7 @@ fn winmd_sign_aligns_with_native_sip_stack() {
         String::from_utf8_lossy(&native_out.stderr)
     );
 
-    let mut rust_cmd = Command::cargo_bin("psign-tool-windows").expect("binary available");
+    let mut rust_cmd = Command::cargo_bin("psign-tool").expect("binary available");
     rust_cmd
         .arg("sign")
         .arg("--pfx")
@@ -1069,16 +1067,16 @@ fn winmd_sign_aligns_with_native_sip_stack() {
 
 /// Windows Script Host `.js`: OS SIP when registered (same stack as native `signtool`).
 #[test]
-#[ignore = "requires SIGNTOOL_RS_TEST_PFX; native signtool.exe; optional SIGNTOOL_RS_TEST_PFX_PASSWORD and SIGNTOOL_RS_JS_UNSIGNED_FIXTURE"]
+#[ignore = "requires PSIGN_TEST_PFX; native signtool.exe; optional PSIGN_TEST_PFX_PASSWORD and PSIGN_JS_UNSIGNED_FIXTURE"]
 fn js_sign_aligns_with_native_sip_stack() {
-    let pfx = match env_path("SIGNTOOL_RS_TEST_PFX") {
+    let pfx = match env_path("PSIGN_TEST_PFX") {
         Some(v) => v,
         None => return,
     };
     let Some(native_exe) = native_signtool_optional_path() else {
         return;
     };
-    let js_src = env_path("SIGNTOOL_RS_JS_UNSIGNED_FIXTURE")
+    let js_src = env_path("PSIGN_JS_UNSIGNED_FIXTURE")
         .map(PathBuf::from)
         .filter(|p| p.exists())
         .unwrap_or_else(|| {
@@ -1092,7 +1090,7 @@ fn js_sign_aligns_with_native_sip_stack() {
     let _ = std::fs::copy(&js_src, &tmp_nat).expect("copy native js temp");
     let _ = std::fs::copy(&js_src, &tmp_rust).expect("copy rust js temp");
 
-    let pw = env_path("SIGNTOOL_RS_TEST_PFX_PASSWORD");
+    let pw = env_path("PSIGN_TEST_PFX_PASSWORD");
 
     let mut native_cmd = Command::new(&native_exe);
     native_cmd
@@ -1112,7 +1110,7 @@ fn js_sign_aligns_with_native_sip_stack() {
         String::from_utf8_lossy(&native_out.stderr)
     );
 
-    let mut rust_cmd = Command::cargo_bin("psign-tool-windows").expect("binary available");
+    let mut rust_cmd = Command::cargo_bin("psign-tool").expect("binary available");
     rust_cmd
         .arg("sign")
         .arg("--pfx")
@@ -1161,16 +1159,16 @@ fn js_sign_aligns_with_native_sip_stack() {
 }
 
 #[test]
-#[ignore = "requires SIGNTOOL_RS_TEST_PFX; native signtool.exe; optional SIGNTOOL_RS_TEST_PFX_PASSWORD and SIGNTOOL_RS_VBS_UNSIGNED_FIXTURE"]
+#[ignore = "requires PSIGN_TEST_PFX; native signtool.exe; optional PSIGN_TEST_PFX_PASSWORD and PSIGN_VBS_UNSIGNED_FIXTURE"]
 fn vbs_sign_aligns_with_native_sip_stack() {
-    let pfx = match env_path("SIGNTOOL_RS_TEST_PFX") {
+    let pfx = match env_path("PSIGN_TEST_PFX") {
         Some(v) => v,
         None => return,
     };
     let Some(native_exe) = native_signtool_optional_path() else {
         return;
     };
-    let vbs_src = env_path("SIGNTOOL_RS_VBS_UNSIGNED_FIXTURE")
+    let vbs_src = env_path("PSIGN_VBS_UNSIGNED_FIXTURE")
         .map(PathBuf::from)
         .filter(|p| p.exists())
         .unwrap_or_else(|| {
@@ -1184,7 +1182,7 @@ fn vbs_sign_aligns_with_native_sip_stack() {
     let _ = std::fs::copy(&vbs_src, &tmp_nat).expect("copy native vbs temp");
     let _ = std::fs::copy(&vbs_src, &tmp_rust).expect("copy rust vbs temp");
 
-    let pw = env_path("SIGNTOOL_RS_TEST_PFX_PASSWORD");
+    let pw = env_path("PSIGN_TEST_PFX_PASSWORD");
 
     let mut native_cmd = Command::new(&native_exe);
     native_cmd
@@ -1204,7 +1202,7 @@ fn vbs_sign_aligns_with_native_sip_stack() {
         String::from_utf8_lossy(&native_out.stderr)
     );
 
-    let mut rust_cmd = Command::cargo_bin("psign-tool-windows").expect("binary available");
+    let mut rust_cmd = Command::cargo_bin("psign-tool").expect("binary available");
     rust_cmd
         .arg("sign")
         .arg("--pfx")
@@ -1253,16 +1251,16 @@ fn vbs_sign_aligns_with_native_sip_stack() {
 }
 
 #[test]
-#[ignore = "requires SIGNTOOL_RS_TEST_PFX; native signtool.exe; optional SIGNTOOL_RS_TEST_PFX_PASSWORD and SIGNTOOL_RS_WSF_UNSIGNED_FIXTURE"]
+#[ignore = "requires PSIGN_TEST_PFX; native signtool.exe; optional PSIGN_TEST_PFX_PASSWORD and PSIGN_WSF_UNSIGNED_FIXTURE"]
 fn wsf_sign_aligns_with_native_sip_stack() {
-    let pfx = match env_path("SIGNTOOL_RS_TEST_PFX") {
+    let pfx = match env_path("PSIGN_TEST_PFX") {
         Some(v) => v,
         None => return,
     };
     let Some(native_exe) = native_signtool_optional_path() else {
         return;
     };
-    let wsf_src = env_path("SIGNTOOL_RS_WSF_UNSIGNED_FIXTURE")
+    let wsf_src = env_path("PSIGN_WSF_UNSIGNED_FIXTURE")
         .map(PathBuf::from)
         .filter(|p| p.exists())
         .unwrap_or_else(|| {
@@ -1276,7 +1274,7 @@ fn wsf_sign_aligns_with_native_sip_stack() {
     let _ = std::fs::copy(&wsf_src, &tmp_nat).expect("copy native wsf temp");
     let _ = std::fs::copy(&wsf_src, &tmp_rust).expect("copy rust wsf temp");
 
-    let pw = env_path("SIGNTOOL_RS_TEST_PFX_PASSWORD");
+    let pw = env_path("PSIGN_TEST_PFX_PASSWORD");
 
     let mut native_cmd = Command::new(&native_exe);
     native_cmd
@@ -1296,7 +1294,7 @@ fn wsf_sign_aligns_with_native_sip_stack() {
         String::from_utf8_lossy(&native_out.stderr)
     );
 
-    let mut rust_cmd = Command::cargo_bin("psign-tool-windows").expect("binary available");
+    let mut rust_cmd = Command::cargo_bin("psign-tool").expect("binary available");
     rust_cmd
         .arg("sign")
         .arg("--pfx")
@@ -1346,30 +1344,30 @@ fn wsf_sign_aligns_with_native_sip_stack() {
 
 #[cfg(feature = "artifact-signing-rest")]
 #[test]
-#[ignore = "requires SIGNTOOL_RS_ARTIFACT_SIGNING_REST_REGION, ACCOUNT_NAME, PROFILE_NAME, DIGEST_FILE and auth (see docs/migration-artifact-signing.md#rest-hash-signing-gated-smoke-test)"]
+#[ignore = "requires PSIGN_ARTIFACT_SIGNING_REST_REGION, ACCOUNT_NAME, PROFILE_NAME, DIGEST_FILE and auth (see docs/migration-artifact-signing.md#rest-hash-signing-gated-smoke-test)"]
 fn artifact_signing_rest_submit_smoke() {
-    let region = match env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_REST_REGION") {
+    let region = match env_path("PSIGN_ARTIFACT_SIGNING_REST_REGION") {
         Some(v) => v,
         None => return,
     };
-    let account_name = match env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_REST_ACCOUNT_NAME") {
+    let account_name = match env_path("PSIGN_ARTIFACT_SIGNING_REST_ACCOUNT_NAME") {
         Some(v) => v,
         None => return,
     };
-    let profile_name = match env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_REST_PROFILE_NAME") {
+    let profile_name = match env_path("PSIGN_ARTIFACT_SIGNING_REST_PROFILE_NAME") {
         Some(v) => v,
         None => return,
     };
-    let digest_file = match env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_REST_DIGEST_FILE") {
+    let digest_file = match env_path("PSIGN_ARTIFACT_SIGNING_REST_DIGEST_FILE") {
         Some(v) => v,
         None => return,
     };
 
-    let access_token = env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_REST_ACCESS_TOKEN");
-    let mi = env_flag_true("SIGNTOOL_RS_ARTIFACT_SIGNING_REST_MANAGED_IDENTITY");
-    let tenant = env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_REST_TENANT_ID");
-    let client_id = env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_REST_CLIENT_ID");
-    let client_secret = env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_REST_CLIENT_SECRET");
+    let access_token = env_path("PSIGN_ARTIFACT_SIGNING_REST_ACCESS_TOKEN");
+    let mi = env_flag_true("PSIGN_ARTIFACT_SIGNING_REST_MANAGED_IDENTITY");
+    let tenant = env_path("PSIGN_ARTIFACT_SIGNING_REST_TENANT_ID");
+    let client_id = env_path("PSIGN_ARTIFACT_SIGNING_REST_CLIENT_ID");
+    let client_secret = env_path("PSIGN_ARTIFACT_SIGNING_REST_CLIENT_SECRET");
 
     let auth_ready = access_token.is_some()
         || mi
@@ -1378,7 +1376,7 @@ fn artifact_signing_rest_submit_smoke() {
         return;
     }
 
-    let mut cmd = Command::cargo_bin("psign-tool-windows").expect("binary available");
+    let mut cmd = Command::cargo_bin("psign-tool").expect("binary available");
     cmd.arg("artifact-signing-submit")
         .arg("--region")
         .arg(&region)
@@ -1389,7 +1387,7 @@ fn artifact_signing_rest_submit_smoke() {
         .arg("--digest-file")
         .arg(&digest_file);
 
-    if let Some(alg) = env_path("SIGNTOOL_RS_ARTIFACT_SIGNING_REST_SIGNATURE_ALGORITHM") {
+    if let Some(alg) = env_path("PSIGN_ARTIFACT_SIGNING_REST_SIGNATURE_ALGORITHM") {
         cmd.arg("--signature-algorithm").arg(&alg);
     }
 

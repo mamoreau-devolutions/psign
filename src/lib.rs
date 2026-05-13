@@ -44,46 +44,247 @@ impl CommandOutput {
 pub const AZURE_SIGN_EXIT_PARTIAL_SUCCESS: i32 = 0x2000_0001_u32 as i32;
 pub const AZURE_SIGN_EXIT_ALL_FAILED: i32 = 0xA000_0002_u32 as i32;
 
+pub const ENV_TOOL_MODE: &str = "PSIGN_TOOL_MODE";
+pub const ENV_RUST_SIP: &str = "PSIGN_RUST_SIP";
+pub const ENV_EXIT_CODES: &str = "PSIGN_EXIT_CODES";
+
+pub const LEGACY_ENV_RUST_SIP: &str = "SIGNTOOL_RS_RUST_SIP";
+pub const LEGACY_ENV_EXIT_CODES: &str = "SIGNTOOL_RS_EXIT_CODES";
+
+pub fn env_var_with_legacy(name: &str, legacy_name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .or_else(|| std::env::var(legacy_name).ok())
+}
+
+fn parse_tool_mode(value: &str) -> anyhow::Result<crate::cli::ToolMode> {
+    use crate::cli::ToolMode;
+    let t = value.trim();
+    if t.eq_ignore_ascii_case("auto") {
+        Ok(ToolMode::Auto)
+    } else if t.eq_ignore_ascii_case("windows") || t.eq_ignore_ascii_case("win32") {
+        Ok(ToolMode::Windows)
+    } else if t.eq_ignore_ascii_case("portable") {
+        Ok(ToolMode::Portable)
+    } else {
+        Err(anyhow::anyhow!(
+            "{ENV_TOOL_MODE} must be one of: auto, windows, portable"
+        ))
+    }
+}
+
+fn resolved_tool_mode(global: &crate::cli::GlobalOpts) -> anyhow::Result<crate::cli::ToolMode> {
+    if let Some(mode) = global.mode {
+        return Ok(mode);
+    }
+    match std::env::var(ENV_TOOL_MODE) {
+        Ok(value) => parse_tool_mode(&value),
+        Err(_) => Ok(crate::cli::ToolMode::Auto),
+    }
+}
+
+fn effective_tool_mode(mode: crate::cli::ToolMode) -> crate::cli::ToolMode {
+    match mode {
+        crate::cli::ToolMode::Auto => {
+            if cfg!(windows) {
+                crate::cli::ToolMode::Windows
+            } else {
+                crate::cli::ToolMode::Portable
+            }
+        }
+        explicit => explicit,
+    }
+}
+
+fn print_output(global: &crate::cli::GlobalOpts, out: &CommandOutput) {
+    if global.debug {
+        eprintln!(
+            "[debug] exit_code={} stdout_len={}",
+            out.exit_code,
+            out.stdout.len()
+        );
+    }
+    if !global.quiet || out.exit_code != 0 {
+        print!("{}", out.stdout);
+    }
+}
+
+fn run_portable_args(args: &[std::ffi::OsString]) -> anyhow::Result<CommandOutput> {
+    let mut argv = Vec::with_capacity(args.len() + 1);
+    argv.push(std::ffi::OsString::from("psign-tool"));
+    if args.is_empty() {
+        argv.push(std::ffi::OsString::from("--help"));
+    } else {
+        argv.extend(args.iter().cloned());
+    }
+    psign_digest_cli::run_from(argv)?;
+    Ok(CommandOutput::ok(String::new()))
+}
+
+fn portable_command_for_path(path: &std::path::Path) -> anyhow::Result<&'static str> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    match ext.as_str() {
+        "exe" | "dll" | "sys" | "ocx" | "efi" | "winmd" => Ok("verify-pe"),
+        "cab" => Ok("verify-cab"),
+        "msi" | "msp" => Ok("verify-msi"),
+        "wim" | "esd" => Ok("verify-esd"),
+        "msix" | "appx" | "msixbundle" | "appxbundle" => Ok("verify-msix"),
+        "cat" => Ok("verify-catalog"),
+        "ps1" | "psd1" | "psm1" | "ps1xml" | "psc1" | "cdxml" | "mof" | "js" | "vbs" | "wsf" => {
+            Ok("verify-script")
+        }
+        _ => Err(anyhow::anyhow!(
+            "portable verify cannot infer a supported SIP format for {}",
+            path.display()
+        )),
+    }
+}
+
+fn portable_verify_unsupported(args: &crate::cli::VerifyArgs) -> bool {
+    args.policy != crate::cli::VerifyPolicy::Default
+        || args.policy_guid.is_some()
+        || args.revocation_check
+        || args.detached_pkcs7.is_some()
+        || args.catalog.is_some()
+        || args.catalog_search.is_some()
+        || args.catalog_database_guid.is_some()
+        || args.os_version_check.is_some()
+        || args.kernel_policy
+        || args.all_signatures
+        || args.allow_test_root
+        || args.warn_if_not_timestamped
+        || args.signature_index.is_some()
+        || args.multiple_semantics
+        || args.verify_pkcs7_file
+        || args.print_description
+        || args.verify_page_hashes
+        || args.chain_root_subject.is_some()
+        || !args.signer_thumbprint_sha1.is_empty()
+        || !args.intermediate_ca_sha1.is_empty()
+        || !args.warn_if_missing_eku.is_empty()
+        || args.detached_pkcs7_content.is_some()
+        || args.warn_pca_2010
+        || args.no_warn_pca_2010
+        || args.verify_sealing_signatures
+        || args.rust_sip_pe_digest_check
+        || args.rust_sip_script_digest_check
+        || args.rust_sip_msi_digest_check
+        || args.rust_sip_esd_digest_check
+        || args.rust_sip_msix_digest_check
+        || args.rust_sip_cab_digest_check
+        || args.rust_sip_catalog_digest_check
+        || args.rust_sip_all_digest_checks
+        || args.biometric_policy
+        || args.enclave_policy
+}
+
+fn execute_portable_verify(args: &crate::cli::VerifyArgs) -> anyhow::Result<CommandOutput> {
+    if portable_verify_unsupported(args) {
+        return Err(anyhow::anyhow!(
+            "--mode portable verify currently supports bare file digest-consistency verification; use `psign-tool portable ...` for portable trust/diagnostic commands"
+        ));
+    }
+    for path in &args.files {
+        let command = portable_command_for_path(path)?;
+        let argv = [
+            std::ffi::OsString::from(command),
+            path.as_os_str().to_os_string(),
+        ];
+        run_portable_args(&argv)?;
+    }
+    Ok(CommandOutput::ok(String::new()))
+}
+
+fn execute_portable_inspect(
+    args: &crate::cli::InspectSignatureArgs,
+) -> anyhow::Result<CommandOutput> {
+    let input = match args.input {
+        crate::cli::InspectSignatureInput::Pe => "pe",
+        crate::cli::InspectSignatureInput::Pkcs7 => "pkcs7",
+    };
+    let argv = [
+        std::ffi::OsString::from("inspect-authenticode"),
+        args.path.as_os_str().to_os_string(),
+        std::ffi::OsString::from("--input"),
+        std::ffi::OsString::from(input),
+    ];
+    run_portable_args(&argv)
+}
+
 #[cfg(windows)]
-pub fn run_windows_cli() -> ! {
-    use crate::cli::{Cli, Command};
+fn execute_windows(cli: &crate::cli::Cli) -> anyhow::Result<CommandOutput> {
+    use crate::cli::Command;
+    match &cli.command {
+        Command::Portable(args) => run_portable_args(&args.args),
+        Command::Verify(args) => crate::win::verify::verify_file(args, &cli.global),
+        Command::Sign(args) => crate::win::sign::sign_file(args, &cli.global),
+        Command::Timestamp(args) => crate::win::timestamp::timestamp_file(args, &cli.global),
+        Command::Catdb(args) => crate::win::catdb::catdb_command(args, &cli.global),
+        Command::Remove(args) => crate::win::remove_signature::remove_command(args, &cli.global),
+        Command::InspectSignature(args) => {
+            crate::win::inspect_signature::inspect_signature_command(args, &cli.global)
+        }
+        Command::Rdp(args) => crate::win::rdp::rdp_command(args, &cli.global),
+        #[cfg(feature = "artifact-signing-rest")]
+        Command::ArtifactSigningSubmit(args) => {
+            crate::win::artifact_signing_rest::artifact_signing_submit_command(args, &cli.global)
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn execute_windows(_cli: &crate::cli::Cli) -> anyhow::Result<CommandOutput> {
+    Err(anyhow::anyhow!(
+        "--mode windows requires Microsoft Windows (WinVerifyTrust, SignerSignEx3, registered CryptSIP)"
+    ))
+}
+
+fn execute_portable(cli: &crate::cli::Cli) -> anyhow::Result<CommandOutput> {
+    use crate::cli::Command;
+    match &cli.command {
+        Command::Portable(args) => run_portable_args(&args.args),
+        Command::Verify(args) => execute_portable_verify(args),
+        Command::InspectSignature(args) => execute_portable_inspect(args),
+        Command::Sign(_) => Err(anyhow::anyhow!(
+            "--mode portable sign is not implemented; portable signing helpers are available under `psign-tool portable ...`"
+        )),
+        Command::Timestamp(_) => Err(anyhow::anyhow!(
+            "--mode portable timestamp is not implemented; portable timestamp helpers are available under `psign-tool portable ...`"
+        )),
+        Command::Catdb(_) => Err(anyhow::anyhow!(
+            "--mode portable catdb is unsupported because catalog database operations require Win32"
+        )),
+        Command::Remove(_) => Err(anyhow::anyhow!(
+            "--mode portable remove is unsupported; embedded signature removal currently requires the Windows implementation"
+        )),
+        Command::Rdp(_) => Err(anyhow::anyhow!(
+            "--mode portable rdp is available as `psign-tool portable rdp ...`"
+        )),
+        #[cfg(feature = "artifact-signing-rest")]
+        Command::ArtifactSigningSubmit(_) => Err(anyhow::anyhow!(
+            "--mode portable artifact-signing-submit is available as `psign-tool portable artifact-signing-submit ...`"
+        )),
+    }
+}
+
+fn execute(cli: &crate::cli::Cli) -> anyhow::Result<CommandOutput> {
+    if let crate::cli::Command::Portable(args) = &cli.command {
+        return run_portable_args(&args.args);
+    }
+    match effective_tool_mode(resolved_tool_mode(&cli.global)?) {
+        crate::cli::ToolMode::Windows => execute_windows(cli),
+        crate::cli::ToolMode::Portable => execute_portable(cli),
+        crate::cli::ToolMode::Auto => unreachable!("auto mode is resolved before dispatch"),
+    }
+}
+
+pub fn run_tool_cli() -> ! {
+    use crate::cli::Cli;
     use clap::Parser;
-
-    fn print_output(global: &crate::cli::GlobalOpts, out: &CommandOutput) {
-        if global.debug {
-            eprintln!(
-                "[debug] exit_code={} stdout_len={}",
-                out.exit_code,
-                out.stdout.len()
-            );
-        }
-        if !global.quiet || out.exit_code != 0 {
-            print!("{}", out.stdout);
-        }
-    }
-
-    fn execute(cli: &Cli) -> anyhow::Result<CommandOutput> {
-        match &cli.command {
-            Command::Verify(args) => crate::win::verify::verify_file(args, &cli.global),
-            Command::Sign(args) => crate::win::sign::sign_file(args, &cli.global),
-            Command::Timestamp(args) => crate::win::timestamp::timestamp_file(args, &cli.global),
-            Command::Catdb(args) => crate::win::catdb::catdb_command(args, &cli.global),
-            Command::Remove(args) => {
-                crate::win::remove_signature::remove_command(args, &cli.global)
-            }
-            Command::InspectSignature(args) => {
-                crate::win::inspect_signature::inspect_signature_command(args, &cli.global)
-            }
-            Command::Rdp(args) => crate::win::rdp::rdp_command(args, &cli.global),
-            #[cfg(feature = "artifact-signing-rest")]
-            Command::ArtifactSigningSubmit(args) => {
-                crate::win::artifact_signing_rest::artifact_signing_submit_command(
-                    args,
-                    &cli.global,
-                )
-            }
-        }
-    }
 
     let argv: Vec<std::ffi::OsString> = std::env::args_os().collect();
     let Some((executable, tail)) = argv.split_first().map(|(e, t)| (e.clone(), t.to_vec())) else {
@@ -122,4 +323,9 @@ pub fn run_windows_cli() -> ! {
     }
 
     std::process::exit(batch_exit);
+}
+
+#[cfg(windows)]
+pub fn run_windows_cli() -> ! {
+    run_tool_cli();
 }

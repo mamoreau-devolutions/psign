@@ -14,8 +14,8 @@ if (-not $WorkspaceRoot) {
     $WorkspaceRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 }
 
-if (-not $env:SIGNTOOL_RS_TEST_PFX -or -not (Test-Path -LiteralPath $env:SIGNTOOL_RS_TEST_PFX)) {
-    throw "Set SIGNTOOL_RS_TEST_PFX (run scripts/ci/bootstrap-devolutions-authenticode.ps1 or set env manually)."
+if (-not $env:PSIGN_TEST_PFX -or -not (Test-Path -LiteralPath $env:PSIGN_TEST_PFX)) {
+    throw "Set PSIGN_TEST_PFX (run scripts/ci/bootstrap-devolutions-authenticode.ps1 or set env manually)."
 }
 
 $kitBinRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
@@ -68,9 +68,9 @@ $payload
     $outDir = Split-Path $outAbs -Parent
     New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
-    $signArgs = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, $cabPath)
-    if ($env:SIGNTOOL_RS_TEST_PFX_PASSWORD) {
-        $signArgs = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, $cabPath)
+    $signArgs = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, $cabPath)
+    if ($env:PSIGN_TEST_PFX_PASSWORD) {
+        $signArgs = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/p", $env:PSIGN_TEST_PFX_PASSWORD, $cabPath)
     }
     & $signtool @signArgs
     if ($LASTEXITCODE -ne 0) { throw "signtool sign failed" }

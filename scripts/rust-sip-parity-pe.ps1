@@ -1,9 +1,9 @@
 # Rust SIP PE parity (experimental): native signtool vs psign with `--rust-sip pe`, then mutual verify.
-# Requires: SIGNTOOL_RS_UNSIGNED_FIXTURE, SIGNTOOL_RS_TEST_PFX (optional SIGNTOOL_RS_TEST_PFX_PASSWORD).
+# Requires: PSIGN_UNSIGNED_FIXTURE, PSIGN_TEST_PFX (optional PSIGN_TEST_PFX_PASSWORD).
 #
 # Usage:
 #   ./scripts/rust-sip-parity-pe.ps1
-#   ./scripts/rust-sip-parity-pe.ps1 -WorkspaceRoot D:\dev\signtool-rs
+#   ./scripts/rust-sip-parity-pe.ps1 -WorkspaceRoot D:\\dev\\psign
 param(
     [string]$WorkspaceRoot = ""
 )
@@ -35,25 +35,25 @@ function Test-RsEnvPresent([string]$Name) {
     return ($null -ne $v -and $v.Trim().Length -gt 0)
 }
 
-if (-not (Test-RsEnvPresent "SIGNTOOL_RS_UNSIGNED_FIXTURE") -or -not (Test-RsEnvPresent "SIGNTOOL_RS_TEST_PFX")) {
-    Write-Host "[skip] rust-sip-parity-pe: set SIGNTOOL_RS_UNSIGNED_FIXTURE and SIGNTOOL_RS_TEST_PFX"
+if (-not (Test-RsEnvPresent "PSIGN_UNSIGNED_FIXTURE") -or -not (Test-RsEnvPresent "PSIGN_TEST_PFX")) {
+    Write-Host "[skip] rust-sip-parity-pe: set PSIGN_UNSIGNED_FIXTURE and PSIGN_TEST_PFX"
     exit 0
 }
 
 $native = Resolve-NativeSignTool
-$rustBin = Join-Path $WorkspaceRoot "target\debug\psign-tool-windows.exe"
+$rustBin = Join-Path $WorkspaceRoot "target\debug\psign-tool.exe"
 if (-not (Test-Path -LiteralPath $rustBin)) {
-    Write-Host "Building psign-tool-windows (debug)..."
-    & cargo build -p psign --bin psign-tool-windows | Out-Host
+    Write-Host "Building psign-tool (debug)..."
+    & cargo build -p psign --bin psign-tool | Out-Host
 }
 
-$u = $env:SIGNTOOL_RS_UNSIGNED_FIXTURE
-$pfx = $env:SIGNTOOL_RS_TEST_PFX
+$u = $env:PSIGN_UNSIGNED_FIXTURE
+$pfx = $env:PSIGN_TEST_PFX
 if (-not (Test-Path -LiteralPath $u)) {
-    throw "SIGNTOOL_RS_UNSIGNED_FIXTURE not found: $u"
+    throw "PSIGN_UNSIGNED_FIXTURE not found: $u"
 }
 if (-not (Test-Path -LiteralPath $pfx)) {
-    throw "SIGNTOOL_RS_TEST_PFX not found: $pfx"
+    throw "PSIGN_TEST_PFX not found: $pfx"
 }
 
 $tmpNative = Join-Path $env:TEMP "psign_rust_sip_native.exe"
@@ -63,8 +63,8 @@ Copy-Item -LiteralPath $u -Destination $tmpRust -Force
 
 $nativeSign = @("sign", "/fd", "SHA256", "/f", $pfx, $tmpNative)
 $rustSign = @("sign", "--pfx", $pfx, "--digest", "sha256", "--rust-sip", "pe", $tmpRust)
-if (Test-RsEnvPresent "SIGNTOOL_RS_TEST_PFX_PASSWORD") {
-    $pw = $env:SIGNTOOL_RS_TEST_PFX_PASSWORD
+if (Test-RsEnvPresent "PSIGN_TEST_PFX_PASSWORD") {
+    $pw = $env:PSIGN_TEST_PFX_PASSWORD
     $nativeSign = @("sign", "/fd", "SHA256", "/f", $pfx, "/p", $pw, $tmpNative)
     $rustSign = @("sign", "--pfx", $pfx, "--password", $pw, "--digest", "sha256", "--rust-sip", "pe", $tmpRust)
 }

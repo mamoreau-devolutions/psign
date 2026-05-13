@@ -35,7 +35,7 @@ Prioritize implementation based on product need; SIP-backed format signing does 
 
 | Area | Notes |
 |------|--------|
-| `sign --rust-sip pe`, `SIGNTOOL_RS_RUST_SIP` | Post-sign Authenticode digest consistency vs PKCS#7 after `SignerSignEx3`; see `docs/rust-sip-architecture.md` |
+| `sign --rust-sip pe`, `PSIGN_RUST_SIP` | Post-sign Authenticode digest consistency vs PKCS#7 after `SignerSignEx3`; see `docs/rust-sip-architecture.md` |
 | `verify --rust-sip-pe-digest-check` | Additive check after WinTrust on PE/WinMD — does not replace `WinVerifyTrust` |
 | `verify --rust-sip-all-digest-checks` | Enables every `--rust-sip-*-digest-check` for embedded verify; encrypted MSIX extensions fail explicitly in the MSIX checker |
 | `/dg` staging overlap | When Rust PKCS#7 encode exists, split-digest backlog intersects Tier 1a completion |

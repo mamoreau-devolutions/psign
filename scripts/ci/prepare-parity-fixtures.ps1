@@ -52,12 +52,12 @@ if ($p7Exit -ne 0 -or -not $p7File) {
     if ($RequireDetachedPkcs7) {
         throw "Detached PKCS#7 generation failed (exit $p7Exit). Native signtool /p7 output: $p7Dir"
     }
-    Write-Warning "Detached PKCS#7 generation failed (exit $p7Exit); omit SIGNTOOL_RS_DETACHED_* from CI env."
+    Write-Warning "Detached PKCS#7 generation failed (exit $p7Exit); omit PSIGN_DETACHED_* from CI env."
 }
 else {
     $detachedLines = @(
-        "SIGNTOOL_RS_DETACHED_CONTENT=$contentPath",
-        "SIGNTOOL_RS_DETACHED_PKCS7=$($p7File.FullName)"
+        "PSIGN_DETACHED_CONTENT=$contentPath",
+        "PSIGN_DETACHED_PKCS7=$($p7File.FullName)"
     )
     foreach ($line in $detachedLines) {
         $name, $value = $line.Split("=", 2)
@@ -68,13 +68,13 @@ else {
     }
 }
 
-$signedLines = @("SIGNTOOL_RS_SIGNED_FIXTURE=$tempCopy")
-Set-Item -Path "Env:SIGNTOOL_RS_SIGNED_FIXTURE" -Value $tempCopy
+$signedLines = @("PSIGN_SIGNED_FIXTURE=$tempCopy")
+Set-Item -Path "Env:PSIGN_SIGNED_FIXTURE" -Value $tempCopy
 if ($EmitGithubEnv -and $env:GITHUB_ENV) {
     Add-Content -LiteralPath $env:GITHUB_ENV -Value $signedLines
 }
 
-Write-Host "Prepared SIGNTOOL_RS_SIGNED_FIXTURE=$tempCopy"
+Write-Host "Prepared PSIGN_SIGNED_FIXTURE=$tempCopy"
 if ($p7File) {
     Write-Host "Prepared detached PKCS#7 $($p7File.FullName)"
 }

@@ -148,7 +148,7 @@ fn unsigned_corpus_freshly_signed_with_native_signtool_verifies_with_psign() {
 
 #[test]
 fn unsigned_corpus_freshly_signed_with_psign_verifies_with_psign() {
-    let thumbprint = std::env::var("SIGNTOOL_RS_TEST_CERT_SHA1")
+    let thumbprint = std::env::var("PSIGN_TEST_CERT_SHA1")
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| TEST_CERT_SHA1.to_owned());
@@ -244,30 +244,13 @@ fn verify_detached_with_portable(repo: &Path, content: &Path, p7: &Path, label: 
 }
 
 fn psign() -> Command {
-    Command::cargo_bin("psign-tool-windows").expect("psign-tool-windows binary")
+    Command::cargo_bin("psign-tool").expect("psign-tool binary")
 }
 
 fn portable() -> Command {
-    let exe = portable_exe();
-    if !exe.is_file() {
-        let mut build = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
-        build.current_dir(repo_root()).args([
-            "build",
-            "-p",
-            "psign-digest-cli",
-            "--bin",
-            "psign-tool-portable",
-            "--locked",
-        ]);
-        if std::env::var("PROFILE").ok().as_deref() == Some("release") {
-            build.arg("--release");
-        }
-        let status = build
-            .status()
-            .unwrap_or_else(|e| panic!("build psign-tool-portable: {e}"));
-        assert!(status.success(), "build psign-tool-portable failed");
-    }
-    Command::new(exe)
+    let mut cmd = psign();
+    cmd.arg("portable");
+    cmd
 }
 
 fn portable_args_for_entry(
@@ -354,17 +337,6 @@ fn test_pfx_path(repo_root: &Path) -> PathBuf {
 
 fn anchor_dir(repo_root: &Path) -> PathBuf {
     repo_root.join("tests\\fixtures\\devolutions-authenticode")
-}
-
-fn portable_exe() -> PathBuf {
-    if let Some(path) = std::env::var_os("CARGO_BIN_EXE_psign-tool-portable") {
-        return PathBuf::from(path);
-    }
-    let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_owned());
-    let target_dir = std::env::var_os("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| repo_root().join("target"));
-    target_dir.join(profile).join("psign-tool-portable.exe")
 }
 
 fn native_signtool_optional_path() -> Option<PathBuf> {

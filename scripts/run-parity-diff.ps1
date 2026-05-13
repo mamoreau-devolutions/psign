@@ -42,10 +42,10 @@ function Resolve-SignTool {
 
 $nativeSignTool = Resolve-SignTool
 $workspace = Split-Path -Parent $PSScriptRoot
-$rustBin = Join-Path $workspace "target\debug\psign-tool-windows.exe"
+$rustBin = Join-Path $workspace "target\debug\psign-tool.exe"
 
 if (-not (Test-Path -LiteralPath $rustBin)) {
-    cargo build -p psign --bin psign-tool-windows | Out-Null
+    cargo build -p psign --bin psign-tool | Out-Null
 }
 
 if ($MsixOnly) {
@@ -404,10 +404,10 @@ $results += [PSCustomObject]@{
 }
 
 # Optional: native /tseal vs rust --tseal exit codes on the same signed artifact.
-if ($env:SIGNTOOL_RS_SIGNED_FIXTURE -and $env:SIGNTOOL_RS_TIMESTAMP_URL) {
+if ($env:PSIGN_SIGNED_FIXTURE -and $env:PSIGN_TIMESTAMP_URL) {
     $expectedScenarioIds += @("timestamp_tseal_exit_parity", "timestamp_tr_two_targets_exit_match")
-    $tsUrl = $env:SIGNTOOL_RS_TIMESTAMP_URL
-    $signedPath = $env:SIGNTOOL_RS_SIGNED_FIXTURE
+    $tsUrl = $env:PSIGN_TIMESTAMP_URL
+    $signedPath = $env:PSIGN_SIGNED_FIXTURE
     $saved = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     & "$nativeSignTool" timestamp /tseal $tsUrl /td SHA256 $signedPath 2>&1 | Out-Null
@@ -448,13 +448,13 @@ function Test-EnvPresent([string]$Name) {
 }
 
 function Get-RustSignCredentialArgs {
-    $thumb = $env:SIGNTOOL_RS_TEST_CERT_SHA1
+    $thumb = $env:PSIGN_TEST_CERT_SHA1
     if ($thumb -and $thumb.Trim().Length -gt 0) {
         return @("--cert-sha1", $thumb.Trim())
     }
-    $out = @("--pfx", $env:SIGNTOOL_RS_TEST_PFX)
-    if ($env:SIGNTOOL_RS_TEST_PFX_PASSWORD) {
-        $out += @("--password", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD)
+    $out = @("--pfx", $env:PSIGN_TEST_PFX)
+    if ($env:PSIGN_TEST_PFX_PASSWORD) {
+        $out += @("--password", $env:PSIGN_TEST_PFX_PASSWORD)
     }
     return $out
 }
@@ -462,28 +462,28 @@ function Get-RustSignCredentialArgs {
 function Get-RustMsixCredentialArgs {
     # Prefer store thumbprint when CI bootstrap imported the test cert into `CurrentUser\My` — Rust `SignerSignEx3`
     # + MSIX SIP often succeeds with `--cert-sha1` while `--pfx` can hit `CRYPT_E_NO_PROVIDER` on some hosts.
-    $thumb = $env:SIGNTOOL_RS_MSIX_TEST_CERT_SHA1
+    $thumb = $env:PSIGN_MSIX_TEST_CERT_SHA1
     if (-not $thumb -or $thumb.Trim().Length -eq 0) {
-        $thumb = $env:SIGNTOOL_RS_TEST_CERT_SHA1
+        $thumb = $env:PSIGN_TEST_CERT_SHA1
     }
     if ($thumb -and $thumb.Trim().Length -gt 0) {
         return @("--cert-sha1", $thumb.Trim())
     }
-    $pfx = $env:SIGNTOOL_RS_MSIX_TEST_PFX
+    $pfx = $env:PSIGN_MSIX_TEST_PFX
     if ($pfx -and $pfx.Trim().Length -gt 0 -and (Test-Path -LiteralPath $pfx.Trim())) {
         $out = @("--pfx", $pfx.Trim())
-        if ($env:SIGNTOOL_RS_MSIX_TEST_PFX_PASSWORD) {
-            $out += @("--password", $env:SIGNTOOL_RS_MSIX_TEST_PFX_PASSWORD)
+        if ($env:PSIGN_MSIX_TEST_PFX_PASSWORD) {
+            $out += @("--password", $env:PSIGN_MSIX_TEST_PFX_PASSWORD)
         }
         return $out
     }
-    throw "Get-RustMsixCredentialArgs: set SIGNTOOL_RS_TEST_CERT_SHA1 (after bootstrap) or SIGNTOOL_RS_MSIX_TEST_PFX (see scripts/ci/bootstrap-devolutions-authenticode.ps1)."
+    throw "Get-RustMsixCredentialArgs: set PSIGN_TEST_CERT_SHA1 (after bootstrap) or PSIGN_MSIX_TEST_PFX (see scripts/ci/bootstrap-devolutions-authenticode.ps1)."
 }
 
 if ($FailOnSemantic) {
     $requiredCore = @(
-        "SIGNTOOL_RS_UNSIGNED_FIXTURE",
-        "SIGNTOOL_RS_TEST_PFX"
+        "PSIGN_UNSIGNED_FIXTURE",
+        "PSIGN_TEST_PFX"
     )
     $missingCore = @($requiredCore | Where-Object { -not (Test-EnvPresent $_) })
     if ($missingCore.Count -gt 0) {
@@ -493,13 +493,13 @@ if ($FailOnSemantic) {
 
 if ($FailOnSemantic -and $FailOnSemanticExhaustive) {
     $requiredExhaustive = @(
-        "SIGNTOOL_RS_SIGNED_FIXTURE",
-        "SIGNTOOL_RS_TIMESTAMP_URL",
-        "SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE",
-        "SIGNTOOL_RS_MSIX_TEST_PFX",
-        "SIGNTOOL_RS_MSIX_TIMESTAMP_URL",
-        "SIGNTOOL_RS_DETACHED_CONTENT",
-        "SIGNTOOL_RS_DETACHED_PKCS7"
+        "PSIGN_SIGNED_FIXTURE",
+        "PSIGN_TIMESTAMP_URL",
+        "PSIGN_MSIX_UNSIGNED_FIXTURE",
+        "PSIGN_MSIX_TEST_PFX",
+        "PSIGN_MSIX_TIMESTAMP_URL",
+        "PSIGN_DETACHED_CONTENT",
+        "PSIGN_DETACHED_PKCS7"
     )
     $missingEx = @($requiredExhaustive | Where-Object { -not (Test-EnvPresent $_) })
     if ($missingEx.Count -gt 0) {
@@ -508,7 +508,7 @@ if ($FailOnSemantic -and $FailOnSemanticExhaustive) {
 }
 
 # Artifact-semantic scenario: sign + verify output includes expected signature markers.
-if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
+if ($env:PSIGN_UNSIGNED_FIXTURE -and $env:PSIGN_TEST_PFX) {
     $expectedScenarioIds += @(
         "artifact_sign_verify_semantic",
         "artifact_sign_two_pe_exit_parity",
@@ -517,7 +517,7 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
         "verify_pe_fixture_pa_exit_match"
     )
     $tempSigned = Join-Path $env:TEMP "psign_ci_semantic.exe"
-    Copy-Item -LiteralPath $env:SIGNTOOL_RS_UNSIGNED_FIXTURE -Destination $tempSigned -Force
+    Copy-Item -LiteralPath $env:PSIGN_UNSIGNED_FIXTURE -Destination $tempSigned -Force
 
     $signArgs = @("sign") + (Get-RustSignCredentialArgs) + @("--digest", "sha256", $tempSigned)
     $saved = $ErrorActionPreference
@@ -542,13 +542,13 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
     # Native `<filename(s)>` vs rust trailing `files`: same PFX/options, two unsigned PE copies — exit codes only.
     $tmpSignA = Join-Path $env:TEMP "psign_sign_two_a.exe"
     $tmpSignB = Join-Path $env:TEMP "psign_sign_two_b.exe"
-    Copy-Item -LiteralPath $env:SIGNTOOL_RS_UNSIGNED_FIXTURE -Destination $tmpSignA -Force
-    Copy-Item -LiteralPath $env:SIGNTOOL_RS_UNSIGNED_FIXTURE -Destination $tmpSignB -Force
+    Copy-Item -LiteralPath $env:PSIGN_UNSIGNED_FIXTURE -Destination $tmpSignA -Force
+    Copy-Item -LiteralPath $env:PSIGN_UNSIGNED_FIXTURE -Destination $tmpSignB -Force
     $savedTwo = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $nativeTwoSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, $tmpSignA, $tmpSignB)
-    if ($env:SIGNTOOL_RS_TEST_PFX_PASSWORD) {
-        $nativeTwoSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, $tmpSignA, $tmpSignB)
+    $nativeTwoSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, $tmpSignA, $tmpSignB)
+    if ($env:PSIGN_TEST_PFX_PASSWORD) {
+        $nativeTwoSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/p", $env:PSIGN_TEST_PFX_PASSWORD, $tmpSignA, $tmpSignB)
     }
     & "$nativeSignTool" @nativeTwoSign 2>&1 | Out-Null
     $nativeTwoSignExit = $LASTEXITCODE
@@ -567,18 +567,18 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
     }
 
     # PE (.exe/.dll/…): same SIP as native; two copies of CI unsigned PE — SHA256 match or verify-valid semantic match.
-    $peExt = [System.IO.Path]::GetExtension($env:SIGNTOOL_RS_UNSIGNED_FIXTURE)
+    $peExt = [System.IO.Path]::GetExtension($env:PSIGN_UNSIGNED_FIXTURE)
     if ([string]::IsNullOrEmpty($peExt)) { $peExt = ".exe" }
     $tmpPeNat = Join-Path $env:TEMP ("psign_pe_fixture_native" + $peExt)
     $tmpPeRust = Join-Path $env:TEMP ("psign_pe_fixture_rust" + $peExt)
-    Copy-Item -LiteralPath $env:SIGNTOOL_RS_UNSIGNED_FIXTURE -Destination $tmpPeNat -Force
-    Copy-Item -LiteralPath $env:SIGNTOOL_RS_UNSIGNED_FIXTURE -Destination $tmpPeRust -Force
+    Copy-Item -LiteralPath $env:PSIGN_UNSIGNED_FIXTURE -Destination $tmpPeNat -Force
+    Copy-Item -LiteralPath $env:PSIGN_UNSIGNED_FIXTURE -Destination $tmpPeRust -Force
     $savedPe = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $nativePeSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, $tmpPeNat)
+    $nativePeSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, $tmpPeNat)
     $rustPeSign = @("sign") + (Get-RustSignCredentialArgs) + @("--digest", "sha256", $tmpPeRust)
-    if ($env:SIGNTOOL_RS_TEST_PFX_PASSWORD) {
-        $nativePeSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, $tmpPeNat)
+    if ($env:PSIGN_TEST_PFX_PASSWORD) {
+        $nativePeSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/p", $env:PSIGN_TEST_PFX_PASSWORD, $tmpPeNat)
     }
     & "$nativeSignTool" @nativePeSign 2>&1 | Out-Null
     $nativePeSignExit = $LASTEXITCODE
@@ -617,14 +617,14 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
 
     # Sign with /d + /du then verify /pa /v /d: Authenticode program name + URL must match native output lines.
     $tmpDesc = Join-Path $env:TEMP "psign_verify_desc.exe"
-    Copy-Item -LiteralPath $env:SIGNTOOL_RS_UNSIGNED_FIXTURE -Destination $tmpDesc -Force
+    Copy-Item -LiteralPath $env:PSIGN_UNSIGNED_FIXTURE -Destination $tmpDesc -Force
     $parityDesc = "psign_parity_desc_2026"
     $parityUrl = "https://example.invalid/psign-parity"
     $savedDesc = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $nativeSignDesc = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/d", $parityDesc, "/du", $parityUrl, $tmpDesc)
-    if ($env:SIGNTOOL_RS_TEST_PFX_PASSWORD) {
-        $nativeSignDesc = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, "/d", $parityDesc, "/du", $parityUrl, $tmpDesc)
+    $nativeSignDesc = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/d", $parityDesc, "/du", $parityUrl, $tmpDesc)
+    if ($env:PSIGN_TEST_PFX_PASSWORD) {
+        $nativeSignDesc = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/p", $env:PSIGN_TEST_PFX_PASSWORD, "/d", $parityDesc, "/du", $parityUrl, $tmpDesc)
     }
     & "$nativeSignTool" @nativeSignDesc 2>&1 | Out-Null
     $nativeSignDescExit = $LASTEXITCODE
@@ -667,7 +667,7 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
     }
 
     # PowerShell .ps1: Windows CryptSIP (same SignerSignEx3 / WinVerifyTrust stack as native signtool).
-    $ps1Src = if ($env:SIGNTOOL_RS_PS1_UNSIGNED_FIXTURE) { $env:SIGNTOOL_RS_PS1_UNSIGNED_FIXTURE } else { Join-Path $workspace "tests\fixtures\unsigned-sample.ps1" }
+    $ps1Src = if ($env:PSIGN_PS1_UNSIGNED_FIXTURE) { $env:PSIGN_PS1_UNSIGNED_FIXTURE } else { Join-Path $workspace "tests\fixtures\unsigned-sample.ps1" }
     if (Test-Path -LiteralPath $ps1Src) {
         $expectedScenarioIds += @("sign_ps1_sha256_match_native", "verify_ps1_pa_exit_match")
         $tmpPs1Nat = Join-Path $env:TEMP "psign_ps1_native.ps1"
@@ -676,10 +676,10 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
         Copy-Item -LiteralPath $ps1Src -Destination $tmpPs1Rust -Force
         $savedPs1 = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        $nativePs1Sign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, $tmpPs1Nat)
+        $nativePs1Sign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, $tmpPs1Nat)
         $rustPs1Sign = @("sign") + (Get-RustSignCredentialArgs) + @("--digest", "sha256", $tmpPs1Rust)
-        if ($env:SIGNTOOL_RS_TEST_PFX_PASSWORD) {
-            $nativePs1Sign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, $tmpPs1Nat)
+        if ($env:PSIGN_TEST_PFX_PASSWORD) {
+            $nativePs1Sign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/p", $env:PSIGN_TEST_PFX_PASSWORD, $tmpPs1Nat)
         }
         & "$nativeSignTool" @nativePs1Sign 2>&1 | Out-Null
         $nativePs1SignExit = $LASTEXITCODE
@@ -727,9 +727,9 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
         Copy-Item -LiteralPath $ps1Src -Destination $tmpPs1DescRust -Force
         $savedPs1Desc = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        $nativePs1DescSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/d", $parityDesc, "/du", $parityUrl, $tmpPs1DescNat)
-        if ($env:SIGNTOOL_RS_TEST_PFX_PASSWORD) {
-            $nativePs1DescSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, "/d", $parityDesc, "/du", $parityUrl, $tmpPs1DescNat)
+        $nativePs1DescSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/d", $parityDesc, "/du", $parityUrl, $tmpPs1DescNat)
+        if ($env:PSIGN_TEST_PFX_PASSWORD) {
+            $nativePs1DescSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/p", $env:PSIGN_TEST_PFX_PASSWORD, "/d", $parityDesc, "/du", $parityUrl, $tmpPs1DescNat)
         }
         & "$nativeSignTool" @nativePs1DescSign 2>&1 | Out-Null
         $nativePs1DescSignExit = $LASTEXITCODE
@@ -773,7 +773,7 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
     }
 
     # PowerShell module .psm1 (same CryptSIP stack as .ps1).
-    $psm1Src = if ($env:SIGNTOOL_RS_PSM1_UNSIGNED_FIXTURE) { $env:SIGNTOOL_RS_PSM1_UNSIGNED_FIXTURE } else { Join-Path $workspace "tests\fixtures\unsigned-sample.psm1" }
+    $psm1Src = if ($env:PSIGN_PSM1_UNSIGNED_FIXTURE) { $env:PSIGN_PSM1_UNSIGNED_FIXTURE } else { Join-Path $workspace "tests\fixtures\unsigned-sample.psm1" }
     if (Test-Path -LiteralPath $psm1Src) {
         $expectedScenarioIds += @(
             "sign_psm1_sha256_match_native",
@@ -786,10 +786,10 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
         Copy-Item -LiteralPath $psm1Src -Destination $tmpPsm1Rust -Force
         $savedPsm1 = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        $nativePsm1Sign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, $tmpPsm1Nat)
+        $nativePsm1Sign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, $tmpPsm1Nat)
         $rustPsm1Sign = @("sign") + (Get-RustSignCredentialArgs) + @("--digest", "sha256", $tmpPsm1Rust)
-        if ($env:SIGNTOOL_RS_TEST_PFX_PASSWORD) {
-            $nativePsm1Sign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, $tmpPsm1Nat)
+        if ($env:PSIGN_TEST_PFX_PASSWORD) {
+            $nativePsm1Sign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/p", $env:PSIGN_TEST_PFX_PASSWORD, $tmpPsm1Nat)
         }
         & "$nativeSignTool" @nativePsm1Sign 2>&1 | Out-Null
         $nativePsm1SignExit = $LASTEXITCODE
@@ -832,9 +832,9 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
         Copy-Item -LiteralPath $psm1Src -Destination $tmpPsm1DescRust -Force
         $savedPsm1Desc = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        $nativePsm1DescSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/d", $parityDesc, "/du", $parityUrl, $tmpPsm1DescNat)
-        if ($env:SIGNTOOL_RS_TEST_PFX_PASSWORD) {
-            $nativePsm1DescSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, "/d", $parityDesc, "/du", $parityUrl, $tmpPsm1DescNat)
+        $nativePsm1DescSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/d", $parityDesc, "/du", $parityUrl, $tmpPsm1DescNat)
+        if ($env:PSIGN_TEST_PFX_PASSWORD) {
+            $nativePsm1DescSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/p", $env:PSIGN_TEST_PFX_PASSWORD, "/d", $parityDesc, "/du", $parityUrl, $tmpPsm1DescNat)
         }
         & "$nativeSignTool" @nativePsm1DescSign 2>&1 | Out-Null
         $nativePsm1DescSignExit = $LASTEXITCODE
@@ -878,7 +878,7 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
     }
 
     # PowerShell manifest .psd1 (same CryptSIP stack as .ps1).
-    $psd1Src = if ($env:SIGNTOOL_RS_PSD1_UNSIGNED_FIXTURE) { $env:SIGNTOOL_RS_PSD1_UNSIGNED_FIXTURE } else { Join-Path $workspace "tests\fixtures\unsigned-sample.psd1" }
+    $psd1Src = if ($env:PSIGN_PSD1_UNSIGNED_FIXTURE) { $env:PSIGN_PSD1_UNSIGNED_FIXTURE } else { Join-Path $workspace "tests\fixtures\unsigned-sample.psd1" }
     if (Test-Path -LiteralPath $psd1Src) {
         $expectedScenarioIds += @(
             "sign_psd1_sha256_match_native",
@@ -891,10 +891,10 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
         Copy-Item -LiteralPath $psd1Src -Destination $tmpPsd1Rust -Force
         $savedPsd1 = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        $nativePsd1Sign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, $tmpPsd1Nat)
+        $nativePsd1Sign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, $tmpPsd1Nat)
         $rustPsd1Sign = @("sign") + (Get-RustSignCredentialArgs) + @("--digest", "sha256", $tmpPsd1Rust)
-        if ($env:SIGNTOOL_RS_TEST_PFX_PASSWORD) {
-            $nativePsd1Sign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, $tmpPsd1Nat)
+        if ($env:PSIGN_TEST_PFX_PASSWORD) {
+            $nativePsd1Sign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/p", $env:PSIGN_TEST_PFX_PASSWORD, $tmpPsd1Nat)
         }
         & "$nativeSignTool" @nativePsd1Sign 2>&1 | Out-Null
         $nativePsd1SignExit = $LASTEXITCODE
@@ -937,9 +937,9 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
         Copy-Item -LiteralPath $psd1Src -Destination $tmpPsd1DescRust -Force
         $savedPsd1Desc = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        $nativePsd1DescSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/d", $parityDesc, "/du", $parityUrl, $tmpPsd1DescNat)
-        if ($env:SIGNTOOL_RS_TEST_PFX_PASSWORD) {
-            $nativePsd1DescSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, "/d", $parityDesc, "/du", $parityUrl, $tmpPsd1DescNat)
+        $nativePsd1DescSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/d", $parityDesc, "/du", $parityUrl, $tmpPsd1DescNat)
+        if ($env:PSIGN_TEST_PFX_PASSWORD) {
+            $nativePsd1DescSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/p", $env:PSIGN_TEST_PFX_PASSWORD, "/d", $parityDesc, "/du", $parityUrl, $tmpPsd1DescNat)
         }
         & "$nativeSignTool" @nativePsd1DescSign 2>&1 | Out-Null
         $nativePsd1DescSignExit = $LASTEXITCODE
@@ -983,7 +983,7 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
     }
 
     # Windows Script Host .js: OS CryptSIP for script signing (same SignerSignEx3 / WinVerifyTrust as native).
-    $jsSrc = if ($env:SIGNTOOL_RS_JS_UNSIGNED_FIXTURE) { $env:SIGNTOOL_RS_JS_UNSIGNED_FIXTURE } else { Join-Path $workspace "tests\fixtures\unsigned-sample.js" }
+    $jsSrc = if ($env:PSIGN_JS_UNSIGNED_FIXTURE) { $env:PSIGN_JS_UNSIGNED_FIXTURE } else { Join-Path $workspace "tests\fixtures\unsigned-sample.js" }
     if (Test-Path -LiteralPath $jsSrc) {
         $expectedScenarioIds += @(
             "sign_js_sha256_match_native",
@@ -996,10 +996,10 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
         Copy-Item -LiteralPath $jsSrc -Destination $tmpJsRust -Force
         $savedJs = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        $nativeJsSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, $tmpJsNat)
+        $nativeJsSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, $tmpJsNat)
         $rustJsSign = @("sign") + (Get-RustSignCredentialArgs) + @("--digest", "sha256", $tmpJsRust)
-        if ($env:SIGNTOOL_RS_TEST_PFX_PASSWORD) {
-            $nativeJsSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, $tmpJsNat)
+        if ($env:PSIGN_TEST_PFX_PASSWORD) {
+            $nativeJsSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/p", $env:PSIGN_TEST_PFX_PASSWORD, $tmpJsNat)
         }
         & "$nativeSignTool" @nativeJsSign 2>&1 | Out-Null
         $nativeJsSignExit = $LASTEXITCODE
@@ -1042,9 +1042,9 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
         Copy-Item -LiteralPath $jsSrc -Destination $tmpJsDescRust -Force
         $savedJsDesc = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        $nativeJsDescSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/d", $parityDesc, "/du", $parityUrl, $tmpJsDescNat)
-        if ($env:SIGNTOOL_RS_TEST_PFX_PASSWORD) {
-            $nativeJsDescSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, "/d", $parityDesc, "/du", $parityUrl, $tmpJsDescNat)
+        $nativeJsDescSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/d", $parityDesc, "/du", $parityUrl, $tmpJsDescNat)
+        if ($env:PSIGN_TEST_PFX_PASSWORD) {
+            $nativeJsDescSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/p", $env:PSIGN_TEST_PFX_PASSWORD, "/d", $parityDesc, "/du", $parityUrl, $tmpJsDescNat)
         }
         & "$nativeSignTool" @nativeJsDescSign 2>&1 | Out-Null
         $nativeJsDescSignExit = $LASTEXITCODE
@@ -1088,7 +1088,7 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
     }
 
     # Windows Script Host .vbs (same stack as .js when SIP registered).
-    $vbsSrc = if ($env:SIGNTOOL_RS_VBS_UNSIGNED_FIXTURE) { $env:SIGNTOOL_RS_VBS_UNSIGNED_FIXTURE } else { Join-Path $workspace "tests\fixtures\unsigned-sample.vbs" }
+    $vbsSrc = if ($env:PSIGN_VBS_UNSIGNED_FIXTURE) { $env:PSIGN_VBS_UNSIGNED_FIXTURE } else { Join-Path $workspace "tests\fixtures\unsigned-sample.vbs" }
     if (Test-Path -LiteralPath $vbsSrc) {
         $expectedScenarioIds += @(
             "sign_vbs_sha256_match_native",
@@ -1101,10 +1101,10 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
         Copy-Item -LiteralPath $vbsSrc -Destination $tmpVbsRust -Force
         $savedVbs = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        $nativeVbsSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, $tmpVbsNat)
+        $nativeVbsSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, $tmpVbsNat)
         $rustVbsSign = @("sign") + (Get-RustSignCredentialArgs) + @("--digest", "sha256", $tmpVbsRust)
-        if ($env:SIGNTOOL_RS_TEST_PFX_PASSWORD) {
-            $nativeVbsSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, $tmpVbsNat)
+        if ($env:PSIGN_TEST_PFX_PASSWORD) {
+            $nativeVbsSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/p", $env:PSIGN_TEST_PFX_PASSWORD, $tmpVbsNat)
         }
         & "$nativeSignTool" @nativeVbsSign 2>&1 | Out-Null
         $nativeVbsSignExit = $LASTEXITCODE
@@ -1147,9 +1147,9 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
         Copy-Item -LiteralPath $vbsSrc -Destination $tmpVbsDescRust -Force
         $savedVbsDesc = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        $nativeVbsDescSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/d", $parityDesc, "/du", $parityUrl, $tmpVbsDescNat)
-        if ($env:SIGNTOOL_RS_TEST_PFX_PASSWORD) {
-            $nativeVbsDescSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, "/d", $parityDesc, "/du", $parityUrl, $tmpVbsDescNat)
+        $nativeVbsDescSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/d", $parityDesc, "/du", $parityUrl, $tmpVbsDescNat)
+        if ($env:PSIGN_TEST_PFX_PASSWORD) {
+            $nativeVbsDescSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/p", $env:PSIGN_TEST_PFX_PASSWORD, "/d", $parityDesc, "/du", $parityUrl, $tmpVbsDescNat)
         }
         & "$nativeSignTool" @nativeVbsDescSign 2>&1 | Out-Null
         $nativeVbsDescSignExit = $LASTEXITCODE
@@ -1193,7 +1193,7 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
     }
 
     # Windows Script File .wsf (XML container — OS SIP when registered).
-    $wsfSrc = if ($env:SIGNTOOL_RS_WSF_UNSIGNED_FIXTURE) { $env:SIGNTOOL_RS_WSF_UNSIGNED_FIXTURE } else { Join-Path $workspace "tests\fixtures\unsigned-sample.wsf" }
+    $wsfSrc = if ($env:PSIGN_WSF_UNSIGNED_FIXTURE) { $env:PSIGN_WSF_UNSIGNED_FIXTURE } else { Join-Path $workspace "tests\fixtures\unsigned-sample.wsf" }
     if (Test-Path -LiteralPath $wsfSrc) {
         $expectedScenarioIds += @(
             "sign_wsf_sha256_match_native",
@@ -1206,10 +1206,10 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
         Copy-Item -LiteralPath $wsfSrc -Destination $tmpWsfRust -Force
         $savedWsf = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        $nativeWsfSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, $tmpWsfNat)
+        $nativeWsfSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, $tmpWsfNat)
         $rustWsfSign = @("sign") + (Get-RustSignCredentialArgs) + @("--digest", "sha256", $tmpWsfRust)
-        if ($env:SIGNTOOL_RS_TEST_PFX_PASSWORD) {
-            $nativeWsfSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, $tmpWsfNat)
+        if ($env:PSIGN_TEST_PFX_PASSWORD) {
+            $nativeWsfSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/p", $env:PSIGN_TEST_PFX_PASSWORD, $tmpWsfNat)
         }
         & "$nativeSignTool" @nativeWsfSign 2>&1 | Out-Null
         $nativeWsfSignExit = $LASTEXITCODE
@@ -1252,9 +1252,9 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
         Copy-Item -LiteralPath $wsfSrc -Destination $tmpWsfDescRust -Force
         $savedWsfDesc = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        $nativeWsfDescSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/d", $parityDesc, "/du", $parityUrl, $tmpWsfDescNat)
-        if ($env:SIGNTOOL_RS_TEST_PFX_PASSWORD) {
-            $nativeWsfDescSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, "/d", $parityDesc, "/du", $parityUrl, $tmpWsfDescNat)
+        $nativeWsfDescSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/d", $parityDesc, "/du", $parityUrl, $tmpWsfDescNat)
+        if ($env:PSIGN_TEST_PFX_PASSWORD) {
+            $nativeWsfDescSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/p", $env:PSIGN_TEST_PFX_PASSWORD, "/d", $parityDesc, "/du", $parityUrl, $tmpWsfDescNat)
         }
         & "$nativeSignTool" @nativeWsfDescSign 2>&1 | Out-Null
         $nativeWsfDescSignExit = $LASTEXITCODE
@@ -1299,23 +1299,23 @@ if ($env:SIGNTOOL_RS_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_TEST_PFX) {
 }
 
 # MSIX semantic scenario: native and rust sign with RFC3161 should align on success/failure.
-if ($env:SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_MSIX_TEST_PFX -and $env:SIGNTOOL_RS_MSIX_TIMESTAMP_URL) {
+if ($env:PSIGN_MSIX_UNSIGNED_FIXTURE -and $env:PSIGN_MSIX_TEST_PFX -and $env:PSIGN_MSIX_TIMESTAMP_URL) {
     $expectedScenarioIds += @("artifact_msix_sign_semantic", "artifact_verify_msix_print_description_match")
     $tempNativeMsix = Join-Path $env:TEMP "psign_ci_msix_native.msix"
     $tempRustMsix = Join-Path $env:TEMP "psign_ci_msix_rust.msix"
-    Copy-Item -LiteralPath $env:SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE -Destination $tempNativeMsix -Force
-    Copy-Item -LiteralPath $env:SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE -Destination $tempRustMsix -Force
+    Copy-Item -LiteralPath $env:PSIGN_MSIX_UNSIGNED_FIXTURE -Destination $tempNativeMsix -Force
+    Copy-Item -LiteralPath $env:PSIGN_MSIX_UNSIGNED_FIXTURE -Destination $tempRustMsix -Force
 
-    $nativeSignArgs = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_MSIX_TEST_PFX, "/tr", $env:SIGNTOOL_RS_MSIX_TIMESTAMP_URL, "/td", "SHA256", $tempNativeMsix)
-    if ($env:SIGNTOOL_RS_MSIX_TEST_PFX_PASSWORD) {
-        $nativeSignArgs = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_MSIX_TEST_PFX, "/p", $env:SIGNTOOL_RS_MSIX_TEST_PFX_PASSWORD, "/tr", $env:SIGNTOOL_RS_MSIX_TIMESTAMP_URL, "/td", "SHA256", $tempNativeMsix)
+    $nativeSignArgs = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_MSIX_TEST_PFX, "/tr", $env:PSIGN_MSIX_TIMESTAMP_URL, "/td", "SHA256", $tempNativeMsix)
+    if ($env:PSIGN_MSIX_TEST_PFX_PASSWORD) {
+        $nativeSignArgs = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_MSIX_TEST_PFX, "/p", $env:PSIGN_MSIX_TEST_PFX_PASSWORD, "/tr", $env:PSIGN_MSIX_TIMESTAMP_URL, "/td", "SHA256", $tempNativeMsix)
     }
     $saved = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     & "$nativeSignTool" @nativeSignArgs 2>&1 | Out-Null
     $nativeMsixExit = $LASTEXITCODE
 
-    $rustSignArgs = @("sign") + (Get-RustMsixCredentialArgs) + @("--digest", "sha256", "--timestamp-url", $env:SIGNTOOL_RS_MSIX_TIMESTAMP_URL, "--timestamp-digest", "sha256", $tempRustMsix)
+    $rustSignArgs = @("sign") + (Get-RustMsixCredentialArgs) + @("--digest", "sha256", "--timestamp-url", $env:PSIGN_MSIX_TIMESTAMP_URL, "--timestamp-digest", "sha256", $tempRustMsix)
     & "$rustBin" @rustSignArgs 2>&1 | Out-Null
     $rustMsixExit = $LASTEXITCODE
     $ErrorActionPreference = $saved
@@ -1342,21 +1342,21 @@ if ($env:SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_MSIX_TEST_PFX -
     $msixParityUrl = "https://example.invalid/psign-parity"
     $tempNativeMsixDesc = Join-Path $env:TEMP "psign_ci_msix_native_desc.msix"
     $tempRustMsixDesc = Join-Path $env:TEMP "psign_ci_msix_rust_desc.msix"
-    Copy-Item -LiteralPath $env:SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE -Destination $tempNativeMsixDesc -Force
-    Copy-Item -LiteralPath $env:SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE -Destination $tempRustMsixDesc -Force
+    Copy-Item -LiteralPath $env:PSIGN_MSIX_UNSIGNED_FIXTURE -Destination $tempNativeMsixDesc -Force
+    Copy-Item -LiteralPath $env:PSIGN_MSIX_UNSIGNED_FIXTURE -Destination $tempRustMsixDesc -Force
     $savedMsixDesc = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     $nativeMsixDescSign = @(
-        "sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_MSIX_TEST_PFX,
+        "sign", "/fd", "SHA256", "/f", $env:PSIGN_MSIX_TEST_PFX,
         "/d", $msixParityDesc, "/du", $msixParityUrl,
-        "/tr", $env:SIGNTOOL_RS_MSIX_TIMESTAMP_URL, "/td", "SHA256",
+        "/tr", $env:PSIGN_MSIX_TIMESTAMP_URL, "/td", "SHA256",
         $tempNativeMsixDesc
     )
-    if ($env:SIGNTOOL_RS_MSIX_TEST_PFX_PASSWORD) {
+    if ($env:PSIGN_MSIX_TEST_PFX_PASSWORD) {
         $nativeMsixDescSign = @(
-            "sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_MSIX_TEST_PFX, "/p", $env:SIGNTOOL_RS_MSIX_TEST_PFX_PASSWORD,
+            "sign", "/fd", "SHA256", "/f", $env:PSIGN_MSIX_TEST_PFX, "/p", $env:PSIGN_MSIX_TEST_PFX_PASSWORD,
             "/d", $msixParityDesc, "/du", $msixParityUrl,
-            "/tr", $env:SIGNTOOL_RS_MSIX_TIMESTAMP_URL, "/td", "SHA256",
+            "/tr", $env:PSIGN_MSIX_TIMESTAMP_URL, "/td", "SHA256",
             $tempNativeMsixDesc
         )
     }
@@ -1366,7 +1366,7 @@ if ($env:SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_MSIX_TEST_PFX -
     $rustMsixDescSign = @("sign") + (Get-RustMsixCredentialArgs) + @(
         "--digest", "sha256",
         "--description", $msixParityDesc, "--description-url", $msixParityUrl,
-        "--timestamp-url", $env:SIGNTOOL_RS_MSIX_TIMESTAMP_URL, "--timestamp-digest", "sha256",
+        "--timestamp-url", $env:PSIGN_MSIX_TIMESTAMP_URL, "--timestamp-digest", "sha256",
         $tempRustMsixDesc
     )
     & "$rustBin" @rustMsixDescSign 2>&1 | Out-Null
@@ -1409,23 +1409,23 @@ if ($env:SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_MSIX_TEST_PFX -
 }
 
 # MSIX decoupled digest scenario: rust dlib/dmdf bridge must align with native success/failure.
-if ($env:SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_MSIX_TEST_PFX -and $env:SIGNTOOL_RS_MSIX_TIMESTAMP_URL -and $env:SIGNTOOL_RS_MSIX_DLIB -and $env:SIGNTOOL_RS_MSIX_DMDF) {
+if ($env:PSIGN_MSIX_UNSIGNED_FIXTURE -and $env:PSIGN_MSIX_TEST_PFX -and $env:PSIGN_MSIX_TIMESTAMP_URL -and $env:PSIGN_MSIX_DLIB -and $env:PSIGN_MSIX_DMDF) {
     $expectedScenarioIds += @("artifact_msix_decoupled_semantic")
     $tempNativeMsixDecoupled = Join-Path $env:TEMP "psign_ci_msix_native_decoupled.msix"
     $tempRustMsixDecoupled = Join-Path $env:TEMP "psign_ci_msix_rust_decoupled.msix"
-    Copy-Item -LiteralPath $env:SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE -Destination $tempNativeMsixDecoupled -Force
-    Copy-Item -LiteralPath $env:SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE -Destination $tempRustMsixDecoupled -Force
+    Copy-Item -LiteralPath $env:PSIGN_MSIX_UNSIGNED_FIXTURE -Destination $tempNativeMsixDecoupled -Force
+    Copy-Item -LiteralPath $env:PSIGN_MSIX_UNSIGNED_FIXTURE -Destination $tempRustMsixDecoupled -Force
 
-    $nativeDecoupledArgs = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_MSIX_TEST_PFX, "/tr", $env:SIGNTOOL_RS_MSIX_TIMESTAMP_URL, "/td", "SHA256", "/dlib", $env:SIGNTOOL_RS_MSIX_DLIB, "/dmdf", $env:SIGNTOOL_RS_MSIX_DMDF, "/ph", $tempNativeMsixDecoupled)
-    if ($env:SIGNTOOL_RS_MSIX_TEST_PFX_PASSWORD) {
-        $nativeDecoupledArgs = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_MSIX_TEST_PFX, "/p", $env:SIGNTOOL_RS_MSIX_TEST_PFX_PASSWORD, "/tr", $env:SIGNTOOL_RS_MSIX_TIMESTAMP_URL, "/td", "SHA256", "/dlib", $env:SIGNTOOL_RS_MSIX_DLIB, "/dmdf", $env:SIGNTOOL_RS_MSIX_DMDF, "/ph", $tempNativeMsixDecoupled)
+    $nativeDecoupledArgs = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_MSIX_TEST_PFX, "/tr", $env:PSIGN_MSIX_TIMESTAMP_URL, "/td", "SHA256", "/dlib", $env:PSIGN_MSIX_DLIB, "/dmdf", $env:PSIGN_MSIX_DMDF, "/ph", $tempNativeMsixDecoupled)
+    if ($env:PSIGN_MSIX_TEST_PFX_PASSWORD) {
+        $nativeDecoupledArgs = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_MSIX_TEST_PFX, "/p", $env:PSIGN_MSIX_TEST_PFX_PASSWORD, "/tr", $env:PSIGN_MSIX_TIMESTAMP_URL, "/td", "SHA256", "/dlib", $env:PSIGN_MSIX_DLIB, "/dmdf", $env:PSIGN_MSIX_DMDF, "/ph", $tempNativeMsixDecoupled)
     }
     $saved = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
     & "$nativeSignTool" @nativeDecoupledArgs 2>&1 | Out-Null
     $nativeDecoupledExit = $LASTEXITCODE
 
-    $rustDecoupledArgs = @("sign") + (Get-RustMsixCredentialArgs) + @("--digest", "sha256", "--timestamp-url", $env:SIGNTOOL_RS_MSIX_TIMESTAMP_URL, "--timestamp-digest", "sha256", "--dlib", $env:SIGNTOOL_RS_MSIX_DLIB, "--dmdf", $env:SIGNTOOL_RS_MSIX_DMDF, "--page-hashes", $tempRustMsixDecoupled)
+    $rustDecoupledArgs = @("sign") + (Get-RustMsixCredentialArgs) + @("--digest", "sha256", "--timestamp-url", $env:PSIGN_MSIX_TIMESTAMP_URL, "--timestamp-digest", "sha256", "--dlib", $env:PSIGN_MSIX_DLIB, "--dmdf", $env:PSIGN_MSIX_DMDF, "--page-hashes", $tempRustMsixDecoupled)
     & "$rustBin" @rustDecoupledArgs 2>&1 | Out-Null
     $rustDecoupledExit = $LASTEXITCODE
     $ErrorActionPreference = $saved
@@ -1447,10 +1447,10 @@ if ($env:SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE -and $env:SIGNTOOL_RS_MSIX_TEST_PFX -
     }
 }
 
-# Optional WinMD (Windows metadata, PE-based CLI assembly SIP): `SIGNTOOL_RS_WINMD_UNSIGNED_FIXTURE` + `SIGNTOOL_RS_TEST_PFX`.
-# Optional RFC3161: `SIGNTOOL_RS_WINMD_TIMESTAMP_URL`. Smoke helper: `scripts/sip-format-smoke.ps1`.
-$winmdSrc = $env:SIGNTOOL_RS_WINMD_UNSIGNED_FIXTURE
-if ($winmdSrc -and $env:SIGNTOOL_RS_TEST_PFX -and (Test-Path -LiteralPath $winmdSrc)) {
+# Optional WinMD (Windows metadata, PE-based CLI assembly SIP): `PSIGN_WINMD_UNSIGNED_FIXTURE` + `PSIGN_TEST_PFX`.
+# Optional RFC3161: `PSIGN_WINMD_TIMESTAMP_URL`. Smoke helper: `scripts/sip-format-smoke.ps1`.
+$winmdSrc = $env:PSIGN_WINMD_UNSIGNED_FIXTURE
+if ($winmdSrc -and $env:PSIGN_TEST_PFX -and (Test-Path -LiteralPath $winmdSrc)) {
     $expectedScenarioIds += @(
         "sign_winmd_sha256_match_native",
         "verify_winmd_pa_exit_match",
@@ -1463,18 +1463,18 @@ if ($winmdSrc -and $env:SIGNTOOL_RS_TEST_PFX -and (Test-Path -LiteralPath $winmd
     $savedW = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
 
-    $nativeWinmdSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX)
-    if ($env:SIGNTOOL_RS_TEST_PFX_PASSWORD) {
-        $nativeWinmdSign += @("/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD)
+    $nativeWinmdSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX)
+    if ($env:PSIGN_TEST_PFX_PASSWORD) {
+        $nativeWinmdSign += @("/p", $env:PSIGN_TEST_PFX_PASSWORD)
     }
-    if ($env:SIGNTOOL_RS_WINMD_TIMESTAMP_URL) {
-        $nativeWinmdSign += @("/tr", $env:SIGNTOOL_RS_WINMD_TIMESTAMP_URL, "/td", "SHA256")
+    if ($env:PSIGN_WINMD_TIMESTAMP_URL) {
+        $nativeWinmdSign += @("/tr", $env:PSIGN_WINMD_TIMESTAMP_URL, "/td", "SHA256")
     }
     $nativeWinmdSign += @($tmpWinmdNat)
 
     $rustWinmdSign = @("sign") + (Get-RustSignCredentialArgs) + @("--digest", "sha256")
-    if ($env:SIGNTOOL_RS_WINMD_TIMESTAMP_URL) {
-        $rustWinmdSign += @("--timestamp-url", $env:SIGNTOOL_RS_WINMD_TIMESTAMP_URL, "--timestamp-digest", "sha256")
+    if ($env:PSIGN_WINMD_TIMESTAMP_URL) {
+        $rustWinmdSign += @("--timestamp-url", $env:PSIGN_WINMD_TIMESTAMP_URL, "--timestamp-digest", "sha256")
     }
     $rustWinmdSign += @($tmpWinmdRust)
 
@@ -1499,12 +1499,12 @@ if ($winmdSrc -and $env:SIGNTOOL_RS_TEST_PFX -and (Test-Path -LiteralPath $winmd
     Copy-Item -LiteralPath $winmdSrc -Destination $tmpWinmdDescNat -Force
     Copy-Item -LiteralPath $winmdSrc -Destination $tmpWinmdDescRust -Force
 
-    $nativeWinmdDescSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/d", $winmdParityDesc, "/du", $winmdParityUrl)
-    if ($env:SIGNTOOL_RS_TEST_PFX_PASSWORD) {
-        $nativeWinmdDescSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, "/d", $winmdParityDesc, "/du", $winmdParityUrl)
+    $nativeWinmdDescSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/d", $winmdParityDesc, "/du", $winmdParityUrl)
+    if ($env:PSIGN_TEST_PFX_PASSWORD) {
+        $nativeWinmdDescSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/p", $env:PSIGN_TEST_PFX_PASSWORD, "/d", $winmdParityDesc, "/du", $winmdParityUrl)
     }
-    if ($env:SIGNTOOL_RS_WINMD_TIMESTAMP_URL) {
-        $nativeWinmdDescSign += @("/tr", $env:SIGNTOOL_RS_WINMD_TIMESTAMP_URL, "/td", "SHA256")
+    if ($env:PSIGN_WINMD_TIMESTAMP_URL) {
+        $nativeWinmdDescSign += @("/tr", $env:PSIGN_WINMD_TIMESTAMP_URL, "/td", "SHA256")
     }
     $nativeWinmdDescSign += @($tmpWinmdDescNat)
 
@@ -1512,8 +1512,8 @@ if ($winmdSrc -and $env:SIGNTOOL_RS_TEST_PFX -and (Test-Path -LiteralPath $winmd
         "--digest", "sha256",
         "--description", $winmdParityDesc, "--description-url", $winmdParityUrl
     )
-    if ($env:SIGNTOOL_RS_WINMD_TIMESTAMP_URL) {
-        $rustWinmdDescSign += @("--timestamp-url", $env:SIGNTOOL_RS_WINMD_TIMESTAMP_URL, "--timestamp-digest", "sha256")
+    if ($env:PSIGN_WINMD_TIMESTAMP_URL) {
+        $rustWinmdDescSign += @("--timestamp-url", $env:PSIGN_WINMD_TIMESTAMP_URL, "--timestamp-digest", "sha256")
     }
     $rustWinmdDescSign += @($tmpWinmdDescRust)
 
@@ -1576,10 +1576,10 @@ if ($winmdSrc -and $env:SIGNTOOL_RS_TEST_PFX -and (Test-Path -LiteralPath $winmd
     }
 }
 
-# Optional MSI (Windows Installer SIP): supply `SIGNTOOL_RS_MSI_UNSIGNED_FIXTURE` + same PFX env as PE (`SIGNTOOL_RS_TEST_PFX`).
-# Optional RFC3161 during sign: `SIGNTOOL_RS_MSI_TIMESTAMP_URL` (native `/tr` `/td SHA256`, rust `--timestamp-url` `--timestamp-digest sha256`).
-$mmsiSrc = $env:SIGNTOOL_RS_MSI_UNSIGNED_FIXTURE
-if ($mmsiSrc -and $env:SIGNTOOL_RS_TEST_PFX -and (Test-Path -LiteralPath $mmsiSrc)) {
+# Optional MSI (Windows Installer SIP): supply `PSIGN_MSI_UNSIGNED_FIXTURE` + same PFX env as PE (`PSIGN_TEST_PFX`).
+# Optional RFC3161 during sign: `PSIGN_MSI_TIMESTAMP_URL` (native `/tr` `/td SHA256`, rust `--timestamp-url` `--timestamp-digest sha256`).
+$mmsiSrc = $env:PSIGN_MSI_UNSIGNED_FIXTURE
+if ($mmsiSrc -and $env:PSIGN_TEST_PFX -and (Test-Path -LiteralPath $mmsiSrc)) {
     $expectedScenarioIds += @(
         "sign_msi_sha256_match_native",
         "verify_msi_pa_exit_match",
@@ -1592,18 +1592,18 @@ if ($mmsiSrc -and $env:SIGNTOOL_RS_TEST_PFX -and (Test-Path -LiteralPath $mmsiSr
     $savedMsi = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
 
-    $nativeMsiSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX)
-    if ($env:SIGNTOOL_RS_TEST_PFX_PASSWORD) {
-        $nativeMsiSign += @("/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD)
+    $nativeMsiSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX)
+    if ($env:PSIGN_TEST_PFX_PASSWORD) {
+        $nativeMsiSign += @("/p", $env:PSIGN_TEST_PFX_PASSWORD)
     }
-    if ($env:SIGNTOOL_RS_MSI_TIMESTAMP_URL) {
-        $nativeMsiSign += @("/tr", $env:SIGNTOOL_RS_MSI_TIMESTAMP_URL, "/td", "SHA256")
+    if ($env:PSIGN_MSI_TIMESTAMP_URL) {
+        $nativeMsiSign += @("/tr", $env:PSIGN_MSI_TIMESTAMP_URL, "/td", "SHA256")
     }
     $nativeMsiSign += @($tmpMsiNat)
 
     $rustMsiSign = @("sign") + (Get-RustSignCredentialArgs) + @("--digest", "sha256")
-    if ($env:SIGNTOOL_RS_MSI_TIMESTAMP_URL) {
-        $rustMsiSign += @("--timestamp-url", $env:SIGNTOOL_RS_MSI_TIMESTAMP_URL, "--timestamp-digest", "sha256")
+    if ($env:PSIGN_MSI_TIMESTAMP_URL) {
+        $rustMsiSign += @("--timestamp-url", $env:PSIGN_MSI_TIMESTAMP_URL, "--timestamp-digest", "sha256")
     }
     $rustMsiSign += @($tmpMsiRust)
 
@@ -1628,12 +1628,12 @@ if ($mmsiSrc -and $env:SIGNTOOL_RS_TEST_PFX -and (Test-Path -LiteralPath $mmsiSr
     Copy-Item -LiteralPath $mmsiSrc -Destination $tmpMsiDescNat -Force
     Copy-Item -LiteralPath $mmsiSrc -Destination $tmpMsiDescRust -Force
 
-    $nativeMsiDescSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/d", $msiParityDesc, "/du", $msiParityUrl)
-    if ($env:SIGNTOOL_RS_TEST_PFX_PASSWORD) {
-        $nativeMsiDescSign = @("sign", "/fd", "SHA256", "/f", $env:SIGNTOOL_RS_TEST_PFX, "/p", $env:SIGNTOOL_RS_TEST_PFX_PASSWORD, "/d", $msiParityDesc, "/du", $msiParityUrl)
+    $nativeMsiDescSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/d", $msiParityDesc, "/du", $msiParityUrl)
+    if ($env:PSIGN_TEST_PFX_PASSWORD) {
+        $nativeMsiDescSign = @("sign", "/fd", "SHA256", "/f", $env:PSIGN_TEST_PFX, "/p", $env:PSIGN_TEST_PFX_PASSWORD, "/d", $msiParityDesc, "/du", $msiParityUrl)
     }
-    if ($env:SIGNTOOL_RS_MSI_TIMESTAMP_URL) {
-        $nativeMsiDescSign += @("/tr", $env:SIGNTOOL_RS_MSI_TIMESTAMP_URL, "/td", "SHA256")
+    if ($env:PSIGN_MSI_TIMESTAMP_URL) {
+        $nativeMsiDescSign += @("/tr", $env:PSIGN_MSI_TIMESTAMP_URL, "/td", "SHA256")
     }
     $nativeMsiDescSign += @($tmpMsiDescNat)
 
@@ -1641,8 +1641,8 @@ if ($mmsiSrc -and $env:SIGNTOOL_RS_TEST_PFX -and (Test-Path -LiteralPath $mmsiSr
         "--digest", "sha256",
         "--description", $msiParityDesc, "--description-url", $msiParityUrl
     )
-    if ($env:SIGNTOOL_RS_MSI_TIMESTAMP_URL) {
-        $rustMsiDescSign += @("--timestamp-url", $env:SIGNTOOL_RS_MSI_TIMESTAMP_URL, "--timestamp-digest", "sha256")
+    if ($env:PSIGN_MSI_TIMESTAMP_URL) {
+        $rustMsiDescSign += @("--timestamp-url", $env:PSIGN_MSI_TIMESTAMP_URL, "--timestamp-digest", "sha256")
     }
     $rustMsiDescSign += @($tmpMsiDescRust)
 
@@ -1706,11 +1706,11 @@ if ($mmsiSrc -and $env:SIGNTOOL_RS_TEST_PFX -and (Test-Path -LiteralPath $mmsiSr
 }
 
 # Optional scenario: detached verify path
-if ($env:SIGNTOOL_RS_DETACHED_CONTENT -and $env:SIGNTOOL_RS_DETACHED_PKCS7) {
+if ($env:PSIGN_DETACHED_CONTENT -and $env:PSIGN_DETACHED_PKCS7) {
     $expectedScenarioIds += @("artifact_detached_semantic")
     $saved = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    & "$rustBin" verify --policy pa --allow-test-root $env:SIGNTOOL_RS_DETACHED_CONTENT --detached-pkcs7 $env:SIGNTOOL_RS_DETACHED_PKCS7 2>&1 | Out-Null
+    & "$rustBin" verify --policy pa --allow-test-root $env:PSIGN_DETACHED_CONTENT --detached-pkcs7 $env:PSIGN_DETACHED_PKCS7 2>&1 | Out-Null
     $detachedExit = $LASTEXITCODE
     $ErrorActionPreference = $saved
     # Bare CMS SignedData from `signtool /p7` is normalized to PKCS#7 ContentInfo in Rust; remaining failures stay documented.
@@ -1724,13 +1724,13 @@ if ($env:SIGNTOOL_RS_DETACHED_CONTENT -and $env:SIGNTOOL_RS_DETACHED_PKCS7) {
 }
 
 # Optional scenario: catalog verify path (+ `/o` WinTrust flag via `--os-version-check` when catalog is used)
-if ($env:SIGNTOOL_RS_CATALOG_TARGET -and $env:SIGNTOOL_RS_CATALOG_FILE) {
+if ($env:PSIGN_CATALOG_TARGET -and $env:PSIGN_CATALOG_FILE) {
     $expectedScenarioIds += @("artifact_catalog_semantic", "artifact_catalog_os_version_semantic")
     $saved = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    & "$rustBin" verify $env:SIGNTOOL_RS_CATALOG_TARGET --catalog $env:SIGNTOOL_RS_CATALOG_FILE 2>&1 | Out-Null
+    & "$rustBin" verify $env:PSIGN_CATALOG_TARGET --catalog $env:PSIGN_CATALOG_FILE 2>&1 | Out-Null
     $catalogExit = $LASTEXITCODE
-    & "$rustBin" verify $env:SIGNTOOL_RS_CATALOG_TARGET --catalog $env:SIGNTOOL_RS_CATALOG_FILE --os-version-check "386:10.0.26100.0" 2>&1 | Out-Null
+    & "$rustBin" verify $env:PSIGN_CATALOG_TARGET --catalog $env:PSIGN_CATALOG_FILE --os-version-check "386:10.0.26100.0" 2>&1 | Out-Null
     $catalogOsExit = $LASTEXITCODE
     $ErrorActionPreference = $saved
     $results += [PSCustomObject]@{

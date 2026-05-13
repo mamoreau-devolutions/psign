@@ -1,7 +1,7 @@
 #![cfg(windows)]
 
-//! Cross-CLI parity between **`psign-tool-portable verify-pe`** and the Rust PE Authenticode digest check
-//! wired behind **`psign-tool-windows verify --rust-sip-pe-digest-check`**.
+//! Cross-CLI parity between **`psign-tool portable verify-pe`** and the Rust PE Authenticode digest check
+//! wired behind **`psign-tool verify --rust-sip-pe-digest-check`**.
 //!
 //! On stock Windows trust stores the upstream **`tiny*.signed.efi`** fixtures do **not** satisfy
 //! WinVerifyTrust, so the Windows CLI exits before it can run the Rust SIP digest pass. These tests
@@ -11,12 +11,10 @@
 use assert_cmd::Command;
 use std::path::PathBuf;
 
-fn portable_exe() -> PathBuf {
-    let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".into());
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target")
-        .join(profile)
-        .join("psign-tool-portable.exe")
+fn portable_cmd() -> Command {
+    let mut cmd = Command::cargo_bin("psign-tool").expect("psign-tool binary");
+    cmd.arg("portable");
+    cmd
 }
 
 fn tiny32_fixture() -> PathBuf {
@@ -31,17 +29,10 @@ fn tiny64_fixture() -> PathBuf {
 
 #[test]
 fn portable_verify_pe_agrees_with_windows_rust_sip_pe_digest_routine_tiny32() {
-    let portable = portable_exe();
-    assert!(
-        portable.is_file(),
-        "psign-tool-portable missing at {} — run `cargo build --workspace` or `cargo build -p psign-digest-cli --bin psign-tool-portable` first",
-        portable.display()
-    );
-
     let fixture = tiny32_fixture();
     assert!(fixture.is_file(), "fixture missing: {}", fixture.display());
 
-    let mut digest_cmd = Command::new(&portable);
+    let mut digest_cmd = portable_cmd();
     digest_cmd.arg("verify-pe").arg(&fixture);
     digest_cmd.assert().success();
 
@@ -53,17 +44,10 @@ fn portable_verify_pe_agrees_with_windows_rust_sip_pe_digest_routine_tiny32() {
 
 #[test]
 fn portable_verify_pe_agrees_with_windows_rust_sip_pe_digest_routine_tiny64() {
-    let portable = portable_exe();
-    assert!(
-        portable.is_file(),
-        "psign-tool-portable missing at {} — run `cargo build --workspace` or `cargo build -p psign-digest-cli --bin psign-tool-portable` first",
-        portable.display()
-    );
-
     let fixture = tiny64_fixture();
     assert!(fixture.is_file(), "fixture missing: {}", fixture.display());
 
-    let mut digest_cmd = Command::new(&portable);
+    let mut digest_cmd = portable_cmd();
     digest_cmd.arg("verify-pe").arg(&fixture);
     digest_cmd.assert().success();
 

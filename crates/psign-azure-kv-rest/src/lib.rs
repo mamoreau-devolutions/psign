@@ -26,7 +26,7 @@ pub enum KvHashAlg {
     Sha512,
 }
 
-/// Authentication inputs (same modes as **`psign-tool-windows`** Azure KV signing).
+/// Authentication inputs (same modes as **`psign-tool`** Azure KV signing).
 #[derive(Debug, Clone, Copy)]
 pub struct KvAuthParams<'a> {
     pub access_token: Option<&'a str>,

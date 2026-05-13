@@ -290,7 +290,7 @@ fn load_decoupled_digest_info(
         .map_err(|e| {
             anyhow!(
                 "LoadLibraryW('{}') failed: {e}. \
-If using Azure Artifact Signing: install .NET 8, deploy the full NuGet `bin\\{arch}` directory (all dependent DLLs), and use the {arch} `Azure.CodeSigning.Dlib.dll` with a {arch} psign-tool-windows build.",
+If using Azure Artifact Signing: install .NET 8, deploy the full NuGet `bin\\{arch}` directory (all dependent DLLs), and use the {arch} `Azure.CodeSigning.Dlib.dll` with a {arch} psign-tool build.",
                 dlib.display()
             )
         })?;

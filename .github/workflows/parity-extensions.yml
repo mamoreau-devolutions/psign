@@ -10,7 +10,7 @@ on:
         type: boolean
         default: false
       run_catalog_verify:
-        description: Run Rust catalog verify against SIGNTOOL_RS_CATALOG_* secrets
+        description: Run Rust catalog verify against PSIGN_CATALOG_* secrets
         type: boolean
         default: false
 
@@ -21,23 +21,23 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build -p psign --bin psign-tool-windows
+      - run: cargo build -p psign --bin psign-tool
       - name: Bootstrap Devolutions test PKI + pack minimal MSIX
         shell: pwsh
         env:
-          SIGNTOOL_RS_MSIX_DLIB: ${{ secrets.SIGNTOOL_RS_MSIX_DLIB }}
-          SIGNTOOL_RS_MSIX_DMDF: ${{ secrets.SIGNTOOL_RS_MSIX_DMDF }}
+          PSIGN_MSIX_DLIB: ${{ secrets.PSIGN_MSIX_DLIB }}
+          PSIGN_MSIX_DMDF: ${{ secrets.PSIGN_MSIX_DMDF }}
         run: |
-          if (-not $env:SIGNTOOL_RS_MSIX_DLIB -or -not $env:SIGNTOOL_RS_MSIX_DMDF) {
-            throw "Set repository secrets SIGNTOOL_RS_MSIX_DLIB and SIGNTOOL_RS_MSIX_DMDF."
+          if (-not $env:PSIGN_MSIX_DLIB -or -not $env:PSIGN_MSIX_DMDF) {
+            throw "Set repository secrets PSIGN_MSIX_DLIB and PSIGN_MSIX_DMDF."
           }
           ./scripts/ci/bootstrap-devolutions-authenticode.ps1 -EmitGithubEnv
           $ws = "${{ github.workspace }}"
-          $exe = Join-Path $ws "target\debug\psign-tool-windows.exe"
+          $exe = Join-Path $ws "target\debug\psign-tool.exe"
           $rt = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { $env:TEMP }
           $msix = Join-Path $rt "psign_extension_decoupled.msix"
           ./scripts/ci/pack-minimal-msix.ps1 -WorkspaceRoot $ws -PeAsExecutable $exe -OutputMsix $msix
-          $env:SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE = $msix
+          $env:PSIGN_MSIX_UNSIGNED_FIXTURE = $msix
           ./scripts/msix-parity-sign.ps1 -UseDecoupledDigest -FailOnSemantic
 
   catalog-verify:
@@ -46,18 +46,18 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build -p psign --bin psign-tool-windows
+      - run: cargo build -p psign --bin psign-tool
       - name: Catalog verify (Rust)
         shell: pwsh
         env:
-          SIGNTOOL_RS_CATALOG_TARGET: ${{ secrets.SIGNTOOL_RS_CATALOG_TARGET }}
-          SIGNTOOL_RS_CATALOG_FILE: ${{ secrets.SIGNTOOL_RS_CATALOG_FILE }}
+          PSIGN_CATALOG_TARGET: ${{ secrets.PSIGN_CATALOG_TARGET }}
+          PSIGN_CATALOG_FILE: ${{ secrets.PSIGN_CATALOG_FILE }}
         run: |
-          if (-not $env:SIGNTOOL_RS_CATALOG_TARGET -or -not $env:SIGNTOOL_RS_CATALOG_FILE) {
-            throw "Set repository secrets SIGNTOOL_RS_CATALOG_TARGET and SIGNTOOL_RS_CATALOG_FILE."
+          if (-not $env:PSIGN_CATALOG_TARGET -or -not $env:PSIGN_CATALOG_FILE) {
+            throw "Set repository secrets PSIGN_CATALOG_TARGET and PSIGN_CATALOG_FILE."
           }
-          $rust = Join-Path "${{ github.workspace }}" "target\debug\psign-tool-windows.exe"
-          & $rust verify $env:SIGNTOOL_RS_CATALOG_TARGET --catalog $env:SIGNTOOL_RS_CATALOG_FILE
+          $rust = Join-Path "${{ github.workspace }}" "target\debug\psign-tool.exe"
+          & $rust verify $env:PSIGN_CATALOG_TARGET --catalog $env:PSIGN_CATALOG_FILE
           if ($LASTEXITCODE -ne 0) { throw "Catalog verify failed with exit $LASTEXITCODE" }
-          & $rust verify $env:SIGNTOOL_RS_CATALOG_TARGET --catalog $env:SIGNTOOL_RS_CATALOG_FILE --os-version-check "386:10.0.26100.0"
+          & $rust verify $env:PSIGN_CATALOG_TARGET --catalog $env:PSIGN_CATALOG_FILE --os-version-check "386:10.0.26100.0"
           if ($LASTEXITCODE -ne 0) { throw "Catalog verify with --os-version-check failed with exit $LASTEXITCODE" }

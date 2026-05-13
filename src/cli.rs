@@ -1,9 +1,10 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "psign-tool-windows",
+    name = "psign-tool",
     version,
     about = "Rust reimplementation of signtool.exe (Windows CryptoAPI / WinTrust)"
 )]
@@ -25,11 +26,23 @@ pub struct GlobalOpts {
     /// Debug diagnostics (native `/debug`).
     #[arg(long, global = true)]
     pub debug: bool,
+    /// Backend mode: auto chooses the native Windows backend on Windows and portable Rust backend elsewhere.
+    #[arg(long, value_enum, global = true)]
+    pub mode: Option<ToolMode>,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+pub enum ToolMode {
+    Auto,
+    Windows,
+    Portable,
 }
 
 #[derive(Subcommand, Debug)]
 #[allow(clippy::large_enum_variant)] // Subcommands mirror native `signtool` argv shapes; indirection hurts clap ergonomics.
 pub enum Command {
+    /// Portable-only diagnostics and helpers (no Win32 APIs).
+    Portable(PortableArgs),
     /// Verify embedded Authenticode signature on a file.
     Verify(VerifyArgs),
     /// Sign a file using mssign32 (`SignerSignEx3`).
@@ -40,13 +53,21 @@ pub enum Command {
     Catdb(CatdbArgs),
     /// Remove embedded signature data from a PE file (native `remove`).
     Remove(RemoveArgs),
-    /// Inspect Authenticode PKCS#7 layers (nested `1.3.6.1.4.1.311.2.4.1`, timestamp OIDs) as JSON — same portable parser as **`psign-tool-portable inspect-authenticode`**.
+    /// Inspect Authenticode PKCS#7 layers (nested `1.3.6.1.4.1.311.2.4.1`, timestamp OIDs) as JSON — same portable parser as **`psign-tool portable inspect-authenticode`**.
     InspectSignature(InspectSignatureArgs),
     /// Sign Remote Desktop Protocol `.rdp` files (native `rdpsign.exe` semantics).
     Rdp(RdpArgs),
     /// Submit a digest to Azure Code Signing **data-plane** REST (`:sign` LRO); requires `--features artifact-signing-rest`. Prints signature + operation JSON on success.
     #[cfg(feature = "artifact-signing-rest")]
     ArtifactSigningSubmit(ArtifactSigningSubmitArgs),
+}
+
+#[derive(Args, Debug)]
+#[command(disable_help_flag = true)]
+pub struct PortableArgs {
+    /// Arguments passed to the portable command parser (for example: `pe-digest file.exe`).
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub args: Vec<OsString>,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -56,7 +77,7 @@ pub enum VerifyPolicy {
     Pg,
 }
 
-/// Experimental Rust SIP backend selector (`sign --rust-sip …`, `SIGNTOOL_RS_RUST_SIP`).
+/// Experimental Rust SIP backend selector (`sign --rust-sip …`, `PSIGN_RUST_SIP`).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 pub enum RustSipBackend {
     /// PE / PE-like WinMD post-sign Authenticode digest consistency check after OS signing.
@@ -80,7 +101,7 @@ pub enum RustSipBackend {
     /// PKCS#7 `.cat` catalog — CMS digest over encapsulated CTL `eContent` vs PKCS#9 `messageDigest` (`WINTRUST` SIP).
     #[value(name = "catalog")]
     Catalog,
-    /// Ignore `SIGNTOOL_RS_RUST_SIP` for this invocation.
+    /// Ignore `PSIGN_RUST_SIP` for this invocation.
     #[value(name = "off")]
     Off,
 }
@@ -88,7 +109,7 @@ pub enum RustSipBackend {
 /// Exit-code scheme for batch `sign` (AzureSignTool uses HRESULT-style values when enabled).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 pub enum SignExitCodes {
-    /// Classic psign-tool-windows semantics (`0` ok, `1` error, `2` warning).
+    /// Classic psign-tool semantics (`0` ok, `1` error, `2` warning).
     #[value(name = "signtool")]
     Signtool,
     /// AzureSignTool-style HRESULT batch codes (`0`, `0x20000001` partial success, `0xA0000002` all failed).
@@ -465,7 +486,7 @@ pub struct SignArgs {
     /// Enclave warnings do not change exit code (native `/noenclavewarn`) — not implemented.
     #[arg(long = "noenclavewarn")]
     pub sign_no_enclave_warn: bool,
-    /// Experimental Rust SIP behavior (`pe` / `script` / `msi` / `esd` / `msix` / `cab` = post-sign digest consistency check). Override with env `SIGNTOOL_RS_RUST_SIP` when unset; use `off` to ignore the env var.
+    /// Experimental Rust SIP behavior (`pe` / `script` / `msi` / `esd` / `msix` / `cab` = post-sign digest consistency check). Override with env `PSIGN_RUST_SIP` when unset; use `off` to ignore the env var.
     #[arg(long = "rust-sip", value_enum)]
     pub rust_sip: Option<RustSipBackend>,
     /// Azure Key Vault URL (`AzureSignTool` `--azure-key-vault-url` / `-kvu`). Requires `--features azure-kv-sign`.
@@ -503,7 +524,7 @@ pub struct SignArgs {
     /// Cap concurrent signing threads for multi-file batches (`-mdop`). `1` forces sequential signing.
     #[arg(long = "max-degree-of-parallelism", visible_alias = "mdop")]
     pub max_degree_parallelism: Option<usize>,
-    /// Batch exit-code scheme; overrides env when set. Env: `SIGNTOOL_RS_EXIT_CODES=azure|signtool`.
+    /// Batch exit-code scheme; overrides env when set. Env: `PSIGN_EXIT_CODES=azure|signtool`.
     #[arg(long = "exit-codes", value_enum)]
     pub exit_codes: Option<SignExitCodes>,
     /// File(s) to sign (native trailing `<filename(s)>`).

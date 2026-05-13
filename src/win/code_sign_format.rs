@@ -6,7 +6,7 @@
 //! PowerShell scripts (`.ps1`), PE files, Windows metadata (`.winmd`), MSIX packages, Windows Installer
 //! packages (`.msi`), WIM/ESD images (`.wim`, `.esd`), etc. use the **existing Windows SIP DLL** at runtime by default.
 //!
-//! **Experimental:** `--rust-sip pe` (and `SIGNTOOL_RS_RUST_SIP=pe`) runs an optional **post-sign**
+//! **Experimental:** `--rust-sip pe` (and `PSIGN_RUST_SIP=pe`) runs an optional **post-sign**
 //! PE Authenticode digest consistency check in Rust after `SignerSignEx3`; it does not replace OS SIP
 //! registration. See `src/win/sip_rust/` (re-exports `psign-sip-digest`) and `docs/rust-sip-architecture.md`.
 //!

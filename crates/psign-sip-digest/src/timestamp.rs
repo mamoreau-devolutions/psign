@@ -5,7 +5,7 @@
 //! when **`--prefer-timestamp-signing-time`** is set (**`psign-authenticode-trust`**). This module
 //! encodes minimal **§2.4.1** requests (version 1, **`messageImprint`**, optional **`nonce`** /
 //! **`certReq`**) and parses **§2.4.2** responses far enough to read **PKIStatus** and locate the
-//! optional **`timeStampToken`** TLV. **HTTP transport** is implemented in **`psign-tool-portable`**
+//! optional **`timeStampToken`** TLV. **HTTP transport** is implemented in **`psign-tool portable`**
 //! behind **`--features timestamp-http`** (**`rfc3161-timestamp-http-post`**). Optional **`failInfo`**
 //! (**`PKIFailureInfo`**) **`BIT STRING`** values can be decoded to RFC 2510 Appendix A bit names
 //! (**`badAlg`** … **`badPOP`**) for logging; **CMS signature / `MessageImprint` verification** remain out of scope.

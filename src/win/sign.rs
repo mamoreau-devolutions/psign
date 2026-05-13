@@ -22,14 +22,14 @@ fn rust_sip_backend(args: &SignArgs) -> Option<RustSipBackend> {
             Pe | Script | Msi | Esd | Msix | Cab | Catalog => Some(b),
         };
     }
-    if std::env::var("SIGNTOOL_RS_RUST_SIP")
+    if crate::env_var_with_legacy(crate::ENV_RUST_SIP, crate::LEGACY_ENV_RUST_SIP)
         .map(|v| v.eq_ignore_ascii_case("off"))
         .unwrap_or(false)
     {
         return None;
     }
-    match std::env::var("SIGNTOOL_RS_RUST_SIP") {
-        Ok(v) => {
+    match crate::env_var_with_legacy(crate::ENV_RUST_SIP, crate::LEGACY_ENV_RUST_SIP) {
+        Some(v) => {
             let t = v.trim();
             if t.eq_ignore_ascii_case("pe") {
                 Some(Pe)
@@ -49,7 +49,7 @@ fn rust_sip_backend(args: &SignArgs) -> Option<RustSipBackend> {
                 None
             }
         }
-        Err(_) => None,
+        None => None,
     }
 }
 
@@ -96,11 +96,11 @@ fn ensure_rust_sip_pe_allowed_for_format(path: &Path) -> Result<()> {
     match crate::win::code_sign_format::detect(path) {
         PortableExecutable | WindowsMetadata => Ok(()),
         MsixFamily => Err(anyhow!(
-            "--rust-sip pe (or SIGNTOOL_RS_RUST_SIP=pe) does not apply to MSIX/AppX packages; \
+            "--rust-sip pe (or PSIGN_RUST_SIP=pe) does not apply to MSIX/AppX packages; \
              use the OS AppX SIP / native signtool — disable Rust SIP with `--rust-sip off`"
         )),
         PowerShellScript | PowerShellModule | PowerShellManifest => Err(anyhow!(
-            "use `--rust-sip script` (or SIGNTOOL_RS_RUST_SIP=script) for PowerShell-class files, not `--rust-sip pe`"
+            "use `--rust-sip script` (or PSIGN_RUST_SIP=script) for PowerShell-class files, not `--rust-sip pe`"
         )),
         WindowsInstaller | Catalog | Cabinet | WimImage => Err(anyhow!(
             "--rust-sip pe applies only to PE-based portable executables (.exe, .dll, .winmd, …); \
@@ -177,8 +177,8 @@ fn resolved_sign_exit_codes(args: &SignArgs) -> SignExitCodes {
     if let Some(x) = args.exit_codes {
         return x;
     }
-    match std::env::var("SIGNTOOL_RS_EXIT_CODES") {
-        Ok(v) => {
+    match crate::env_var_with_legacy(crate::ENV_EXIT_CODES, crate::LEGACY_ENV_EXIT_CODES) {
+        Some(v) => {
             let t = v.trim();
             if t.eq_ignore_ascii_case("azure") || t.eq_ignore_ascii_case("azuresigntool") {
                 SignExitCodes::Azuresigntool
@@ -186,7 +186,7 @@ fn resolved_sign_exit_codes(args: &SignArgs) -> SignExitCodes {
                 SignExitCodes::Signtool
             }
         }
-        Err(_) => SignExitCodes::Signtool,
+        None => SignExitCodes::Signtool,
     }
 }
 

@@ -1,4 +1,4 @@
-//! Thin compatibility entry point: sets Azure-style HRESULT batch defaults (`SIGNTOOL_RS_EXIT_CODES`).
+//! Thin compatibility entry point: sets Azure-style HRESULT batch defaults (`PSIGN_EXIT_CODES`).
 
 #[cfg(not(windows))]
 fn main() {
@@ -10,7 +10,7 @@ fn main() {
 fn main() {
     // SAFETY: single-threaded process startup before spawning workers; sets HRESULT-style defaults for scripts.
     unsafe {
-        std::env::set_var("SIGNTOOL_RS_EXIT_CODES", "azure");
+        std::env::set_var("PSIGN_EXIT_CODES", "azure");
     }
     psign::run_windows_cli();
 }
