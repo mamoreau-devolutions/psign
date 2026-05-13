@@ -2169,6 +2169,19 @@ mod tests {
     }
 
     #[test]
+    fn block_map_parser_rejects_missing_or_unsupported_hash_method() {
+        let missing = br#"<BlockMap><File Name="payload.txt" Size="1"><Block Hash="AAAA"/></File></BlockMap>"#;
+        let err = parse_block_map_xml(missing).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("HashMethod"), "{msg}");
+
+        let unsupported = br#"<BlockMap HashMethod="http://example.invalid/sha3-256"><File Name="payload.txt" Size="1"><Block Hash="AAAA"/></File></BlockMap>"#;
+        let err = parse_block_map_xml(unsupported).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("unsupported"), "{msg}");
+    }
+
+    #[test]
     fn content_types_validation_rejects_malformed_overrides() {
         let no_absolute_part = br#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="AppxBlockMap.xml" ContentType="application/vnd.ms-appx.blockmap+xml"/></Types>"#;
         let err = validate_content_types_xml(no_absolute_part).unwrap_err();
@@ -2179,6 +2192,23 @@ mod tests {
         let err = validate_content_types_xml(duplicate_default).unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("duplicate"), "{msg}");
+    }
+
+    #[test]
+    fn content_types_validation_rejects_text_and_code_integrity_mismatch() {
+        let text = br#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">not allowed</Types>"#;
+        let err = validate_content_types_xml(text).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("non-whitespace text"), "{msg}");
+
+        let xml = br#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/AppxBlockMap.xml" ContentType="application/vnd.ms-appx.blockmap+xml"/><Override PartName="/AppxSignature.p7x" ContentType="application/vnd.ms-appx.signature"/><Override PartName="/AppxManifest.xml" ContentType="application/vnd.ms-appx.manifest+xml"/><Override PartName="/AppxMetadata/CodeIntegrity.cat" ContentType="application/octet-stream"/></Types>"#;
+        let content_types = validate_content_types_xml(xml).unwrap();
+        let inventory = AppxPackageInventory {
+            has_code_integrity: true,
+        };
+        let err = validate_reserved_content_types(&content_types, inventory, "appx").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("CodeIntegrity.cat"), "{msg}");
     }
 
     #[test]
@@ -2542,6 +2572,48 @@ mod tests {
         let err = validate_block_map_file_hashes(&zip, kind, &files).unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("zero Size"), "{msg}");
+    }
+
+    #[test]
+    fn block_map_validation_rejects_metadata_and_block_count_mismatches() {
+        let metadata_payload = b"metadata is not payload";
+        let metadata_hash = hash_bytes(PeAuthenticodeHashKind::Sha256, metadata_payload);
+        let metadata_block_map =
+            block_map_xml_for_file("AppxBlockMap.xml", metadata_payload.len(), &metadata_hash);
+        let (kind, files) = parse_block_map_xml(&metadata_block_map).unwrap();
+        let zip = zip_with_entries(&[("AppxBlockMap.xml", metadata_payload)]);
+        let err = validate_block_map_file_hashes(&zip, kind, &files).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("metadata part"), "{msg}");
+
+        let content_without_hashes =
+            br#"<BlockMap HashMethod="http://www.w3.org/2001/04/xmlenc#sha256"><File Name="payload.txt" Size="3"/></BlockMap>"#;
+        let (kind, files) = parse_block_map_xml(content_without_hashes).unwrap();
+        let zip = zip_with_entries(&[("payload.txt", b"abc")]);
+        let err = validate_block_map_file_hashes(&zip, kind, &files).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("no block hashes"), "{msg}");
+
+        let empty_hash = hash_bytes(PeAuthenticodeHashKind::Sha256, b"");
+        let empty_with_hashes = block_map_xml_for_file("empty.txt", 0, &empty_hash);
+        let (kind, files) = parse_block_map_xml(&empty_with_hashes).unwrap();
+        let zip = zip_with_entries(&[("empty.txt", b"")]);
+        let err = validate_block_map_file_hashes(&zip, kind, &files).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("empty but has block hashes"), "{msg}");
+
+        let payload = b"abc";
+        let hash = hash_bytes(PeAuthenticodeHashKind::Sha256, payload);
+        let hash_b64 = base64::engine::general_purpose::STANDARD.encode(hash);
+        let too_many = format!(
+            r#"<BlockMap HashMethod="{HASH_SHA256}"><File Name="payload.txt" Size="{}"><Block Hash="{hash_b64}"/><Block Hash="{hash_b64}"/></File></BlockMap>"#,
+            payload.len()
+        );
+        let (kind, files) = parse_block_map_xml(too_many.as_bytes()).unwrap();
+        let zip = zip_with_entries(&[("payload.txt", payload)]);
+        let err = validate_block_map_file_hashes(&zip, kind, &files).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("too many block hashes"), "{msg}");
     }
 
     #[test]
