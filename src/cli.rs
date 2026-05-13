@@ -42,6 +42,8 @@ pub enum Command {
     Remove(RemoveArgs),
     /// Inspect Authenticode PKCS#7 layers (nested `1.3.6.1.4.1.311.2.4.1`, timestamp OIDs) as JSON — same portable parser as **`psign-tool-portable inspect-authenticode`**.
     InspectSignature(InspectSignatureArgs),
+    /// Sign Remote Desktop Protocol `.rdp` files (native `rdpsign.exe` semantics).
+    Rdp(RdpArgs),
     /// Submit a digest to Azure Code Signing **data-plane** REST (`:sign` LRO); requires `--features artifact-signing-rest`. Prints signature + operation JSON on success.
     #[cfg(feature = "artifact-signing-rest")]
     ArtifactSigningSubmit(ArtifactSigningSubmitArgs),
@@ -582,6 +584,30 @@ pub struct RemoveArgs {
     #[arg(long, visible_alias = "u")]
     pub strip_unauthenticated_attributes: bool,
     /// PE/COFF file(s) to modify (native trailing `<filename(s)>`).
+    #[arg(required = true)]
+    pub files: Vec<PathBuf>,
+}
+
+#[derive(Args, Debug)]
+pub struct RdpArgs {
+    /// SHA1 thumbprint of the RDP signing certificate (legacy rdpsign mode).
+    #[arg(
+        long = "sha1",
+        conflicts_with = "cert_sha256",
+        required_unless_present = "cert_sha256"
+    )]
+    pub cert_sha1: Option<String>,
+    /// SHA256 thumbprint of the RDP signing certificate.
+    #[arg(
+        long = "sha256",
+        conflicts_with = "cert_sha1",
+        required_unless_present = "cert_sha1"
+    )]
+    pub cert_sha256: Option<String>,
+    /// Test signing without replacing input files (native `/l`).
+    #[arg(short = 'l', long = "dry-run", visible_alias = "l")]
+    pub dry_run: bool,
+    /// `.rdp` file(s) to sign.
     #[arg(required = true)]
     pub files: Vec<PathBuf>,
 }

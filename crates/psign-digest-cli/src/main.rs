@@ -37,6 +37,7 @@ use psign_sip_digest::pe_digest::{
 use psign_sip_digest::pe_embed;
 use psign_sip_digest::pkcs7;
 use psign_sip_digest::pkcs7_wire;
+use psign_sip_digest::rdp;
 use psign_sip_digest::timestamp::{
     Rfc3161PkiStatus, Rfc3161TimestampRequestPlan, build_timestamp_request_bytes,
     parse_time_stamp_resp_der, pkifailure_info_flag_labels_from_bit_string_tlv,
@@ -467,6 +468,48 @@ enum Command {
         pkcs7_path: PathBuf,
         #[arg(long, value_name = "PATH")]
         output: PathBuf,
+    },
+    /// Sign `.rdp` files using portable RDP SignScope/SecureSettingsBlob logic.
+    ///
+    /// Supply either **`--cert`** + **`--key`** for local RSA/SHA-256 PKCS#7 creation, or
+    /// **`--signature-pkcs7`** to embed an externally-created detached PKCS#7 for a single input.
+    Rdp {
+        /// Signer certificate as DER or PEM.
+        #[arg(
+            long,
+            value_name = "PATH",
+            requires = "key",
+            conflicts_with = "signature_pkcs7"
+        )]
+        cert: Option<PathBuf>,
+        /// RSA private key as PKCS#8 or PKCS#1, DER or unencrypted PEM.
+        #[arg(
+            long,
+            value_name = "PATH",
+            requires = "cert",
+            conflicts_with = "signature_pkcs7"
+        )]
+        key: Option<PathBuf>,
+        /// Additional certificate to include in the PKCS#7 certificate set.
+        #[arg(
+            long = "chain-cert",
+            value_name = "PATH",
+            requires = "cert",
+            conflicts_with = "signature_pkcs7"
+        )]
+        chain_certs: Vec<PathBuf>,
+        /// Detached PKCS#7 DER to serialize into the RDP `Signature` record.
+        #[arg(long = "signature-pkcs7", value_name = "PATH", conflicts_with_all = ["cert", "key", "chain_certs"])]
+        signature_pkcs7: Option<PathBuf>,
+        /// Build and validate the signed shape without writing files.
+        #[arg(long)]
+        dry_run: bool,
+        /// Write output here instead of overwriting the input. Only valid with one input file.
+        #[arg(long, value_name = "PATH")]
+        output: Option<PathBuf>,
+        /// `.rdp` file(s) to sign.
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
     },
     /// Write embedded Authenticode PKCS#7 (**raw DER**) from a signed **`.cab`** tail to stdout or **`--output`**.
     ///
@@ -1031,6 +1074,100 @@ fn run_artifact_signing_metadata_check(path: Option<PathBuf>) -> Result<()> {
     Ok(())
 }
 
+fn run_rdp_portable(
+    cert: Option<PathBuf>,
+    key: Option<PathBuf>,
+    chain_certs: Vec<PathBuf>,
+    signature_pkcs7: Option<PathBuf>,
+    dry_run: bool,
+    output: Option<PathBuf>,
+    files: Vec<PathBuf>,
+) -> Result<()> {
+    if files.is_empty() {
+        return Err(anyhow!("rdp requires at least one input file"));
+    }
+    if output.is_some() && files.len() != 1 {
+        return Err(anyhow!("--output is only valid with one input file"));
+    }
+    if dry_run && output.is_some() {
+        return Err(anyhow!("--dry-run cannot be combined with --output"));
+    }
+    if signature_pkcs7.is_some() && files.len() != 1 {
+        return Err(anyhow!(
+            "--signature-pkcs7 is only valid with one input file because it signs one secure blob"
+        ));
+    }
+
+    let external_pkcs7 = signature_pkcs7
+        .as_ref()
+        .map(|path| std::fs::read(path).with_context(|| format!("read {}", path.display())))
+        .transpose()?;
+
+    let signer = match (cert, key) {
+        (Some(cert), Some(key)) => {
+            let cert_bytes =
+                std::fs::read(&cert).with_context(|| format!("read {}", cert.display()))?;
+            let signer_cert = rdp::parse_certificate(&cert_bytes)
+                .with_context(|| format!("parse signer certificate {}", cert.display()))?;
+            let key_bytes =
+                std::fs::read(&key).with_context(|| format!("read {}", key.display()))?;
+            let private_key = rdp::parse_rsa_private_key(&key_bytes)
+                .with_context(|| format!("parse RSA private key {}", key.display()))?;
+            let mut parsed_chain = Vec::with_capacity(chain_certs.len());
+            for chain_cert in chain_certs {
+                let bytes = std::fs::read(&chain_cert)
+                    .with_context(|| format!("read {}", chain_cert.display()))?;
+                parsed_chain.push(rdp::parse_certificate(&bytes).with_context(|| {
+                    format!("parse chain certificate {}", chain_cert.display())
+                })?);
+            }
+            Some((signer_cert, parsed_chain, private_key))
+        }
+        (None, None) if external_pkcs7.is_some() => None,
+        _ => {
+            return Err(anyhow!(
+                "rdp requires either --cert and --key, or --signature-pkcs7"
+            ));
+        }
+    };
+
+    for path in files {
+        let input = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+        let text = rdp::decode_rdp_text(&input);
+        let records = rdp::parse_records(&text);
+        let mut prepared = rdp::prepare_for_signature(records)
+            .with_context(|| format!("prepare RDP signature scope for {}", path.display()))?;
+        let pkcs7 = if let Some(pkcs7) = external_pkcs7.as_ref() {
+            pkcs7.clone()
+        } else {
+            let (cert, chain, key) = signer
+                .as_ref()
+                .expect("signer exists when external PKCS#7 is absent");
+            rdp::sign_secure_blob_rsa_sha256(
+                &prepared.secure_blob,
+                cert.clone(),
+                chain.clone(),
+                key.clone(),
+            )
+            .with_context(|| format!("sign {}", path.display()))?
+        };
+        rdp::apply_pkcs7_signature(&mut prepared.records, &pkcs7);
+
+        if dry_run {
+            println!("Test signed {}", path.display());
+            continue;
+        }
+
+        let destination = output.as_ref().unwrap_or(&path);
+        let output_bytes = rdp::encode_native_unicode(&rdp::records_to_text(&prepared.records));
+        std::fs::write(destination, output_bytes)
+            .with_context(|| format!("write {}", destination.display()))?;
+        println!("Signed {}", destination.display());
+    }
+
+    Ok(())
+}
+
 fn script_ext_from_path(path: &Path) -> Result<&str> {
     let ext = path
         .extension()
@@ -1328,6 +1465,25 @@ fn run() -> Result<()> {
                     })?;
             std::fs::write(&output, &out_image)
                 .with_context(|| format!("write {}", output.display()))?;
+        }
+        Command::Rdp {
+            cert,
+            key,
+            chain_certs,
+            signature_pkcs7,
+            dry_run,
+            output,
+            files,
+        } => {
+            run_rdp_portable(
+                cert,
+                key,
+                chain_certs,
+                signature_pkcs7,
+                dry_run,
+                output,
+                files,
+            )?;
         }
         Command::ExtractCabPkcs7 { path, output } => {
             use std::io::Write;

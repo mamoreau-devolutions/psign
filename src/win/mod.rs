@@ -7,6 +7,7 @@ pub mod cert_props;
 pub mod code_sign_format;
 pub mod common;
 pub mod inspect_signature;
+pub mod rdp;
 pub mod remove_signature;
 pub mod remove_unauth;
 pub mod sealing;

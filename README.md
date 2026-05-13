@@ -10,6 +10,7 @@ differential parity tests against the native tool where CI fixtures allow.
 - `sign`: Rust mssign32 core (`SignerSignEx3`) with PFX/system-store cert selection, RFC3161 sign-time timestamping, and decoupled-digest bridge flow (`--dlib` or `--trusted-signing-dlib-root` + `--dmdf`) for MSIX parity and [Azure Artifact Signing / Trusted Signing](docs/migration-artifact-signing.md).
 - `inspect-signature`: JSON dump of PKCS#7 signers, timestamp OIDs, and nested signatures (`1.3.6.1.4.1.311.2.4.1`) — same parser as **`psign-tool-portable inspect-authenticode`** ([docs/psa-interoperability.md](docs/psa-interoperability.md)).
 - `timestamp`: Rust mssign32 core (`SignerTimeStampEx3`/`SignerTimeStampEx2`) plus AppX restrictions.
+- `rdp`: Rust port of **`rdpsign.exe`** for `.rdp` files (`SignScope` / `Signature` records, detached PKCS#7 over the secure-settings blob).
 
 ## MSIX parity notes
 
@@ -27,7 +28,7 @@ At the repo root, **`cargo build`** targets **`default-members`** only (**portab
 
 ## Linux / portable digest tooling
 
-The **`psign-tool-windows`** CLI (package **`psign`**) is Windows-only (stub exits on other targets). Cross-platform pieces live in **`psign-sip-digest`** and the **`psign-tool-portable`** binary (`crates/psign-digest-cli`). They exercise the same PE-derived Authenticode digest logic used for **PE and WinMD** (CLI metadata), plus CAB, MSI, ESD/WIM, cleartext MSIX, catalog, and scripts—without **`WinVerifyTrust`**.
+The **`psign-tool-windows`** CLI (package **`psign`**) is Windows-only (stub exits on other targets). Cross-platform pieces live in **`psign-sip-digest`** and the **`psign-tool-portable`** binary (`crates/psign-digest-cli`). They exercise the same PE-derived Authenticode digest logic used for **PE and WinMD** (CLI metadata), plus CAB, MSI, ESD/WIM, cleartext MSIX, catalog, scripts, and portable `.rdp` signing—without **`WinVerifyTrust`**.
 
 **Feature gaps vs native `signtool`, AzureSignTool, and Azure Artifact Signing:** [`docs/gap-analysis-signing-platforms.md`](docs/gap-analysis-signing-platforms.md). **Linux workflows (verify, REST hash sign, hybrid embed):** [`docs/linux-signing-pipelines.md`](docs/linux-signing-pipelines.md). For Key Vault **`RS256`** over CMS authenticated attributes (not the PE image hash), use **`psign-tool-portable pe-signer-rs256-prehash`** — see [`docs/migration-azuresigntool.md`](docs/migration-azuresigntool.md).
 
@@ -35,6 +36,8 @@ From the repo root (see [`docs/roadmap-authenticode-linux.md`](docs/roadmap-auth
 
 ```sh
 cargo install --path crates/psign-digest-cli --locked   # installs `psign-tool-portable`
+# Portable RDP signing:
+# psign-tool-portable rdp --cert cert.der --key key.pk8 file.rdp
 # Optional portable REST helpers (Linux/macOS):
 # cargo install --path crates/psign-digest-cli --locked --features artifact-signing-rest
 # cargo install --path crates/psign-digest-cli --locked --features azure-kv-sign-portable

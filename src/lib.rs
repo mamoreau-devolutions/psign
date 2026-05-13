@@ -8,6 +8,7 @@
 
 pub mod cli;
 pub mod native_argv;
+pub mod rdp;
 pub mod response_argv;
 #[cfg(windows)]
 pub mod win;
@@ -73,6 +74,7 @@ pub fn run_windows_cli() -> ! {
             Command::InspectSignature(args) => {
                 crate::win::inspect_signature::inspect_signature_command(args, &cli.global)
             }
+            Command::Rdp(args) => crate::win::rdp::rdp_command(args, &cli.global),
             #[cfg(feature = "artifact-signing-rest")]
             Command::ArtifactSigningSubmit(args) => {
                 crate::win::artifact_signing_rest::artifact_signing_submit_command(
