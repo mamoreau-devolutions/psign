@@ -1,0 +1,43 @@
+{
+  "generated_by": "scripts/ci/build-package-signing-fixtures.ps1",
+  "pfx": "tests\\fixtures\\devolutions-authenticode\\authenticode-test-cert.pfx",
+  "pfx_thumbprint": "A9FDF3593E91689CC93B1CEBED5E8FFC1F6FEE38",
+  "entries": [
+    {
+      "id": "package-nupkg-unsigned",
+      "family": "nuget",
+      "state": "unsigned",
+      "path": "tests\\fixtures\\package-signing\\unsigned\\sample.nupkg",
+      "size_bytes": 823,
+      "sha256": "e396012a79929bbee0cb88d90975525b25989d7e9103bc5925e4353584b82059"
+    },
+    {
+      "id": "package-nupkg-signed",
+      "family": "nuget",
+      "state": "signed",
+      "path": "tests\\fixtures\\package-signing\\signed\\sample.signed.nupkg",
+      "size_bytes": 3354,
+      "sha256": "fac4da33d03d3e466284f787a1d82659fa29cc5eea0d577e270325981235be96",
+      "source_path": "tests\\fixtures\\package-signing\\unsigned\\sample.nupkg",
+      "tool": "dotnet nuget sign"
+    },
+    {
+      "id": "package-vsix-unsigned",
+      "family": "vsix",
+      "state": "unsigned",
+      "path": "tests\\fixtures\\package-signing\\unsigned\\sample.vsix",
+      "size_bytes": 1185,
+      "sha256": "cde7eea1b4cb5523506ec0dc7a63906503595b4df5b08987a6d7095dec55684e"
+    },
+    {
+      "id": "package-vsix-signed",
+      "family": "vsix",
+      "state": "signed",
+      "path": "tests\\fixtures\\package-signing\\signed\\sample.signed.vsix",
+      "size_bytes": 7080,
+      "sha256": "00a2d3908ae0e81704628adf41868e8ca5e6aa1f63867fbdd100277bc85fec02",
+      "source_path": "tests\\fixtures\\package-signing\\unsigned\\sample.vsix",
+      "tool": "System.IO.Packaging.PackageDigitalSignatureManager"
+    }
+  ]
+}

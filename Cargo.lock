@@ -2085,6 +2085,7 @@ dependencies = [
  "psign-authenticode-trust",
  "psign-azure-kv-rest",
  "psign-codesigning-rest",
+ "psign-opc-sign",
  "psign-sip-digest",
  "rand 0.8.6",
  "reqwest",
@@ -2094,6 +2095,16 @@ dependencies = [
  "sha2 0.10.9",
  "tempfile",
  "x509-cert",
+ "zip",
+]
+
+[[package]]
+name = "psign-opc-sign"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "sha2 0.10.9",
+ "zip",
 ]
 
 [[package]]

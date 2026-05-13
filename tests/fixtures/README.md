@@ -23,6 +23,25 @@ Signed Authenticode outputs are not byte-for-byte reproducible because native
 signing records signing-time metadata; review and commit the regenerated
 manifests/hashes with the files.
 
+Package-signing fixtures live under `tests/fixtures/package-signing/`:
+
+- `unsigned/sample.nupkg` and `signed/sample.signed.nupkg` exercise NuGet
+  package-signature markers produced by `dotnet nuget sign`.
+- `unsigned/sample.vsix` and `signed/sample.signed.vsix` exercise OPC
+  XMLDSig marker paths produced by
+  `System.IO.Packaging.PackageDigitalSignatureManager`.
+- `package-signing-fixtures.json` records sizes and SHA-256 hashes.
+
+Regenerate them on Windows with the Devolutions test signing PFX:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\ci\build-package-signing-fixtures.ps1 -WorkspaceRoot . -Force
+```
+
+Signed package outputs may change when regenerated because signing metadata and
+reference-signing tool output can vary; review and commit the refreshed manifest
+with the files.
+
 `tests/corpus_sign_verify.rs` exercises the corpus on Windows by verifying every
 committed signed vector, native-signing the unsigned source rows and verifying
 the fresh outputs with `psign`, and psign-signing the offline-supported subset

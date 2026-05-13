@@ -22,6 +22,7 @@ use psign_azure_kv_rest::{
 use psign_codesigning_rest::{
     CodesigningAuth, CodesigningSubmitParams, submit_codesign_hash_blocking,
 };
+use psign_opc_sign::{nuget, vsix};
 use psign_sip_digest::cab_digest::{
     cab_rsa_sha256_signer_prehash_digest, cab_signature_pkcs7_der, compute_cab_authenticode_digest,
     parse_cab_context, verify_cab_digest_consistency,
@@ -655,6 +656,22 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         output: Option<PathBuf>,
     },
+    /// Inspect NuGet package-signature marker state (`.signature.p7s`) without validating CMS.
+    NupkgSignatureInfo { path: PathBuf },
+    /// Hash an unsigned NuGet package exactly as the package-signature properties document records it.
+    ///
+    /// This is the unsigned ZIP byte hash used before adding `.signature.p7s`; signed packages are rejected.
+    NupkgDigest {
+        path: PathBuf,
+        #[arg(long, value_enum, default_value_t = NugetHashAlg::Sha256)]
+        algorithm: NugetHashAlg,
+        #[arg(long, value_enum, default_value_t = DigestEncoding::Hex)]
+        encoding: DigestEncoding,
+        #[arg(long, value_name = "PATH")]
+        output: Option<PathBuf>,
+    },
+    /// Inspect VSIX OPC signature marker state without validating XMLDSig.
+    VsixSignatureInfo { path: PathBuf },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -683,6 +700,23 @@ enum TimestampReqOutput {
     Der,
     /// One lowercase hex line (no line break after last nibble in typical terminals — still ends with newline for consistency).
     Hex,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum NugetHashAlg {
+    Sha256,
+    Sha384,
+    Sha512,
+}
+
+impl From<NugetHashAlg> for nuget::NuGetHashAlgorithm {
+    fn from(value: NugetHashAlg) -> Self {
+        match value {
+            NugetHashAlg::Sha256 => Self::Sha256,
+            NugetHashAlg::Sha384 => Self::Sha384,
+            NugetHashAlg::Sha512 => Self::Sha512,
+        }
+    }
 }
 
 impl From<HashAlg> for PeAuthenticodeHashKind {
@@ -1677,6 +1711,63 @@ where
             let ctx = parse_cab_context(&data)?;
             let digest = compute_cab_authenticode_digest(&data, &ctx, algorithm.into())?;
             write_digest_output(encoding, &digest, output.as_deref())?;
+        }
+        Command::NupkgSignatureInfo { path } => {
+            let info = nuget::inspect_nupkg_path(&path)
+                .with_context(|| format!("nupkg-signature-info {}", path.display()))?;
+            println!("signed={}", if info.signed { "yes" } else { "no" });
+            println!(
+                "signature_file={}",
+                if info.signed {
+                    nuget::PACKAGE_SIGNATURE_FILE_NAME
+                } else {
+                    "-"
+                }
+            );
+            println!(
+                "signature_len={}",
+                info.signature_len
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| "-".to_string())
+            );
+            println!(
+                "signature_stored={}",
+                info.signature_is_stored
+                    .map(|v| if v { "yes" } else { "no" })
+                    .unwrap_or("-")
+            );
+            println!("entries={}", info.package.entries.len());
+        }
+        Command::NupkgDigest {
+            path,
+            algorithm,
+            encoding,
+            output,
+        } => {
+            let digest = nuget::unsigned_package_digest_path(&path, algorithm.into())
+                .with_context(|| format!("nupkg-digest {}", path.display()))?;
+            write_digest_output(encoding, &digest, output.as_deref())?;
+        }
+        Command::VsixSignatureInfo { path } => {
+            let info = vsix::inspect_vsix_path(&path)
+                .with_context(|| format!("vsix-signature-info {}", path.display()))?;
+            println!(
+                "opc_signature={}",
+                if info.has_opc_signature { "yes" } else { "no" }
+            );
+            println!(
+                "signature_origin={}",
+                if info.package.has_opc_signature_origin {
+                    psign_opc_sign::opc::OPC_SIGNATURE_ORIGIN_PART
+                } else {
+                    "-"
+                }
+            );
+            println!("signature_parts={}", info.package.opc_signature_parts.len());
+            for part in info.package.opc_signature_parts {
+                println!("signature_part={part}");
+            }
+            println!("entries={}", info.package.entries.len());
         }
     }
     Ok(())
