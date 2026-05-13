@@ -9,3 +9,8 @@
 .env
 # Local CI artifact unpack / agent scratch dirs
 tmp-ci-*/
+/dist/
+/nuget/staging/
+/nuget/tmp-tool/
+/nuget/tool/bin/
+/nuget/tool/obj/
