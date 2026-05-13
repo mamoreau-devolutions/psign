@@ -1,5 +1,5 @@
 {
-  "native_style_cli_aliases": "On Windows, argv tokens starting with `/` after the subcommand are rewritten to GNU-style flags before clap parses (e.g. `verify /pa /q file.exe`, `verify /vr`, `verify /p7s path.p7s`, `verify /testroot`, `verify /sl`, `verify /ph` pairs with `/v` like native, `sign /fd SHA256 /tseal URL file`, `sign /sa OID value`, `sign /seal`, `sign /c TemplateName`, `timestamp /force`, `remove /s file.exe`). Additionally, psign-tool-windows accepts `--` long aliases mirroring native names (sign `--fd`, `--tr`, `--tseal`, `--c`, `--sa`, `--fdchw`, `--tdchw`, `--rmc`, `--seal`, `--itos`, `--force`, `--nosealwarn`, `--noenclavewarn`; verify `--tw`, `--kp`, `--vr`, `--sha1`, `--p7s`, `--testroot`, `--sl`, `--bp`, `--enclave`; timestamp `--tr`/`--td`/`--tp`, `--force`, `--nosealwarn`; catdb `--d`/`--g`/`--r`/`--u`; remove `--s`/`--c`/`--u`).",
+  "native_style_cli_aliases": "On Windows, argv tokens starting with `/` after the subcommand are rewritten to GNU-style flags before clap parses (e.g. `verify /pa /q file.exe`, `verify /vr`, `verify /p7s path.p7s`, `verify /testroot`, `verify /sl`, `verify /ph` pairs with `/v` like native, `sign /fd SHA256 /tseal URL file`, `sign /sa OID value`, `sign /seal`, `sign /c TemplateName`, `timestamp /force`, `remove /s file.exe`, `rdp /sha256 HASH /l file.rdp`). Additionally, psign-tool-windows accepts `--` long aliases mirroring native names (sign `--fd`, `--tr`, `--tseal`, `--c`, `--sa`, `--fdchw`, `--tdchw`, `--rmc`, `--seal`, `--itos`, `--force`, `--nosealwarn`, `--noenclavewarn`; verify `--tw`, `--kp`, `--vr`, `--sha1`, `--p7s`, `--testroot`, `--sl`, `--bp`, `--enclave`; timestamp `--tr`/`--td`/`--tp`, `--force`, `--nosealwarn`; catdb `--d`/`--g`/`--r`/`--u`; remove `--s`/`--c`/`--u`; rdp `--sha256`, `--sha1`, `--l`).",
   "invocation": [
     {"native": "@responsefile", "rust": "@responsefile", "tier": "P0", "status": "implemented", "notes": "UTF-8 (optional BOM) or UTF-16 LE/BE with BOM; invalid UTF-8 falls back to UTF-16 LE without BOM; one argument per line; double-quoted lines with \"\" escapes; blank line separates commands when @file is the only tail arg; inline @path splices one block; `@@` prefix strips one `@` for a literal leading at-sign; native signtool may mis-parse @ when the signtool.exe path contains spaces—parity script uses a TEMP copy"}
   ],
@@ -127,6 +127,13 @@
       {"native": "/c", "rust": "--strip-chain-except-signer (--c)", "tier": "P1", "status": "implemented", "notes": "CryptMsgControl CMSG_CTRL_DEL_CERT after matching SignerInfo Issuer+Serial to cert bag; PE Image* replace PKCS#7; `/c`+`/u` one CryptMsg session (parity `remove_cu_sha256_match_native`)"},
       {"native": "/u", "rust": "--strip-unauthenticated-attributes (--u)", "tier": "P1", "status": "implemented", "notes": "CryptMsgControl DEL_SIGNER_UNAUTH_ATTR + PE Image* replace PKCS#7; enumerate uses CERT_SECTION_TYPE_ANY"},
       {"native": "(required mode)", "rust": "at least one of /s /c /u", "tier": "P0", "status": "implemented", "notes": "Matches native requirement text"}
+    ],
+    "rdp": [
+      {"native": "rdpsign /sha256 <hash>", "rust": "rdp --sha256 <hash>", "tier": "P0", "status": "implemented", "notes": "Looks up the RDP signing certificate by SHA256 thumbprint in LocalMachine\\MY then CurrentUser\\MY; builds native SignScope/Signature records and overwrites the `.rdp` file on success."},
+      {"native": "rdpsign /sha1 <hash>", "rust": "rdp --sha1 <hash>", "tier": "P1", "status": "implemented", "notes": "Legacy thumbprint selection mode retained for older rdpsign compatibility."},
+      {"native": "/l", "rust": "--dry-run (--l)", "tier": "P0", "status": "implemented", "notes": "Signs and validates the generated payload without replacing the input file."},
+      {"native": "/q", "rust": "--quiet (-q)", "tier": "P0", "status": "implemented", "notes": "Uses the shared global quiet flag."},
+      {"native": "/v", "rust": "--verbose (-v)", "tier": "P0", "status": "implemented", "notes": "Uses the shared global verbose flag for per-file status."}
     ]
   },
   "tier_summary": {
@@ -176,6 +183,12 @@
       "windows_mechanism": "Windows Script Host–related SIP where registered for the extension.",
       "rust_path": "Same Win32 stack as native (`SignerSignEx3`, `WinVerifyTrust`); no in-tree SIP port.",
       "parity": "`run-parity-diff.ps1`: per-extension sign/verify SHA256 + `artifact_verify_{js,vbs,wsf}_print_description_match` (`/d` `/du` then `verify /v /d` vs `--print-description`; same `$parityDesc`/`$parityUrl` as PE). Fixtures `unsigned-sample.{js,vbs,wsf}` or env `SIGNTOOL_RS_JS_UNSIGNED_FIXTURE`, `_VBS_`, `_WSF_`. Requires OS SIP registration per extension."
+    },
+    {
+      "extensions": [".rdp"],
+      "windows_mechanism": "`rdpsign.exe` parses RDP settings, signs the UTF-16 secure-settings blob with detached PKCS#7 (`CryptSignMessage`), serializes `{version,type,length,pkcs7}`, and writes `SignScope` / `Signature` records.",
+      "rust_path": "`psign-tool-windows rdp --sha256 <thumbprint> file.rdp` implements the RDP-specific path directly; `psign-tool-portable rdp --cert cert.pem --key key.pem file.rdp` uses the same RDP SignScope/secure-blob serializer and creates detached RSA/SHA-256 CMS without Win32. This is not a SIP/SignerSignEx3 file format.",
+      "parity": "Unit fixtures under `tests/fixtures/rdp/` cover UTF-8, UTF-8 BOM, UTF-16 LE/BE with and without BOM, partial/stale SignScope/Signature records, malformed records, secure blob generation, serialized signature shape, and a signed `.rdp` generated with the repo test PFX. Portable CLI tests cover external PKCS#7 embedding and local RSA/SHA-256 cert+key signing; Windows tests exercise the same shared fixtures through the `psign` crate and optional integration can compare against native `rdpsign` output shape."
     }
   ],
   "portable_digest_cli": {
@@ -213,6 +226,7 @@
       {"name": "list-pe-pkcs7", "maps_to_native_concept": "Enumerate embedded PKCS#7 rows (byte_len per index)"},
       {"name": "inspect-pe-spc-indirect", "maps_to_native_concept": "JSON for SpcIndirectDataContent / digest in embedded PE PKCS#7"},
       {"name": "append-pe-pkcs7", "maps_to_native_concept": "Experimental: append PKCS#7 row + recompute PE CheckSum — not SignerSignEx3"},
+      {"name": "rdp", "maps_to_native_concept": "Portable RDP SignScope/Signature writer using local RSA/SHA-256 cert+key or an externally-created detached PKCS#7"},
       {"name": "pe-checksum", "maps_to_native_concept": "Optional header CheckSum vs ImageHlp-style computation"},
       {"name": "inspect-authenticode", "maps_to_native_concept": "Portable PKCS#7 inspection JSON (PE or raw)"},
       {"name": "artifact-signing-metadata-check", "maps_to_native_concept": "Validate --dmdf-style JSON shape (no network)"},

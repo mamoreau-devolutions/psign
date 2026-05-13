@@ -8,9 +8,24 @@ use psign_sip_digest::cab_digest;
 use psign_sip_digest::catalog_digest;
 use psign_sip_digest::msi_digest;
 use psign_sip_digest::pkcs7;
+use psign_sip_digest::rdp;
 use psign_sip_digest::verify_pe;
+use rand::rngs::OsRng;
+use rsa::RsaPrivateKey;
+use rsa::pkcs1v15::SigningKey;
+use rsa::pkcs8::EncodePrivateKey;
+use rsa::signature::Keypair;
 use serde_json::Value;
+use sha2::{Digest as _, Sha256};
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::time::Duration;
+use x509_cert::builder::{Builder, CertificateBuilder, Profile};
+use x509_cert::der::Encode;
+use x509_cert::name::Name;
+use x509_cert::serial_number::SerialNumber;
+use x509_cert::spki::SubjectPublicKeyInfoOwned;
+use x509_cert::time::Validity;
 
 #[test]
 fn binary_reports_name_and_version_flag() {
@@ -60,6 +75,7 @@ fn help_lists_core_subcommands() {
         "pe-signer-rs256-prehash",
         "pkcs7-signer-rs256-prehash",
         "append-pe-pkcs7",
+        "rdp",
         "rfc3161-timestamp-req",
         "rfc3161-timestamp-resp-inspect",
     ] {
@@ -68,6 +84,145 @@ fn help_lists_core_subcommands() {
             "help output should mention subcommand {needle:?}"
         );
     }
+}
+
+#[test]
+fn rdp_embeds_external_pkcs7_signature_for_text_encodings() {
+    let repo = repo_root();
+    let dir = tempfile::tempdir().unwrap();
+    let pkcs7 = dir.path().join("sig.p7b");
+    std::fs::write(&pkcs7, b"pkcs7").unwrap();
+
+    for name in [
+        "unsigned-utf8.rdp",
+        "unsigned-utf8-bom.rdp",
+        "unsigned-utf16le-bom.rdp",
+        "unsigned-utf16le-nobom.rdp",
+        "unsigned-utf16be-bom.rdp",
+        "unsigned-utf16be-nobom.rdp",
+        "partial-signed-scope.rdp",
+        "with-stale-signature.rdp",
+        "malformed-lines.rdp",
+    ] {
+        let fixture = repo.join("tests/fixtures/rdp").join(name);
+        let out = dir.path().join(format!("{name}.signed.rdp"));
+        let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+        cmd.arg("rdp")
+            .arg("--signature-pkcs7")
+            .arg(&pkcs7)
+            .arg("--output")
+            .arg(&out)
+            .arg(&fixture);
+        cmd.assert()
+            .success()
+            .stdout(predicate::str::contains("Signed"));
+
+        let bytes = std::fs::read(&out).unwrap();
+        assert_eq!(&bytes[..2], &[0xFF, 0xFE], "output BOM for {name}");
+        let text = rdp::decode_rdp_text(&bytes);
+        assert!(
+            text.contains("SignScope:s:Full Address,Alternate Full Address,Server Port"),
+            "SignScope in {name}: {text}"
+        );
+        assert!(
+            text.contains("Signature:s:AQABAAEAAAAFAAAAcGtjczc="),
+            "Signature in {name}: {text}"
+        );
+        assert!(
+            !text.contains("stale"),
+            "stale partial signature should be replaced in {name}: {text}"
+        );
+    }
+}
+
+#[test]
+fn rdp_rejects_malformed_missing_full_address() {
+    let repo = repo_root();
+    let dir = tempfile::tempdir().unwrap();
+    let pkcs7 = dir.path().join("sig.p7b");
+    let out = dir.path().join("signed.rdp");
+    std::fs::write(&pkcs7, b"pkcs7").unwrap();
+
+    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    cmd.arg("rdp")
+        .arg("--signature-pkcs7")
+        .arg(&pkcs7)
+        .arg("--output")
+        .arg(&out)
+        .arg(repo.join("tests/fixtures/rdp/missing-full-address.rdp"));
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("Full Address"));
+    assert!(!out.exists());
+}
+
+#[test]
+fn rdp_portable_cert_key_signs_with_detached_pkcs7() {
+    let repo = repo_root();
+    let dir = tempfile::tempdir().unwrap();
+    let cert = dir.path().join("cert.der");
+    let key = dir.path().join("key.pk8");
+    let out = dir.path().join("signed.rdp");
+    write_test_rsa_cert_key(&cert, &key);
+
+    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    cmd.arg("rdp")
+        .arg("--cert")
+        .arg(&cert)
+        .arg("--key")
+        .arg(&key)
+        .arg("--output")
+        .arg(&out)
+        .arg(repo.join("tests/fixtures/rdp/unsigned-utf8.rdp"));
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("Signed"));
+
+    let bytes = std::fs::read(&out).unwrap();
+    let records = rdp::parse_records(&rdp::decode_rdp_text(&bytes));
+    let pkcs7_der = rdp::signature_record_pkcs7(&records).expect("Signature record");
+    let sd = pkcs7::parse_pkcs7_signed_data_der(&pkcs7_der).expect("PKCS#7 SignedData");
+    let si = sd.signer_infos.0.as_slice().first().expect("signer info");
+    let message_digest = pkcs7::signer_info_pkcs9_message_digest_octets(si).expect("messageDigest");
+    let mut unsigned = records.clone();
+    unsigned.retain(|r| !r.name.eq_ignore_ascii_case("Signature"));
+    let sign_scope = unsigned
+        .iter()
+        .find(|r| r.name.eq_ignore_ascii_case("SignScope"))
+        .expect("SignScope")
+        .value
+        .clone();
+    let secure_blob = rdp::secure_settings_blob(&unsigned, &sign_scope).expect("secure blob");
+    assert_eq!(message_digest, Sha256::digest(&secure_blob).as_slice());
+}
+
+fn write_test_rsa_cert_key(cert_path: &Path, key_path: &Path) {
+    let private_key = RsaPrivateKey::new(&mut OsRng, 2048).expect("rsa private key");
+    let signing_key = SigningKey::<Sha256>::new(private_key.clone());
+    let subject = Name::from_str("CN=psign portable rdp test").expect("subject name");
+    let spki = SubjectPublicKeyInfoOwned::from_key(signing_key.verifying_key())
+        .expect("subject public key info");
+    let builder = CertificateBuilder::new(
+        Profile::Root,
+        SerialNumber::from(42u32),
+        Validity::from_now(Duration::from_secs(86_400)).expect("validity"),
+        subject,
+        spki,
+        &signing_key,
+    )
+    .expect("certificate builder");
+    let cert = builder
+        .build::<rsa::pkcs1v15::Signature>()
+        .expect("self-signed certificate");
+    std::fs::write(cert_path, cert.to_der().expect("certificate DER")).expect("write cert");
+    std::fs::write(
+        key_path,
+        private_key
+            .to_pkcs8_der()
+            .expect("PKCS#8 private key")
+            .as_bytes(),
+    )
+    .expect("write key");
 }
 
 #[test]

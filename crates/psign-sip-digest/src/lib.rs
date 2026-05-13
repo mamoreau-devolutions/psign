@@ -14,6 +14,7 @@ pub mod pe_embed;
 pub mod pkcs7;
 pub mod pkcs7_wire;
 pub mod ps_script;
+pub mod rdp;
 pub mod timestamp;
 pub mod verify_pe;
 pub mod wsh_script;

@@ -8,7 +8,7 @@ use predicates::prelude::*;
 use psign::cli::{Cli, Command as SubCommand, DigestAlgorithm, RustSipBackend, VerifyPolicy};
 use std::ffi::OsString;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[test]
 fn verify_os_version_check_parses() {
@@ -118,6 +118,73 @@ fn sign_accepts_multiple_trailing_files() {
 }
 
 #[test]
+fn rdp_accepts_sha256_and_multiple_trailing_files() {
+    let c = Cli::try_parse_from([
+        "psign-tool-windows",
+        "rdp",
+        "--sha256",
+        "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "--dry-run",
+        "one.rdp",
+        "two.rdp",
+    ])
+    .expect("parse");
+    let SubCommand::Rdp(r) = c.command else {
+        panic!("expected rdp");
+    };
+    assert_eq!(
+        r.cert_sha256.as_deref(),
+        Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+    );
+    assert!(r.dry_run);
+    assert_eq!(r.files.len(), 2);
+}
+
+#[test]
+fn rdp_requires_one_thumbprint_algorithm() {
+    assert!(
+        Cli::try_parse_from(["psign-tool-windows", "rdp", "file.rdp"]).is_err(),
+        "missing thumbprint should fail"
+    );
+    assert!(
+        Cli::try_parse_from([
+            "psign-tool-windows",
+            "rdp",
+            "--sha1",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "--sha256",
+            "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+            "file.rdp",
+        ])
+        .is_err(),
+        "sha1 and sha256 should conflict"
+    );
+}
+
+#[test]
+fn rdp_shared_fixtures_decode_in_windows_crate() {
+    for name in [
+        "unsigned-utf8.rdp",
+        "unsigned-utf8-bom.rdp",
+        "unsigned-utf16le-bom.rdp",
+        "unsigned-utf16le-nobom.rdp",
+        "unsigned-utf16be-bom.rdp",
+        "unsigned-utf16be-nobom.rdp",
+        "partial-signed-scope.rdp",
+        "signed-test-cert.rdp",
+    ] {
+        let bytes = fs::read(rdp_fixture(name)).expect("read fixture");
+        let records = psign::rdp::parse_records(&psign::rdp::decode_rdp_text(&bytes));
+        assert!(
+            records
+                .iter()
+                .any(|r| r.name.eq_ignore_ascii_case("Full Address")),
+            "Full Address should be present in {name}"
+        );
+    }
+}
+
+#[test]
 fn timestamp_accepts_multiple_trailing_files() {
     let c = Cli::try_parse_from([
         "psign-tool-windows",
@@ -136,6 +203,14 @@ fn timestamp_accepts_multiple_trailing_files() {
     assert_eq!(t.files.len(), 2);
     assert_eq!(t.files[0], Path::new("a.exe"));
     assert_eq!(t.files[1], Path::new("b.exe"));
+}
+
+fn rdp_fixture(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("rdp")
+        .join(name)
 }
 
 #[test]

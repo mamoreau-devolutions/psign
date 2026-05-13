@@ -246,6 +246,45 @@ fn catalog_semantic_path_executes_in_rust() {
 }
 
 #[test]
+#[ignore = "requires SIGNTOOL_RS_RDP_TEST_CERT_SHA256; optional SIGNTOOL_RS_RDP_UNSIGNED_FIXTURE"]
+fn rdp_sign_writes_native_signature_records() {
+    let thumbprint = match env_path("SIGNTOOL_RS_RDP_TEST_CERT_SHA256") {
+        Some(v) => v,
+        None => return,
+    };
+    let out = std::env::temp_dir().join("psign_rdp_signed_fixture.rdp");
+    if let Some(fixture) = env_path("SIGNTOOL_RS_RDP_UNSIGNED_FIXTURE") {
+        std::fs::copy(fixture, &out).expect("copy rdp fixture");
+    } else {
+        std::fs::write(
+            &out,
+            b"full address:s:server.example.test\r\nserver port:i:3389\r\n",
+        )
+        .expect("write rdp fixture");
+    }
+
+    let rust = Command::cargo_bin("psign-tool-windows")
+        .expect("binary available")
+        .arg("rdp")
+        .arg("--sha256")
+        .arg(&thumbprint)
+        .arg(&out)
+        .output()
+        .expect("run psign-tool-windows rdp");
+    assert!(
+        rust.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&rust.stdout),
+        String::from_utf8_lossy(&rust.stderr)
+    );
+
+    let text = psign::rdp::decode_rdp_text(&std::fs::read(&out).expect("read signed rdp"));
+    assert!(text.contains("SignScope:s:Full Address,Alternate Full Address"));
+    assert!(text.contains("Signature:s:"));
+    let _ = std::fs::remove_file(out);
+}
+
+#[test]
 #[ignore = "requires SIGNTOOL_RS_MULTISIG_FIXTURE"]
 fn multisig_verify_path_executes_in_rust() {
     let fixture = match env_path("SIGNTOOL_RS_MULTISIG_FIXTURE") {

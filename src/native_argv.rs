@@ -15,6 +15,7 @@ enum Verb {
     Timestamp,
     Catdb,
     Remove,
+    Rdp,
     Unknown,
 }
 
@@ -31,6 +32,7 @@ fn is_verb(s: &str) -> Option<Verb> {
         "timestamp" => Some(Verb::Timestamp),
         "catdb" => Some(Verb::Catdb),
         "remove" => Some(Verb::Remove),
+        "rdp" => Some(Verb::Rdp),
         _ => None,
     }
 }
@@ -324,6 +326,18 @@ fn translate_slash_switch(
             "u" => (vec!["--u".into()], 0),
             _ => (vec![], 0),
         },
+        Rdp => match key {
+            "sha1" => {
+                let v = n.unwrap_or("");
+                (vec!["--sha1".into(), v.to_string()], 1)
+            }
+            "sha256" => {
+                let v = n.unwrap_or("");
+                (vec!["--sha256".into(), v.to_string()], 1)
+            }
+            "l" => (vec!["--dry-run".into()], 0),
+            _ => (vec![], 0),
+        },
         Unknown => (vec![], 0),
     }
 }
@@ -552,6 +566,19 @@ mod tests {
         let (u, eu) = translate_slash_switch(Verb::Remove, "u", None, None);
         assert_eq!(eu, 0);
         assert_eq!(u, vec!["--u"]);
+    }
+
+    #[test]
+    fn translate_rdp_rdpsign_switches() {
+        let (sha, esha) = translate_slash_switch(Verb::Rdp, "sha256", Some("AABBCC"), None);
+        assert_eq!(esha, 1);
+        assert_eq!(sha, vec!["--sha256", "AABBCC"]);
+        let (sha1, esha1) = translate_slash_switch(Verb::Rdp, "sha1", Some("001122"), None);
+        assert_eq!(esha1, 1);
+        assert_eq!(sha1, vec!["--sha1", "001122"]);
+        let (dry, edry) = translate_slash_switch(Verb::Rdp, "l", None, None);
+        assert_eq!(edry, 0);
+        assert_eq!(dry, vec!["--dry-run"]);
     }
 
     #[test]
