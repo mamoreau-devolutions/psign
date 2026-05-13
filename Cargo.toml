@@ -5,6 +5,7 @@ members = [
     "crates/psign-authenticode-trust",
     "crates/psign-codesigning-rest",
     "crates/psign-azure-kv-rest",
+    "crates/psign-opc-sign",
 ]
 # Bare `cargo build` / `cargo test` at the repo root builds portable crates only (Linux/macOS friendly).
 # Use `-p psign` or `cargo build --workspace` for the full workspace including the Windows binary crate.
@@ -14,6 +15,7 @@ default-members = [
     "crates/psign-authenticode-trust",
     "crates/psign-codesigning-rest",
     "crates/psign-azure-kv-rest",
+    "crates/psign-opc-sign",
 ]
 resolver = "2"
 

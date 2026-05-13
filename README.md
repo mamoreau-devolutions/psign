@@ -24,7 +24,7 @@ differential parity tests against the native tool where CI fixtures allow.
 cargo build
 ```
 
-At the repo root, **`cargo build`** targets **`default-members`** only (**portable digest crates**). On Windows, build the **`psign-tool`** executable with **`cargo windows-bin`** or **`cargo build -p psign --bin psign-tool`** (see [`.cargo/config.toml`](.cargo/config.toml)). Optional Cargo features: **`azure-kv-sign`** (Key Vault digest callback), **`artifact-signing-rest`** (**`artifact-signing-submit`** LRO against **`*.codesigning.azure.net`**).
+At the repo root, **`cargo build`** targets **`default-members`** only (**portable digest / trust / package crates**). On Windows, build the **`psign-tool`** executable with **`cargo windows-bin`** or **`cargo build -p psign --bin psign-tool`** (see [`.cargo/config.toml`](.cargo/config.toml)). Optional Cargo features: **`azure-kv-sign`** (Key Vault digest callback), **`artifact-signing-rest`** (**`artifact-signing-submit`** LRO against **`*.codesigning.azure.net`**).
 
 ## Dotnet tool package (.NET 10+)
 
@@ -52,7 +52,7 @@ The package is built from native `psign-tool` artifacts for `win-x64`, `win-arm6
 
 ## Linux / portable digest tooling
 
-The canonical **`psign-tool`** CLI (package **`psign`**) supports an optional backend selector: **`--mode auto|windows|portable`**. When omitted, **`auto`** is used; **`PSIGN_TOOL_MODE`** can set the same default for parity automation. Windows mode uses Win32 APIs and registered SIP DLLs. Portable mode and the **`psign-tool portable ...`** namespace use the cross-platform Rust implementations from **`psign-sip-digest`** and **`psign-authenticode-trust`** without **`WinVerifyTrust`**.
+The canonical **`psign-tool`** CLI (package **`psign`**) supports an optional backend selector: **`--mode auto|windows|portable`**. When omitted, **`auto`** is used; **`PSIGN_TOOL_MODE`** can set the same default for parity automation. Windows mode uses Win32 APIs and registered SIP DLLs. Portable mode and the **`psign-tool portable ...`** namespace use the cross-platform Rust implementations from **`psign-sip-digest`**, **`psign-authenticode-trust`**, and **`psign-opc-sign`** without **`WinVerifyTrust`**.
 
 **Feature gaps vs native `signtool`, AzureSignTool, and Azure Artifact Signing:** [`docs/gap-analysis-signing-platforms.md`](docs/gap-analysis-signing-platforms.md). **Linux workflows (verify, REST hash sign, hybrid embed):** [`docs/linux-signing-pipelines.md`](docs/linux-signing-pipelines.md). For Key Vault **`RS256`** over CMS authenticated attributes (not the PE image hash), use **`psign-tool portable pe-signer-rs256-prehash`** — see [`docs/migration-azuresigntool.md`](docs/migration-azuresigntool.md).
 
@@ -62,6 +62,10 @@ From the repo root (see [`docs/roadmap-authenticode-linux.md`](docs/roadmap-auth
 cargo build -p psign --bin psign-tool --locked
 # Portable RDP signing:
 # psign-tool portable rdp --cert cert.der --key key.pk8 file.rdp
+# Portable package inspection helpers:
+# psign-tool portable nupkg-signature-info package.nupkg
+# psign-tool portable nupkg-digest package.nupkg --algorithm sha256
+# psign-tool portable vsix-signature-info extension.vsix
 # Optional portable REST helpers (Linux/macOS):
 # cargo build -p psign --bin psign-tool --locked --features artifact-signing-rest
 # cargo build -p psign --bin psign-tool --locked --features azure-kv-sign

@@ -43,6 +43,7 @@ Until Phase 2 completes, **verify-first Linux CI** remains the supported story; 
 Already aligned in Rust for **cleartext** subjects:
 
 - **MSIX / APPX / bundles** (ZIP layout) — `sip_rust::msix_digest` (encrypted **Eappx** stays out of scope without Windows crypto). **`psign-tool portable verify-msix`** exercises the same portable ZIP/hash path on Linux; **manifest publisher vs PKCS#7 signer** enforcement remains **`AppxSip`** / **`SignerSignEx*`** on Windows.
+- **VSIX / NuGet packages** — these are portable package-signing formats, not Windows SIP formats. **`psign-opc-sign`** starts the dedicated OPC/NuGet layer with signature marker inspection and unsigned NuGet package digests (`psign-tool portable nupkg-signature-info`, `nupkg-digest`, `vsix-signature-info`). Full VSIX XMLDSig and `dotnet nuget sign`-compatible CMS author-signature creation remain separate milestones from Authenticode SIP parity.
 - **MSI** OLE tree — `sip_rust::msi_digest`.
 - **ESD / WIM** prefix hash — `sip_rust::esd_digest`.
 - **PE / CAB / catalog** digests — pure byte/layout algorithms; **deployment policy** still differs without WinTrust.

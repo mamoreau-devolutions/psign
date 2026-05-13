@@ -213,6 +213,47 @@ fn generated_signed_corpus_manifest_matches_files_and_has_no_failures() {
     );
 }
 
+#[test]
+fn package_signing_fixture_manifest_matches_files() {
+    let manifest: serde_json::Value = serde_json::from_str(include_str!(
+        "fixtures/package-signing/package-signing-fixtures.json"
+    ))
+    .expect("package signing fixture manifest JSON");
+
+    assert_eq!(
+        manifest["generated_by"],
+        "scripts/ci/build-package-signing-fixtures.ps1"
+    );
+    assert_eq!(
+        manifest["pfx_thumbprint"],
+        "A9FDF3593E91689CC93B1CEBED5E8FFC1F6FEE38"
+    );
+
+    let entries = manifest["entries"]
+        .as_array()
+        .expect("package signing entries must be an array");
+    assert_eq!(entries.len(), 4, "package signing fixture count");
+    assert_hash_entries(entries);
+
+    let families: HashSet<_> = entries
+        .iter()
+        .map(|entry| entry["family"].as_str().expect("family").to_owned())
+        .collect();
+    assert_eq!(
+        families,
+        HashSet::from(["nuget".to_owned(), "vsix".to_owned()])
+    );
+
+    let states: HashSet<_> = entries
+        .iter()
+        .map(|entry| entry["state"].as_str().expect("state").to_owned())
+        .collect();
+    assert_eq!(
+        states,
+        HashSet::from(["unsigned".to_owned(), "signed".to_owned()])
+    );
+}
+
 fn manifest() -> serde_json::Value {
     serde_json::from_str(include_str!("fixtures/code-signing-vectors.json"))
         .expect("code-signing vector manifest JSON")

@@ -28,6 +28,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 psign-authenticode-trust = { path = "../psign-authenticode-trust" }
 psign-sip-digest = { path = "../psign-sip-digest" }
+psign-opc-sign = { path = "../psign-opc-sign" }
 psign-codesigning-rest = { path = "../psign-codesigning-rest", optional = true }
 psign-azure-kv-rest = { path = "../psign-azure-kv-rest", optional = true }
 base64 = { version = "0.22", optional = true }
@@ -41,3 +42,4 @@ rsa = { version = "0.9.10", features = ["sha2"] }
 sha2 = "0.10"
 tempfile = "3"
 x509-cert = { version = "0.2.5", features = ["builder"] }
+zip = { version = "0.6.6", default-features = false, features = ["deflate"] }

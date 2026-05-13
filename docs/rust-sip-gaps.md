@@ -32,6 +32,10 @@ Use **`verify --rust-sip-all-digest-checks`** to enable every experimental diges
 
 Split digest (`/dg`, `/ds`, …), sealing (`/seal`, `/itos`, …), biometric/enclave verify policies, PKCS#7-only product modes, etc. — see [`cli-parity-backlog.md`](cli-parity-backlog.md) and [`psign-cli-matrix.json`](psign-cli-matrix.json).
 
+## Portable package signing (not SIP)
+
+VSIX and NuGet package signatures should not be modeled as Rust SIP gaps. VSIX uses OPC XML Digital Signature package parts/relationships, while NuGet package signing (`dotnet nuget sign` semantics) embeds one stored root ZIP entry named **`.signature.p7s`** containing CMS `SignedData` over a NuGet properties document. The dedicated **`psign-opc-sign`** crate owns these ZIP/OPC/NuGet primitives; current portable CLI coverage is inspection/hash groundwork (`nupkg-signature-info`, `nupkg-digest`, `vsix-signature-info`), not full XMLDSig/CMS package signing yet.
+
 ## Tier 1b / 1c style gaps inside Rust SIP
 
 | Item | Status |

@@ -76,6 +76,9 @@ fn help_lists_core_subcommands() {
         "pkcs7-signer-rs256-prehash",
         "append-pe-pkcs7",
         "rdp",
+        "nupkg-signature-info",
+        "nupkg-digest",
+        "vsix-signature-info",
         "rfc3161-timestamp-req",
         "rfc3161-timestamp-resp-inspect",
     ] {
@@ -84,6 +87,78 @@ fn help_lists_core_subcommands() {
             "help output should mention subcommand {needle:?}"
         );
     }
+}
+
+#[test]
+fn nupkg_signature_info_detects_root_signature_marker() {
+    let package = package_fixture("signed/sample.signed.nupkg");
+
+    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    cmd.arg("nupkg-signature-info").arg(&package);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("signed=yes"))
+        .stdout(predicate::str::contains("signature_file=.signature.p7s"))
+        .stdout(predicate::str::contains("signature_len="))
+        .stdout(predicate::str::contains("signature_stored=yes"));
+}
+
+#[test]
+fn nupkg_digest_matches_unsigned_package_bytes() {
+    let package = package_fixture("unsigned/sample.nupkg");
+    let expected = hex_lower(&Sha256::digest(std::fs::read(&package).unwrap()));
+
+    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    cmd.arg("nupkg-digest")
+        .arg(&package)
+        .arg("--algorithm")
+        .arg("sha256");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(expected));
+}
+
+#[test]
+fn nupkg_digest_rejects_signed_package_fixture() {
+    let package = package_fixture("signed/sample.signed.nupkg");
+
+    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    cmd.arg("nupkg-digest")
+        .arg(&package)
+        .arg("--algorithm")
+        .arg("sha256");
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("already contains .signature.p7s"));
+}
+
+#[test]
+fn vsix_signature_info_detects_opc_signature_parts() {
+    let package = package_fixture("signed/sample.signed.vsix");
+
+    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    cmd.arg("vsix-signature-info").arg(&package);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("opc_signature=yes"))
+        .stdout(predicate::str::contains(
+            "signature_origin=package/services/digital-signature/origin.psdsor",
+        ))
+        .stdout(predicate::str::contains("signature_parts=1"))
+        .stdout(predicate::str::contains(
+            "signature_part=package/services/digital-signature/xml-signature/",
+        ));
+}
+
+fn package_fixture(rel: &str) -> PathBuf {
+    let separator = std::path::MAIN_SEPARATOR.to_string();
+    repo_root()
+        .join("tests/fixtures/package-signing")
+        .join(rel.replace('/', &separator))
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 #[test]

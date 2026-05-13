@@ -232,6 +232,9 @@
       {"name": "artifact-signing-metadata-check", "maps_to_native_concept": "Validate --dmdf-style JSON shape (no network)"},
       {"name": "artifact-signing-submit", "maps_to_native_concept": "Trusted Signing :sign LRO (feature artifact-signing-rest); hash file in, JSON out"},
       {"name": "azure-key-vault-sign-digest", "maps_to_native_concept": "KV keys/sign on digest file (feature azure-kv-sign-portable); AzureSignTool remote step analogue"},
+      {"name": "nupkg-signature-info", "maps_to_native_concept": "NuGet package-signature marker inspection for `.signature.p7s` (not SIP; groundwork for dotnet nuget sign-compatible portable signing)"},
+      {"name": "nupkg-digest", "maps_to_native_concept": "Unsigned NuGet package byte hash used by the package-signature properties document (SHA-256/384/512; rejects already signed packages)"},
+      {"name": "vsix-signature-info", "maps_to_native_concept": "VSIX OPC XMLDSig marker inspection under package digital-signature service parts (not SIP; groundwork for portable VSIX XMLDSig signing)"},
       {"name": "rfc3161-timestamp-req", "maps_to_native_concept": "RFC 3161 TimeStampReq DER from imprint preimage (TSA application/timestamp-query body)"},
       {"name": "rfc3161-timestamp-resp-inspect", "maps_to_native_concept": "Parse TimeStampResp PKIStatus (label + raw int), timeStampToken length + 16-octet TLV hex prefix (CMS sniffing), statusString, failInfo TLV + PKIFailureInfo bit names (not CryptVerifyTimeStampSignature)"},
       {"name": "rfc3161-timestamp-http-post", "maps_to_native_concept": "HTTPS POST TimeStampReq to TSA (optional build feature timestamp-http; not SignerTimeStampEx3)"}
