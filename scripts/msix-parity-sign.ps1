@@ -1,11 +1,11 @@
 param(
-    [string]$UnsignedMsix = $env:SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE,
-    [string]$PfxPath = $env:SIGNTOOL_RS_MSIX_TEST_PFX,
-    [string]$PfxPassword = $env:SIGNTOOL_RS_MSIX_TEST_PFX_PASSWORD,
-    [string]$CertSha1 = $env:SIGNTOOL_RS_MSIX_TEST_CERT_SHA1,
-    [string]$TimestampUrl = $env:SIGNTOOL_RS_MSIX_TIMESTAMP_URL,
-    [string]$DlibPath = $env:SIGNTOOL_RS_MSIX_DLIB,
-    [string]$DmdfPath = $env:SIGNTOOL_RS_MSIX_DMDF,
+    [string]$UnsignedMsix = $env:PSIGN_MSIX_UNSIGNED_FIXTURE,
+    [string]$PfxPath = $env:PSIGN_MSIX_TEST_PFX,
+    [string]$PfxPassword = $env:PSIGN_MSIX_TEST_PFX_PASSWORD,
+    [string]$CertSha1 = $env:PSIGN_MSIX_TEST_CERT_SHA1,
+    [string]$TimestampUrl = $env:PSIGN_MSIX_TIMESTAMP_URL,
+    [string]$DlibPath = $env:PSIGN_MSIX_DLIB,
+    [string]$DmdfPath = $env:PSIGN_MSIX_DMDF,
     [string]$Digest = "SHA256",
     [string]$TimestampDigest = "SHA256",
     [string]$ReportPath,
@@ -51,12 +51,12 @@ function Resolve-SignTool {
 }
 
 function Resolve-RustBin {
-    $rustBin = Join-Path $workspace "target\debug\psign-tool-windows.exe"
+    $rustBin = Join-Path $workspace "target\debug\psign-tool.exe"
     if (-not (Test-Path -LiteralPath $rustBin)) {
-        cargo build -p psign --bin psign-tool-windows | Out-Null
+        cargo build -p psign --bin psign-tool | Out-Null
     }
     if (-not (Test-Path -LiteralPath $rustBin)) {
-        throw "Unable to locate psign-tool-windows.exe after build."
+        throw "Unable to locate psign-tool.exe after build."
     }
     return $rustBin
 }
@@ -91,7 +91,7 @@ if (-not (Test-Path -LiteralPath $UnsignedMsix)) {
     throw "Unsigned MSIX not found: $UnsignedMsix"
 }
 if (-not $PfxPath -and -not $CertSha1) {
-    throw "Provide either -PfxPath (or SIGNTOOL_RS_MSIX_TEST_PFX) or -CertSha1 (or SIGNTOOL_RS_MSIX_TEST_CERT_SHA1)."
+    throw "Provide either -PfxPath (or PSIGN_MSIX_TEST_PFX) or -CertSha1 (or PSIGN_MSIX_TEST_CERT_SHA1)."
 }
 if ($PfxPath -and -not (Test-Path -LiteralPath $PfxPath)) {
     throw "PFX not found: $PfxPath"
@@ -133,11 +133,11 @@ if ($decoupled) {
 $nativeSignArgs += @($nativeMsix)
 
 $rustThumbFromEnv = $null
-if ($env:SIGNTOOL_RS_MSIX_TEST_CERT_SHA1 -and $env:SIGNTOOL_RS_MSIX_TEST_CERT_SHA1.Trim()) {
-    $rustThumbFromEnv = $env:SIGNTOOL_RS_MSIX_TEST_CERT_SHA1.Trim()
+if ($env:PSIGN_MSIX_TEST_CERT_SHA1 -and $env:PSIGN_MSIX_TEST_CERT_SHA1.Trim()) {
+    $rustThumbFromEnv = $env:PSIGN_MSIX_TEST_CERT_SHA1.Trim()
 }
-elseif ($env:SIGNTOOL_RS_TEST_CERT_SHA1 -and $env:SIGNTOOL_RS_TEST_CERT_SHA1.Trim()) {
-    $rustThumbFromEnv = $env:SIGNTOOL_RS_TEST_CERT_SHA1.Trim()
+elseif ($env:PSIGN_TEST_CERT_SHA1 -and $env:PSIGN_TEST_CERT_SHA1.Trim()) {
+    $rustThumbFromEnv = $env:PSIGN_TEST_CERT_SHA1.Trim()
 }
 
 $rustSignArgs = @("sign", "--digest", $Digest.ToLowerInvariant(), "--timestamp-url", $TimestampUrl, "--timestamp-digest", $TimestampDigest.ToLowerInvariant())

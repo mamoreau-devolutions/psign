@@ -1,6 +1,6 @@
 [alias]
 # Main Windows CLI (`default-members` omit root crate — always pass `-p psign`).
-windows-bin = "build -p psign --bin psign-tool-windows --locked"
+windows-bin = "build -p psign --bin psign-tool --locked"
 # Portable Authenticode digest stack (no Win32). See docs/roadmap-authenticode-linux.md.
 digest-check = "check -p psign-sip-digest -p psign-digest-cli -p psign-authenticode-trust -p psign-codesigning-rest -p psign-azure-kv-rest --locked"
 # `psign-digest-cli` has integration tests only — keep it last so `--lib` does not silence them.

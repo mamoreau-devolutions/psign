@@ -8,7 +8,7 @@ differential parity tests against the native tool where CI fixtures allow.
 
 - `verify`: WinVerifyTrust-backed implementation with policy modes (`default`, `pa`, `pg`).
 - `sign`: Rust mssign32 core (`SignerSignEx3`) with PFX/system-store cert selection, RFC3161 sign-time timestamping, and decoupled-digest bridge flow (`--dlib` or `--trusted-signing-dlib-root` + `--dmdf`) for MSIX parity and [Azure Artifact Signing / Trusted Signing](docs/migration-artifact-signing.md).
-- `inspect-signature`: JSON dump of PKCS#7 signers, timestamp OIDs, and nested signatures (`1.3.6.1.4.1.311.2.4.1`) — same parser as **`psign-tool-portable inspect-authenticode`** ([docs/psa-interoperability.md](docs/psa-interoperability.md)).
+- `inspect-signature`: JSON dump of PKCS#7 signers, timestamp OIDs, and nested signatures (`1.3.6.1.4.1.311.2.4.1`) — same parser as **`psign-tool portable inspect-authenticode`** ([docs/psa-interoperability.md](docs/psa-interoperability.md)).
 - `timestamp`: Rust mssign32 core (`SignerTimeStampEx3`/`SignerTimeStampEx2`) plus AppX restrictions.
 - `rdp`: Rust port of **`rdpsign.exe`** for `.rdp` files (`SignScope` / `Signature` records, detached PKCS#7 over the secure-settings blob).
 
@@ -24,23 +24,23 @@ differential parity tests against the native tool where CI fixtures allow.
 cargo build
 ```
 
-At the repo root, **`cargo build`** targets **`default-members`** only (**portable digest crates**). On Windows, build the **`psign-tool-windows`** executable with **`cargo windows-bin`** or **`cargo build -p psign --bin psign-tool-windows`** (see [`.cargo/config.toml`](.cargo/config.toml)). Optional Cargo features: **`azure-kv-sign`** (Key Vault digest callback), **`artifact-signing-rest`** (**`artifact-signing-submit`** LRO against **`*.codesigning.azure.net`**).
+At the repo root, **`cargo build`** targets **`default-members`** only (**portable digest crates**). On Windows, build the **`psign-tool`** executable with **`cargo windows-bin`** or **`cargo build -p psign --bin psign-tool`** (see [`.cargo/config.toml`](.cargo/config.toml)). Optional Cargo features: **`azure-kv-sign`** (Key Vault digest callback), **`artifact-signing-rest`** (**`artifact-signing-submit`** LRO against **`*.codesigning.azure.net`**).
 
 ## Linux / portable digest tooling
 
-The **`psign-tool-windows`** CLI (package **`psign`**) is Windows-only (stub exits on other targets). Cross-platform pieces live in **`psign-sip-digest`** and the **`psign-tool-portable`** binary (`crates/psign-digest-cli`). They exercise the same PE-derived Authenticode digest logic used for **PE and WinMD** (CLI metadata), plus CAB, MSI, ESD/WIM, cleartext MSIX, catalog, scripts, and portable `.rdp` signing—without **`WinVerifyTrust`**.
+The canonical **`psign-tool`** CLI (package **`psign`**) supports an optional backend selector: **`--mode auto|windows|portable`**. When omitted, **`auto`** is used; **`PSIGN_TOOL_MODE`** can set the same default for parity automation. Windows mode uses Win32 APIs and registered SIP DLLs. Portable mode and the **`psign-tool portable ...`** namespace use the cross-platform Rust implementations from **`psign-sip-digest`** and **`psign-authenticode-trust`** without **`WinVerifyTrust`**.
 
-**Feature gaps vs native `signtool`, AzureSignTool, and Azure Artifact Signing:** [`docs/gap-analysis-signing-platforms.md`](docs/gap-analysis-signing-platforms.md). **Linux workflows (verify, REST hash sign, hybrid embed):** [`docs/linux-signing-pipelines.md`](docs/linux-signing-pipelines.md). For Key Vault **`RS256`** over CMS authenticated attributes (not the PE image hash), use **`psign-tool-portable pe-signer-rs256-prehash`** — see [`docs/migration-azuresigntool.md`](docs/migration-azuresigntool.md).
+**Feature gaps vs native `signtool`, AzureSignTool, and Azure Artifact Signing:** [`docs/gap-analysis-signing-platforms.md`](docs/gap-analysis-signing-platforms.md). **Linux workflows (verify, REST hash sign, hybrid embed):** [`docs/linux-signing-pipelines.md`](docs/linux-signing-pipelines.md). For Key Vault **`RS256`** over CMS authenticated attributes (not the PE image hash), use **`psign-tool portable pe-signer-rs256-prehash`** — see [`docs/migration-azuresigntool.md`](docs/migration-azuresigntool.md).
 
 From the repo root (see [`docs/roadmap-authenticode-linux.md`](docs/roadmap-authenticode-linux.md)):
 
 ```sh
-cargo install --path crates/psign-digest-cli --locked   # installs `psign-tool-portable`
+cargo build -p psign --bin psign-tool --locked
 # Portable RDP signing:
-# psign-tool-portable rdp --cert cert.der --key key.pk8 file.rdp
+# psign-tool portable rdp --cert cert.der --key key.pk8 file.rdp
 # Optional portable REST helpers (Linux/macOS):
-# cargo install --path crates/psign-digest-cli --locked --features artifact-signing-rest
-# cargo install --path crates/psign-digest-cli --locked --features azure-kv-sign-portable
+# cargo build -p psign --bin psign-tool --locked --features artifact-signing-rest
+# cargo build -p psign --bin psign-tool --locked --features azure-kv-sign
 cargo digest-test    # alias: sip-digest + authenticode-trust + codesigning-rest lib tests + digest-cli integration tests
 cargo digest-check   # alias: `cargo check` on portable workspace crates (includes `psign-codesigning-rest`)
 ```
@@ -80,7 +80,7 @@ cargo test --test parity_signtool -- --ignored --nocapture
 ./scripts/run-parity-diff.ps1 -FailOnSemantic
 ```
 
-`-FailOnSemantic` requires `SIGNTOOL_RS_UNSIGNED_FIXTURE` and `SIGNTOOL_RS_TEST_PFX`. Add `-FailOnSemanticExhaustive` when timestamp, MSIX package, and detached PKCS#7 env vars are also set (see [`docs/ci-parity.md`](docs/ci-parity.md)).
+`-FailOnSemantic` requires `PSIGN_UNSIGNED_FIXTURE` and `PSIGN_TEST_PFX`. Add `-FailOnSemanticExhaustive` when timestamp, MSIX package, and detached PKCS#7 env vars are also set (see [`docs/ci-parity.md`](docs/ci-parity.md)).
 
 ## CI parity (GitHub Actions)
 
@@ -89,36 +89,36 @@ The **`windows`** workflow builds the repo, bootstraps the public Devolutions te
 Local mirror of the CI orchestrator:
 
 ```powershell
-cargo build -p psign --bin psign-tool-windows
+cargo build -p psign --bin psign-tool
 ./scripts/ci/run-exhaustive-parity-ci.ps1
 ```
 
 ## MSIX parity signing script
 
-Use the dedicated local parity runner to sign the same unsigned MSIX with native `signtool.exe` and `psign-tool-windows`, then compare verification outcomes:
+Use the dedicated local parity runner to sign the same unsigned MSIX with native `signtool.exe` and `psign-tool`, then compare verification outcomes:
 
 ```powershell
-$env:SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE="D:\path\unsigned.msix"
-$env:SIGNTOOL_RS_MSIX_TEST_PFX="D:\path\authenticode-test-cert.pfx"
-$env:SIGNTOOL_RS_MSIX_TEST_PFX_PASSWORD="CodeSign123!"
-$env:SIGNTOOL_RS_MSIX_TIMESTAMP_URL="http://timestamp.digicert.com"
+$env:PSIGN_MSIX_UNSIGNED_FIXTURE="D:\path\unsigned.msix"
+$env:PSIGN_MSIX_TEST_PFX="D:\path\authenticode-test-cert.pfx"
+$env:PSIGN_MSIX_TEST_PFX_PASSWORD="CodeSign123!"
+$env:PSIGN_MSIX_TIMESTAMP_URL="http://timestamp.digicert.com"
 ./scripts/msix-parity-sign.ps1 -FailOnSemantic
 ```
 
 If you already imported the Devolutions test cert into `CurrentUser\\My`, you can use thumbprint mode instead of a PFX:
 
 ```powershell
-$env:SIGNTOOL_RS_MSIX_UNSIGNED_FIXTURE="D:\path\unsigned.msix"
-$env:SIGNTOOL_RS_MSIX_TEST_CERT_SHA1="A9FDF3593E91689CC93B1CEBED5E8FFC1F6FEE38"
-$env:SIGNTOOL_RS_MSIX_TIMESTAMP_URL="http://timestamp.digicert.com"
+$env:PSIGN_MSIX_UNSIGNED_FIXTURE="D:\path\unsigned.msix"
+$env:PSIGN_MSIX_TEST_CERT_SHA1="A9FDF3593E91689CC93B1CEBED5E8FFC1F6FEE38"
+$env:PSIGN_MSIX_TIMESTAMP_URL="http://timestamp.digicert.com"
 ./scripts/msix-parity-sign.ps1 -FailOnSemantic
 ```
 
 Optional decoupled digest parity:
 
 ```powershell
-$env:SIGNTOOL_RS_MSIX_DLIB="D:\path\provider.dll"
-$env:SIGNTOOL_RS_MSIX_DMDF="D:\path\metadata.json"
+$env:PSIGN_MSIX_DLIB="D:\path\provider.dll"
+$env:PSIGN_MSIX_DMDF="D:\path\metadata.json"
 ./scripts/msix-parity-sign.ps1 -UseDecoupledDigest -FailOnSemantic
 ```
 

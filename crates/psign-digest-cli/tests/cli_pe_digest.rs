@@ -33,7 +33,7 @@ fn binary_reports_name_and_version_flag() {
     cmd.arg("--version");
     cmd.assert()
         .success()
-        .stdout(predicate::str::contains("psign-tool-portable"))
+        .stdout(predicate::str::contains("psign-tool"))
         .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
 }
 

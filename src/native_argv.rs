@@ -377,12 +377,11 @@ pub fn normalize_native_signtool_argv(args: Vec<OsString>) -> Vec<OsString> {
     };
 
     let mut globals: Vec<OsString> = Vec::new();
-    for (i, arg) in args.iter().enumerate().skip(1) {
-        if i == vi {
-            continue;
-        }
+    for arg in args.iter().skip(1).take(vi - 1) {
         if let Some(g) = try_global_slash(arg) {
             globals.extend(g);
+        } else {
+            globals.push(arg.clone());
         }
     }
 
@@ -394,7 +393,8 @@ pub fn normalize_native_signtool_argv(args: Vec<OsString>) -> Vec<OsString> {
     let mut i = vi + 1;
     while i < args.len() {
         let arg = &args[i];
-        if try_global_slash(arg).is_some() {
+        if let Some(g) = try_global_slash(arg) {
+            out.extend(g);
             i += 1;
             continue;
         }

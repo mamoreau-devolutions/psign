@@ -26,13 +26,18 @@ description = "Rust port of the Windows SDK signtool.exe (Authenticode sign/veri
 [features]
 default = []
 ## Azure Key Vault signing (`AuthenticatorDigestSign` callback + REST); enables Azure-shaped CLI flags on `sign`.
-azure-kv-sign = ["dep:psign-azure-kv-rest", "dep:reqwest"]
+azure-kv-sign = [
+    "dep:psign-azure-kv-rest",
+    "dep:reqwest",
+    "psign-digest-cli/azure-kv-sign-portable",
+]
 ## Azure Artifact Signing / Trusted Signing **data-plane** hash signing (REST LRO); experimental helper command `artifact-signing-submit`.
-artifact-signing-rest = ["dep:psign-codesigning-rest"]
+artifact-signing-rest = ["dep:psign-codesigning-rest", "psign-digest-cli/artifact-signing-rest"]
 
 [dependencies]
 psign-sip-digest = { path = "crates/psign-sip-digest" }
 psign-authenticode-trust = { path = "crates/psign-authenticode-trust" }
+psign-digest-cli = { path = "crates/psign-digest-cli" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
@@ -67,8 +72,12 @@ predicates = "3"
 psign-authenticode-trust = { path = "crates/psign-authenticode-trust" }
 
 [[bin]]
-name = "psign-tool-windows"
+name = "psign-tool"
 path = "src/main.rs"
+
+[[bin]]
+name = "psign-tool-windows"
+path = "src/bin/psign_tool_windows.rs"
 
 [[bin]]
 name = "psign-azure-sign-tool-compat"

@@ -2012,6 +2012,7 @@ dependencies = [
  "psign-authenticode-trust",
  "psign-azure-kv-rest",
  "psign-codesigning-rest",
+ "psign-digest-cli",
  "psign-sip-digest",
  "rayon",
  "reqwest",

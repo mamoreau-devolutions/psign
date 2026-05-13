@@ -7,8 +7,8 @@
 Regenerate:
 
 ```powershell
-cargo run -p psign-digest-cli --bin psign-tool-portable -- `
-  extract-pe-pkcs7 tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi `
+cargo run -p psign --bin psign-tool -- `
+  portable extract-pe-pkcs7 tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi `
   --output tests/fixtures/catalog-authenticode-upstream/tiny32-content.cat
 ```
 

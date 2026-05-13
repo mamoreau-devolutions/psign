@@ -1,5 +1,5 @@
 {
-  "native_style_cli_aliases": "On Windows, argv tokens starting with `/` after the subcommand are rewritten to GNU-style flags before clap parses (e.g. `verify /pa /q file.exe`, `verify /vr`, `verify /p7s path.p7s`, `verify /testroot`, `verify /sl`, `verify /ph` pairs with `/v` like native, `sign /fd SHA256 /tseal URL file`, `sign /sa OID value`, `sign /seal`, `sign /c TemplateName`, `timestamp /force`, `remove /s file.exe`, `rdp /sha256 HASH /l file.rdp`). Additionally, psign-tool-windows accepts `--` long aliases mirroring native names (sign `--fd`, `--tr`, `--tseal`, `--c`, `--sa`, `--fdchw`, `--tdchw`, `--rmc`, `--seal`, `--itos`, `--force`, `--nosealwarn`, `--noenclavewarn`; verify `--tw`, `--kp`, `--vr`, `--sha1`, `--p7s`, `--testroot`, `--sl`, `--bp`, `--enclave`; timestamp `--tr`/`--td`/`--tp`, `--force`, `--nosealwarn`; catdb `--d`/`--g`/`--r`/`--u`; remove `--s`/`--c`/`--u`; rdp `--sha256`, `--sha1`, `--l`).",
+  "native_style_cli_aliases": "On Windows, argv tokens starting with `/` after the subcommand are rewritten to GNU-style flags before clap parses (e.g. `verify /pa /q file.exe`, `verify /vr`, `verify /p7s path.p7s`, `verify /testroot`, `verify /sl`, `verify /ph` pairs with `/v` like native, `sign /fd SHA256 /tseal URL file`, `sign /sa OID value`, `sign /seal`, `sign /c TemplateName`, `timestamp /force`, `remove /s file.exe`, `rdp /sha256 HASH /l file.rdp`). Additionally, psign-tool accepts `--` long aliases mirroring native names (sign `--fd`, `--tr`, `--tseal`, `--c`, `--sa`, `--fdchw`, `--tdchw`, `--rmc`, `--seal`, `--itos`, `--force`, `--nosealwarn`, `--noenclavewarn`; verify `--tw`, `--kp`, `--vr`, `--sha1`, `--p7s`, `--testroot`, `--sl`, `--bp`, `--enclave`; timestamp `--tr`/`--td`/`--tp`, `--force`, `--nosealwarn`; catdb `--d`/`--g`/`--r`/`--u`; remove `--s`/`--c`/`--u`; rdp `--sha256`, `--sha1`, `--l`).",
   "invocation": [
     {"native": "@responsefile", "rust": "@responsefile", "tier": "P0", "status": "implemented", "notes": "UTF-8 (optional BOM) or UTF-16 LE/BE with BOM; invalid UTF-8 falls back to UTF-16 LE without BOM; one argument per line; double-quoted lines with \"\" escapes; blank line separates commands when @file is the only tail arg; inline @path splices one block; `@@` prefix strips one `@` for a literal leading at-sign; native signtool may mis-parse @ when the signtool.exe path contains spaces—parity script uses a TEMP copy"}
   ],
@@ -56,8 +56,8 @@
       {"native": "/tseal", "rust": "--seal-timestamp-url (--tseal)", "tier": "P0", "status": "implemented", "notes": "Sign-time sealed RFC3161 URL; mutually exclusive with /tr and /t; same SignerSignEx3 RFC3161 path as /tr here"},
       {"native": "/u", "rust": "--eku-oid", "tier": "P0", "status": "implemented"},
       {"native": "/uw", "rust": "--eku-windows-system-component", "tier": "P0", "status": "implemented"},
-      {"native": "(experimental)", "rust": "--rust-sip pe|off", "tier": "P2", "status": "partial", "notes": "Post-sign PE Authenticode digest vs PKCS#7 indirect digest after `SignerSignEx3`; `SIGNTOOL_RS_RUST_SIP=pe`; `/rust-sip pe` native argv; not production SIP replacement"},
-      {"native": "(experimental env)", "rust": "SIGNTOOL_RS_RUST_SIP", "tier": "P2", "status": "partial", "notes": "`pe` / `script` / `msi` / `esd` / `msix` / `cab` / `catalog` enable digest gates; `off` disables env; `--rust-sip off` overrides"},
+      {"native": "(experimental)", "rust": "--rust-sip pe|off", "tier": "P2", "status": "partial", "notes": "Post-sign PE Authenticode digest vs PKCS#7 indirect digest after `SignerSignEx3`; `PSIGN_RUST_SIP=pe`; `/rust-sip pe` native argv; not production SIP replacement"},
+      {"native": "(experimental env)", "rust": "PSIGN_RUST_SIP", "tier": "P2", "status": "partial", "notes": "`pe` / `script` / `msi` / `esd` / `msix` / `cab` / `catalog` enable digest gates; `off` disables env; `--rust-sip off` overrides"},
       {"native": "(experimental)", "rust": "--rust-sip script", "tier": "P2", "status": "partial", "notes": "Post-sign script digest vs PKCS#7: PowerShell UTF-16 strip (pwrshsip); WSH strip + offset dword (wshext); COM text decode may differ"},
       {"native": "(experimental)", "rust": "--rust-sip msi", "tier": "P2", "status": "partial", "notes": "Post-sign MSI OLE fingerprint vs PKCS#7 indirect digest after `SignerSignEx3` (Signify-compatible `sip_rust::msi_digest`); `/rust-sip msi` argv; only when target resolves to Windows Installer format"},
       {"native": "(experimental)", "rust": "--rust-sip esd", "tier": "P2", "status": "partial", "notes": "Post-sign WIM/ESD prefix digest vs PKCS#7 (`sip_rust::esd_digest`, `EsdSip.dll` semantics); `/rust-sip esd` argv; `.wim`/`.esd` only"},
@@ -83,7 +83,7 @@
       {"native": "/ms", "rust": "--multiple-semantics", "tier": "P1", "status": "partial", "notes": "Documented no-op; WinVerifyTrust default varies by OS"},
       {"native": "/p7", "rust": "--verify-pkcs7-file", "tier": "P0", "status": "partial", "notes": "Same WinTrust file path as PE; PKCS-only semantics limited"},
       {"native": "/d", "rust": "--print-description", "tier": "P1", "status": "implemented", "notes": "SPC_SP_OPUS_INFO from WinVerifyTrust state; requires -v like native"},
-      {"native": "/ph", "rust": "--verify-page-hashes", "tier": "P1", "status": "implemented", "notes": "Requires -v like native; WTD_HASH_ONLY_FLAG + OID scan for SPC_PE_IMAGE_PAGE_HASHES; warns exit 2 if absent; portable probe + table parse (no WinTrust): `psign-tool-portable pe-has-page-hashes` / `pe-page-hash-info` — see `portable_digest_cli`"},
+      {"native": "/ph", "rust": "--verify-page-hashes", "tier": "P1", "status": "implemented", "notes": "Requires -v like native; WTD_HASH_ONLY_FLAG + OID scan for SPC_PE_IMAGE_PAGE_HASHES; warns exit 2 if absent; portable probe + table parse (no WinTrust): `psign-tool portable pe-has-page-hashes` / `pe-page-hash-info` — see `portable_digest_cli`"},
       {"native": "/r", "rust": "--chain-root-subject", "tier": "P0", "status": "implemented"},
       {"native": "/sha1", "rust": "--signer-thumbprint-sha1", "tier": "P0", "status": "implemented", "notes": "Repeatable; signer cert SHA1 must match one value"},
       {"native": "/ca", "rust": "--intermediate-ca-sha1", "tier": "P0", "status": "implemented", "notes": "Repeatable; at least one intermediate CA thumbprint must match chain"},
@@ -146,60 +146,60 @@
       "extensions": [".ps1", ".psm1", ".psd1"],
       "windows_mechanism": "Registered Cryptography SIP for PowerShell / module / manifest files; native `signtool` and `SignerSignEx3` load the OS SIP implementation.",
       "rust_path": "Same Win32 stack (`SignerSignEx3`, `WinVerifyTrust`) — uses the OS SIP DLL; see `src/win/code_sign_format.rs`.",
-      "parity": "`scripts/run-parity-diff.ps1`: `.ps1` — `sign_ps1_*`, `verify_ps1_*`, `artifact_verify_ps1_print_description_match` (`/d` `/du` + `verify /v /d` vs `--print-description`; shares `$parityDesc`/`$parityUrl` with PE). `.psm1` / `.psd1` — same plus `artifact_verify_psm1_print_description_match`, `artifact_verify_psd1_print_description_match`. Fixtures under `tests/fixtures/` or env overrides `SIGNTOOL_RS_PS1_UNSIGNED_FIXTURE`, `_PSM1_`, `_PSD1_`. Exact SHA256 when PKCS#7 matches native; else `artifact_semantic_match` if both `/pa` verify succeed."
+      "parity": "`scripts/run-parity-diff.ps1`: `.ps1` — `sign_ps1_*`, `verify_ps1_*`, `artifact_verify_ps1_print_description_match` (`/d` `/du` + `verify /v /d` vs `--print-description`; shares `$parityDesc`/`$parityUrl` with PE). `.psm1` / `.psd1` — same plus `artifact_verify_psm1_print_description_match`, `artifact_verify_psd1_print_description_match`. Fixtures under `tests/fixtures/` or env overrides `PSIGN_PS1_UNSIGNED_FIXTURE`, `_PSM1_`, `_PSD1_`. Exact SHA256 when PKCS#7 matches native; else `artifact_semantic_match` if both `/pa` verify succeed."
     },
     {
       "extensions": [".exe", ".dll", ".sys", ".ocx", ".efi", ".scr", ".cpl", ".mui"],
       "windows_mechanism": "PE Authenticode (`WIN_CERTIFICATE`); SIP resolves from PE metadata.",
       "rust_path": "Same Win32 SIP delegation as native; optional experimental `--rust-sip pe` post-sign digest gate (`crates/psign-sip-digest`, re-exported under `sip_rust`).",
-      "parity": "`run-parity-diff.ps1` `sign_pe_fixture_sha256_match_native` / `verify_pe_fixture_pa_exit_match` on `SIGNTOOL_RS_UNSIGNED_FIXTURE` (two-copy sign + SHA256 or verify-valid semantic match); plus `artifact_sign_two_pe_exit_parity` and semantic verify scenarios."
+      "parity": "`run-parity-diff.ps1` `sign_pe_fixture_sha256_match_native` / `verify_pe_fixture_pa_exit_match` on `PSIGN_UNSIGNED_FIXTURE` (two-copy sign + SHA256 or verify-valid semantic match); plus `artifact_sign_two_pe_exit_parity` and semantic verify scenarios."
     },
     {
       "extensions": [".winmd"],
       "windows_mechanism": "Windows metadata files are CLI assemblies in a PE-based container; Authenticode via OS SIP (same `SignerSignEx3` / `WinVerifyTrust` stack as PE signing).",
       "rust_path": "`CodeSignFormat::WindowsMetadata` in `src/win/code_sign_format.rs`; same Win32 delegation as native.",
-      "parity": "Optional `scripts/run-parity-diff.ps1` when `SIGNTOOL_RS_WINMD_UNSIGNED_FIXTURE` + `SIGNTOOL_RS_TEST_PFX` set: `sign_winmd_sha256_match_native`, `verify_winmd_pa_exit_match`, `artifact_verify_winmd_print_description_match`; optional `SIGNTOOL_RS_WINMD_TIMESTAMP_URL`. Local smoke: `scripts/sip-format-smoke.ps1`. `remove /s` allowed only for PE-image-backed mapped extensions — `.winmd` is treated as PE-backed (`Image*` APIs) like `.exe`."
+      "parity": "Optional `scripts/run-parity-diff.ps1` when `PSIGN_WINMD_UNSIGNED_FIXTURE` + `PSIGN_TEST_PFX` set: `sign_winmd_sha256_match_native`, `verify_winmd_pa_exit_match`, `artifact_verify_winmd_print_description_match`; optional `PSIGN_WINMD_TIMESTAMP_URL`. Local smoke: `scripts/sip-format-smoke.ps1`. `remove /s` allowed only for PE-image-backed mapped extensions — `.winmd` is treated as PE-backed (`Image*` APIs) like `.exe`."
     },
     {
       "extensions": [".msix", ".msixbundle", ".appx", ".appxbundle"],
       "windows_mechanism": "AppX/MSIX SIP; tooling often uses decoupled digest `/dlib` + `/dmdf` + `/ph`.",
       "rust_path": "Same Win32 SIP + decoupled digest bridge as native.",
-      "parity": "`scripts/msix-parity-sign.ps1` and MSIX blocks in `run-parity-diff.ps1` (`artifact_msix_sign_semantic`, `artifact_msix_decoupled_semantic` when dlib env set). Description parity: `artifact_verify_msix_print_description_match` — sign with `/d` `/du` + RFC3161 (`SIGNTOOL_RS_MSIX_*` env), then `verify /v /d` vs `--print-description` (same strings as PE description test)."
+      "parity": "`scripts/msix-parity-sign.ps1` and MSIX blocks in `run-parity-diff.ps1` (`artifact_msix_sign_semantic`, `artifact_msix_decoupled_semantic` when dlib env set). Description parity: `artifact_verify_msix_print_description_match` — sign with `/d` `/du` + RFC3161 (`PSIGN_MSIX_*` env), then `verify /v /d` vs `--print-description` (same strings as PE description test)."
     },
     {
       "extensions": [".msi", ".msp", ".mst"],
       "windows_mechanism": "Windows Installer SIP (OLE compound storage Authenticode).",
       "rust_path": "`SignerSignEx3` / `WinVerifyTrust` — OS SIP; `code_sign_format::WindowsInstaller`; experimental digest parity in `sip_rust::msi_digest` (`--rust-sip msi`, `verify --rust-sip-msi-digest-check`); `remove` rejects (not PE `Image*`).",
-      "parity": "No bundled unsigned `.msi` in-repo (OLE compound); optional parity in `run-parity-diff.ps1` when `SIGNTOOL_RS_MSI_UNSIGNED_FIXTURE` + `SIGNTOOL_RS_TEST_PFX` point at a valid package: `sign_msi_sha256_match_native`, `verify_msi_pa_exit_match`, `artifact_verify_msi_print_description_match`. Optional sign-time RFC3161: `SIGNTOOL_RS_MSI_TIMESTAMP_URL`."
+      "parity": "No bundled unsigned `.msi` in-repo (OLE compound); optional parity in `run-parity-diff.ps1` when `PSIGN_MSI_UNSIGNED_FIXTURE` + `PSIGN_TEST_PFX` point at a valid package: `sign_msi_sha256_match_native`, `verify_msi_pa_exit_match`, `artifact_verify_msi_print_description_match`. Optional sign-time RFC3161: `PSIGN_MSI_TIMESTAMP_URL`."
     },
     {
       "extensions": [".wim", ".esd"],
       "windows_mechanism": "WIM/ESD image SIP (`EsdSip.dll`; GUID `9F3053C5-439D-4BF7-8A77-04F0450A1D9F`).",
       "rust_path": "`SignerSignEx3` / `WinVerifyTrust` — OS SIP; `code_sign_format::WimImage`; experimental digest parity in `sip_rust::esd_digest` (`--rust-sip esd`, `verify --rust-sip-esd-digest-check`); `remove` rejects.",
-      "parity": "No bundled signed WIM in-repo; optional local sign/verify with native `signtool` then `psign-tool-windows verify /pa --rust-sip-esd-digest-check` for Rust consistency."
+      "parity": "No bundled signed WIM in-repo; optional local sign/verify with native `signtool` then `psign-tool verify /pa --rust-sip-esd-digest-check` for Rust consistency."
     },
     {
       "extensions": [".js", ".vbs", ".wsf"],
       "windows_mechanism": "Windows Script Host–related SIP where registered for the extension.",
       "rust_path": "Same Win32 stack as native (`SignerSignEx3`, `WinVerifyTrust`); no in-tree SIP port.",
-      "parity": "`run-parity-diff.ps1`: per-extension sign/verify SHA256 + `artifact_verify_{js,vbs,wsf}_print_description_match` (`/d` `/du` then `verify /v /d` vs `--print-description`; same `$parityDesc`/`$parityUrl` as PE). Fixtures `unsigned-sample.{js,vbs,wsf}` or env `SIGNTOOL_RS_JS_UNSIGNED_FIXTURE`, `_VBS_`, `_WSF_`. Requires OS SIP registration per extension."
+      "parity": "`run-parity-diff.ps1`: per-extension sign/verify SHA256 + `artifact_verify_{js,vbs,wsf}_print_description_match` (`/d` `/du` then `verify /v /d` vs `--print-description`; same `$parityDesc`/`$parityUrl` as PE). Fixtures `unsigned-sample.{js,vbs,wsf}` or env `PSIGN_JS_UNSIGNED_FIXTURE`, `_VBS_`, `_WSF_`. Requires OS SIP registration per extension."
     },
     {
       "extensions": [".rdp"],
       "windows_mechanism": "`rdpsign.exe` parses RDP settings, signs the UTF-16 secure-settings blob with detached PKCS#7 (`CryptSignMessage`), serializes `{version,type,length,pkcs7}`, and writes `SignScope` / `Signature` records.",
-      "rust_path": "`psign-tool-windows rdp --sha256 <thumbprint> file.rdp` implements the RDP-specific path directly; `psign-tool-portable rdp --cert cert.pem --key key.pem file.rdp` uses the same RDP SignScope/secure-blob serializer and creates detached RSA/SHA-256 CMS without Win32. This is not a SIP/SignerSignEx3 file format.",
+      "rust_path": "`psign-tool rdp --sha256 <thumbprint> file.rdp` implements the RDP-specific path directly; `psign-tool portable rdp --cert cert.pem --key key.pem file.rdp` uses the same RDP SignScope/secure-blob serializer and creates detached RSA/SHA-256 CMS without Win32. This is not a SIP/SignerSignEx3 file format.",
       "parity": "Unit fixtures under `tests/fixtures/rdp/` cover UTF-8, UTF-8 BOM, UTF-16 LE/BE with and without BOM, partial/stale SignScope/Signature records, malformed records, secure blob generation, serialized signature shape, and a signed `.rdp` generated with the repo test PFX. Portable CLI tests cover external PKCS#7 embedding and local RSA/SHA-256 cert+key signing; Windows tests exercise the same shared fixtures through the `psign` crate and optional integration can compare against native `rdpsign` output shape."
     }
   ],
   "portable_digest_cli": {
-    "binary": "psign-tool-portable",
+    "binary": "psign-tool portable",
     "crate": "crates/psign-digest-cli",
     "depends_on": "crates/psign-sip-digest; crates/psign-authenticode-trust (trust-verify-* subcommands)",
     "platforms_note": "Builds on Linux/macOS/Windows; no `windows` / WinVerifyTrust dependency.",
     "purpose": "Optional digest recomputation vs PKCS#7 indirect data and PE page-hash OID scans — additive to native signtool, not a full replacement.",
     "commands": [
       {"name": "pe-digest", "maps_to_native_concept": "PE SIP image hash (algorithm-selectable)"},
-      {"name": "verify-pe", "maps_to_native_concept": "Consistency check after conceptual WinTrust success — similar to `psign-tool-windows verify --rust-sip-pe-digest-check`"},
+      {"name": "verify-pe", "maps_to_native_concept": "Consistency check after conceptual WinTrust success — similar to `psign-tool verify --rust-sip-pe-digest-check`"},
       {"name": "trust-verify-pe", "maps_to_native_concept": "Explicit-anchor PKCS#7 trust + picky chain + PE digest (not WinTrust); optional `--as-of YYYY-MM-DD` for expired fixtures"},
       {"name": "trust-verify-cab", "maps_to_native_concept": "`verify-cab` digest consistency then same trust stack as PE"},
       {"name": "trust-verify-catalog", "maps_to_native_concept": "`verify-catalog` CMS digest consistency then picky trust when Authenticode-wrapped"},

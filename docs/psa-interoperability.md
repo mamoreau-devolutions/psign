@@ -1,6 +1,6 @@
 # Interoperability with PowerShell OpenAuthenticode
 
-[PowerShell OpenAuthenticode](https://github.com/jborean93/PowerShell-OpenAuthenticode) (**PSA**) uses portable **.NET CMS** (`SignedCode`) for signing and verification. **`psign`** uses **`SignerSignEx3`** on Windows and **`psign-tool-portable`** / **`psign-authenticode-trust`** for digest + optional anchor trust off-Windows.
+[PowerShell OpenAuthenticode](https://github.com/jborean93/PowerShell-OpenAuthenticode) (**PSA**) uses portable **.NET CMS** (`SignedCode`) for signing and verification. **`psign`** uses **`SignerSignEx3`** on Windows and **`psign-tool portable`** / **`psign-authenticode-trust`** for digest + optional anchor trust off-Windows.
 
 This note maps PSA behaviors to this repo; see also [`plan-openauthenticode-parity.md`](plan-openauthenticode-parity.md).
 
@@ -8,10 +8,10 @@ This note maps PSA behaviors to this repo; see also [`plan-openauthenticode-pari
 
 | PSA | psign / portable |
 |-----|-------------------------|
-| **`Get-OpenAuthenticodeSignature`** (nested PKCS#7 walk + timestamp OIDs) | **`psign-tool-portable inspect-authenticode`** or **`psign-tool-windows inspect-signature`** — JSON from **`psign-authenticode-trust`** (`inspect_pe_authenticode`, `inspect_authenticode_pkcs7_der`) |
-| **`-SkipCertificateCheck`** (CMS signature check without full chain policy) | **`psign-tool-portable trust-verify-*`** with **`--allow-loose-signing-cert`** (`AuthenticodeTrustPolicy::ignore_signing_certificate_check`) plus explicit **`--anchor-dir`** / **`--authroot-cab`** |
+| **`Get-OpenAuthenticodeSignature`** (nested PKCS#7 walk + timestamp OIDs) | **`psign-tool portable inspect-authenticode`** or **`psign-tool inspect-signature`** — JSON from **`psign-authenticode-trust`** (`inspect_pe_authenticode`, `inspect_authenticode_pkcs7_der`) |
+| **`-SkipCertificateCheck`** (CMS signature check without full chain policy) | **`psign-tool portable trust-verify-*`** with **`--allow-loose-signing-cert`** (`AuthenticodeTrustPolicy::ignore_signing_certificate_check`) plus explicit **`--anchor-dir`** / **`--authroot-cab`** |
 | Timestamp-aware validity for **expired leaf** certs | **`--prefer-timestamp-signing-time`**, **`--require-valid-timestamp`**, **`--as-of`** on **`trust-verify-*`** |
-| No revocation in PSA README | Portable trust path does **not** aim to replace OS revocation; **`psign-tool-windows verify`** follows **`WinVerifyTrust`** |
+| No revocation in PSA README | Portable trust path does **not** aim to replace OS revocation; **`psign-tool verify`** follows **`WinVerifyTrust`** |
 
 ## Signing
 
@@ -23,4 +23,4 @@ This note maps PSA behaviors to this repo; see also [`plan-openauthenticode-pari
 
 ## Appendix signatures
 
-PSA **`Add-OpenAuthenticodeSignature`** nests PKCS#7 under OID **`1.3.6.1.4.1.311.2.4.1`**. **`psign-tool-windows sign --append-signature`** follows the same **`SIG_APPEND`**/`SignerSignEx3` behavior; the parity test **`append_signature_pe_nested_pkcs7_visible_to_inspector`** (ignored; requires fixtures) asserts nested blobs appear in **`inspect-pe`** JSON output.
+PSA **`Add-OpenAuthenticodeSignature`** nests PKCS#7 under OID **`1.3.6.1.4.1.311.2.4.1`**. **`psign-tool sign --append-signature`** follows the same **`SIG_APPEND`**/`SignerSignEx3` behavior; the parity test **`append_signature_pe_nested_pkcs7_visible_to_inspector`** (ignored; requires fixtures) asserts nested blobs appear in **`inspect-pe`** JSON output.

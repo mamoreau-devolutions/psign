@@ -1,6 +1,6 @@
 # Feature gap analysis: native signtool, AzureSignTool, Artifact Signing vs psign
 
-This document compares **Windows SDK `signtool.exe`**, **AzureSignTool**, **Azure Artifact Signing (Trusted Signing)**, and this repository’s **`psign-tool-windows`** / **`psign-tool-portable`**. It is the product-facing companion to the engineering-focused [`rust-sip-gaps.md`](rust-sip-gaps.md) and [`parity-matrix.md`](parity-matrix.md).
+This document compares **Windows SDK `signtool.exe`**, **AzureSignTool**, **Azure Artifact Signing (Trusted Signing)**, and this repository’s **`psign-tool`** / **`psign-tool portable`**. It is the product-facing companion to the engineering-focused [`rust-sip-gaps.md`](rust-sip-gaps.md) and [`parity-matrix.md`](parity-matrix.md).
 
 **Writable copies of Kits / System32 binaries (read-only install dirs):** [`writable-signing-binaries.md`](writable-signing-binaries.md).
 
@@ -10,7 +10,7 @@ This document compares **Windows SDK `signtool.exe`**, **AzureSignTool**, **Azur
 
 Legend: **Sign** = produce/embed Authenticode; **WT verify** = `WinVerifyTrust`-style OS verify; **Digest** = recompute SIP indirect data vs PKCS#7; **Trust** = portable CMS + explicit anchors.
 
-| Subject format | Native `signtool` | `psign-tool-windows` | `psign-tool-portable` |
+| Subject format | Native `signtool` | `psign-tool` | `psign-tool portable` |
 |----------------|-------------------|--------------------|---------------------|
 | PE / WinMD | Sign, WT verify | Sign, WT verify, optional `--rust-sip pe` | Digest, inspect, trust-verify-pe |
 | CAB | Sign, WT verify | Same | verify-cab, trust-verify-cab, cab-digest |
@@ -34,14 +34,14 @@ Legend: **Sign** = produce/embed Authenticode; **WT verify** = `WinVerifyTrust`-
 | Goal | Today | Gap |
 |------|--------|-----|
 | **Drop-in Linux replacement for `signtool.exe` sign/verify** | Not supported | Signing and WinTrust-backed verify require Windows CryptAPI/SIP (`SignerSignEx3`, `WinVerifyTrust`). |
-| **Drop-in Linux replacement for AzureSignTool** | Partial | **`azure-key-vault-sign-digest`** on **`psign-tool-portable`** (**`--features azure-kv-sign-portable`**) performs the Key Vault **`keys/sign`** step (**digest file → signature**). Use **`pe-digest --encoding raw`** for the **PE image** hash file; use **`pe-signer-rs256-prehash --encoding raw`** (optional **`--signer-index`** for the *N*th **`SignerInfo`** inside the selected PKCS#7 row) when you need the **CMS authenticated-attribute** **SHA-256** prehash (**32** octets) for **`RS256`** on an **existing embedded PKCS#7** (see [`migration-azuresigntool.md`](migration-azuresigntool.md)). **Embedding** Authenticode still requires **`psign-tool-windows`** (`SignerSignEx3`) or a portable **`SignedData`** rebuild. Full **`sign`** with KV callback remains Windows (**`--features azure-kv-sign`**). |
-| **Drop-in Linux replacement for Artifact Signing (dlib / REST)** | Partial | **`artifact-signing-submit`** (**`--features artifact-signing-rest`**) runs on **Linux/macOS** via **`psign-tool-portable`** or on Windows via **`psign-tool-windows`** — same **`:sign`** LRO (**hash → JSON**). **Embedding** PKCS#7 still requires **`SignerSignEx3`** + dlib or future portable CMS/embed. **`psign-tool-portable`** validates **`--dmdf`** JSON without network. |
-| **Linux verify + digest parity for many Authenticode formats** | Supported | **`psign-tool-portable`** covers PE, CAB, MSI, ESD/WIM, cleartext MSIX, catalog, scripts; **`trust-verify-*`** adds anchor-based CMS trust (see [`authenticode-trust-stack.md`](authenticode-trust-stack.md)). |
+| **Drop-in Linux replacement for AzureSignTool** | Partial | **`azure-key-vault-sign-digest`** on **`psign-tool portable`** (**`--features azure-kv-sign-portable`**) performs the Key Vault **`keys/sign`** step (**digest file → signature**). Use **`pe-digest --encoding raw`** for the **PE image** hash file; use **`pe-signer-rs256-prehash --encoding raw`** (optional **`--signer-index`** for the *N*th **`SignerInfo`** inside the selected PKCS#7 row) when you need the **CMS authenticated-attribute** **SHA-256** prehash (**32** octets) for **`RS256`** on an **existing embedded PKCS#7** (see [`migration-azuresigntool.md`](migration-azuresigntool.md)). **Embedding** Authenticode still requires **`psign-tool`** (`SignerSignEx3`) or a portable **`SignedData`** rebuild. Full **`sign`** with KV callback remains Windows (**`--features azure-kv-sign`**). |
+| **Drop-in Linux replacement for Artifact Signing (dlib / REST)** | Partial | **`artifact-signing-submit`** (**`--features artifact-signing-rest`**) runs on **Linux/macOS** via **`psign-tool portable`** or on Windows via **`psign-tool`** — same **`:sign`** LRO (**hash → JSON**). **Embedding** PKCS#7 still requires **`SignerSignEx3`** + dlib or future portable CMS/embed. **`psign-tool portable`** validates **`--dmdf`** JSON without network. |
+| **Linux verify + digest parity for many Authenticode formats** | Supported | **`psign-tool portable`** covers PE, CAB, MSI, ESD/WIM, cleartext MSIX, catalog, scripts; **`trust-verify-*`** adds anchor-based CMS trust (see [`authenticode-trust-stack.md`](authenticode-trust-stack.md)). |
 | **Maximum Authenticode subject formats** | Windows signs all SIP-registered types Rust can digest-check | **Encrypted MSIX**, **VBA/mso**, **extension SIP DLLs**, **standalone `.p7x`** subject handling — see [`rust-sip-gaps.md`](rust-sip-gaps.md). |
 
-**Practical Linux path today:** Use **`psign-tool-portable`** for **digest computation**, **Key Vault `keys/sign`** on digest files (**`azure-key-vault-sign-digest`** with **`--features azure-kv-sign-portable`**), **`:sign` REST** (**`artifact-signing-submit`** with **`--features artifact-signing-rest`**), **inspect**, and **verify/trust** across supported formats. **Embed** Authenticode (PKCS#7 into the subject) still requires **`psign-tool-windows`** / **`SignerSignEx3`** (or native **`signtool.exe`**) until portable CMS+embed lands. Cookbook: [`linux-signing-pipelines.md`](linux-signing-pipelines.md).
+**Practical Linux path today:** Use **`psign-tool portable`** for **digest computation**, **Key Vault `keys/sign`** on digest files (**`azure-key-vault-sign-digest`** with **`--features azure-kv-sign-portable`**), **`:sign` REST** (**`artifact-signing-submit`** with **`--features artifact-signing-rest`**), **inspect**, and **verify/trust** across supported formats. **Embed** Authenticode (PKCS#7 into the subject) still requires **`psign-tool`** / **`SignerSignEx3`** (or native **`signtool.exe`**) until portable CMS+embed lands. Cookbook: [`linux-signing-pipelines.md`](linux-signing-pipelines.md).
 
-**Long-term Linux signing** (if required): implement portable **CMS `SignerInfo` production** (inside **`SignedData`**) + **format-specific embedding** (PE `WIN_CERTIFICATE`, CAB PKCS#7 placement, MSI digital signature streams, MSIX `ContentTypes` / manifest glue, etc.) and combine with **remote signing** (KV REST, Artifact Signing `:sign` LRO). [`pkcs7.rs`](crates/psign-sip-digest/src/pkcs7.rs) holds parse/replace helpers, **`signed_data_replace_first_signer_info`**, **`encode_pkcs7_content_info_signed_data_der`**, **RSA PKCS#1 RS256** prehash ↔ **`SignerInfo.signature`** parity tests (`rsa_pkcs1v15_signed_attrs_verify`), and **`signer_info_sha256_digest_over_signed_attrs`** (documented KV **`RS256`** input shape); [`pe_embed.rs`](crates/psign-sip-digest/src/pe_embed.rs) can **wrap PKCS#7**, **append** rows (including after signer splice experiments), and **recompute `CheckSum`**. **`psign-tool-portable pe-signer-rs256-prehash`** surfaces the **32-byte** prehash for Linux KV workflows; **unsigned→signed** / timestamp / CAB·MSI embed remain backlog (see [`rust-sip-gaps.md`](rust-sip-gaps.md)).
+**Long-term Linux signing** (if required): implement portable **CMS `SignerInfo` production** (inside **`SignedData`**) + **format-specific embedding** (PE `WIN_CERTIFICATE`, CAB PKCS#7 placement, MSI digital signature streams, MSIX `ContentTypes` / manifest glue, etc.) and combine with **remote signing** (KV REST, Artifact Signing `:sign` LRO). [`pkcs7.rs`](crates/psign-sip-digest/src/pkcs7.rs) holds parse/replace helpers, **`signed_data_replace_first_signer_info`**, **`encode_pkcs7_content_info_signed_data_der`**, **RSA PKCS#1 RS256** prehash ↔ **`SignerInfo.signature`** parity tests (`rsa_pkcs1v15_signed_attrs_verify`), and **`signer_info_sha256_digest_over_signed_attrs`** (documented KV **`RS256`** input shape); [`pe_embed.rs`](crates/psign-sip-digest/src/pe_embed.rs) can **wrap PKCS#7**, **append** rows (including after signer splice experiments), and **recompute `CheckSum`**. **`psign-tool portable pe-signer-rs256-prehash`** surfaces the **32-byte** prehash for Linux KV workflows; **unsigned→signed** / timestamp / CAB·MSI embed remain backlog (see [`rust-sip-gaps.md`](rust-sip-gaps.md)).
 
 ---
 
@@ -49,7 +49,7 @@ Legend: **Sign** = produce/embed Authenticode; **WT verify** = `WinVerifyTrust`-
 
 **Strengths:** Full Authenticode lifecycle — **sign**, **verify** (many policies), **timestamp**, **remove**, **catalog** ops, **sealing** / AppX constraints, response files, broad switch surface ([`psign-cli-matrix.json`](psign-cli-matrix.json)).
 
-**This repo (`psign-tool-windows`):**
+**This repo (`psign-tool`):**
 
 | Area | Parity |
 |------|--------|
@@ -59,7 +59,7 @@ Legend: **Sign** = produce/embed Authenticode; **WT verify** = `WinVerifyTrust`-
 | catdb | Partial |
 | Every obscure `/switch` | See **`cli-parity-backlog.md`** |
 
-**Portable digest-only checks** after native sign: **`verify-pe`**, **`--rust-sip-*`** family on **`psign-tool-windows`**.
+**Portable digest-only checks** after native sign: **`verify-pe`**, **`--rust-sip-*`** family on **`psign-tool`**.
 
 ---
 
@@ -69,7 +69,7 @@ Legend: **Sign** = produce/embed Authenticode; **WT verify** = `WinVerifyTrust`-
 
 **This repo:**
 
-| AzureSignTool concept | `psign-tool-windows` | `psign-tool-portable` |
+| AzureSignTool concept | `psign-tool` | `psign-tool portable` |
 |-----------------------|-------------------|---------------------|
 | KV URL, cert name, auth (MI / SP / token) | Yes (`--features azure-kv-sign`) | **`azure-key-vault-sign-digest`** (`--features azure-kv-sign-portable`) — digest file only |
 | Batch / parallelism / exit HRESULTs | Mapped (`--input-file-list`, `--exit-codes azuresigntool`, …) | N/A |
@@ -92,19 +92,19 @@ Details: [`migration-azuresigntool.md`](migration-azuresigntool.md).
 
 | Surface | Implementation |
 |---------|----------------|
-| Decoupled sign (`--dlib`, `--trusted-signing-dlib-root`, `--dmdf`) | **`psign-tool-windows`** only |
-| REST hash signing | **`artifact-signing-submit`** (`--features artifact-signing-rest`) on **`psign-tool-windows`** or **`psign-tool-portable`** |
-| Metadata validation without signing | **`psign-tool-portable artifact-signing-metadata-check`** |
+| Decoupled sign (`--dlib`, `--trusted-signing-dlib-root`, `--dmdf`) | **`psign-tool`** only |
+| REST hash signing | **`artifact-signing-submit`** (`--features artifact-signing-rest`) on **`psign-tool`** or **`psign-tool portable`** |
+| Metadata validation without signing | **`psign-tool portable artifact-signing-metadata-check`** |
 
 **Gap:** REST output is **not** wired into a portable Authenticode embedder; docs state MVP is hash signing / diagnostics. [`migration-artifact-signing.md`](migration-artifact-signing.md).
 
 ---
 
-## `psign-tool-portable` (Linux/macOS)
+## `psign-tool portable` (Linux/macOS)
 
-**Commands (verify / inspect / digest tools):** See [`roadmap-authenticode-linux.md`](roadmap-authenticode-linux.md) and **`psign-tool-portable --help`**.
+**Commands (verify / inspect / digest tools):** See [`roadmap-authenticode-linux.md`](roadmap-authenticode-linux.md) and **`psign-tool portable --help`**.
 
-**Remote signing steps (no embed):** With **`--features azure-kv-sign-portable`**, **`azure-key-vault-sign-digest`** performs Azure Key Vault **`keys/sign`** on a **raw digest file** (same REST shape as AzureSignTool’s remote step). **`pe-signer-rs256-prehash`**, **`cab-signer-rs256-prehash`**, **`msi-signer-rs256-prehash`**, and **`catalog-signer-rs256-prehash`** (**`--encoding raw`**) emit the **32-byte** **`RS256`** input over **`SignerInfo.signedAttrs`** (distinct from subject-layout digests and from **`verify-catalog`**’s CTL **`eContent`** / PKCS#9 checks). With **`--features artifact-signing-rest`**, **`artifact-signing-submit`** calls Trusted Signing **`:sign`**. Neither writes PKCS#7 into a PE/CAB/MSI subject without **`psign-tool-windows`** (or future portable CMS embed).
+**Remote signing steps (no embed):** With **`--features azure-kv-sign-portable`**, **`azure-key-vault-sign-digest`** performs Azure Key Vault **`keys/sign`** on a **raw digest file** (same REST shape as AzureSignTool’s remote step). **`pe-signer-rs256-prehash`**, **`cab-signer-rs256-prehash`**, **`msi-signer-rs256-prehash`**, and **`catalog-signer-rs256-prehash`** (**`--encoding raw`**) emit the **32-byte** **`RS256`** input over **`SignerInfo.signedAttrs`** (distinct from subject-layout digests and from **`verify-catalog`**’s CTL **`eContent`** / PKCS#9 checks). With **`--features artifact-signing-rest`**, **`artifact-signing-submit`** calls Trusted Signing **`:sign`**. Neither writes PKCS#7 into a PE/CAB/MSI subject without **`psign-tool`** (or future portable CMS embed).
 
 **RFC 3161 TSA helpers (Linux-side, no embed):** **`rfc3161-timestamp-req`** builds **`TimeStampReq`** DER from **`--digest-hex`** / **`--digest-file`** (message-imprint preimage; optional **`--nonce`**, **`--cert-req`**) for **`curl`** / OpenSSL **`ts`** against a timestamp URL. **`rfc3161-timestamp-resp-inspect`** prints **`pki_status`** / **`pki_status_int`** (raw status INTEGER) / **`granted`** / token length, **`time_stamp_token_prefix_hex`** (first **16** octets of the raw **`timeStampToken`** TLV, or **`-`** when absent — handy for **`ContentInfo`** / CMS shape checks), **`status_strings_json`** (**`PKIFreeText`**), **`fail_info_tlv_hex`**, and **`fail_info_flags_json`** (RFC 2510 Appendix A **`PKIFailureInfo`** bit names through **`badPOP`**, then **`bit_N`**; **`null`** when the **`BIT STRING`** body is not decodable). Optional **`rfc3161-timestamp-http-post`** (**`--features timestamp-http`**) performs the HTTPS POST without **`curl`**. None of this replaces **`SignerTimeStampEx3`** or **`CryptVerifyTimeStampSignature`**.
 
@@ -128,7 +128,7 @@ Use **public documentation**, **this repo’s parity tests**, and **writable cop
 
 | Original / surface | Mechanism | Typical study angle |
 |--------------------|-----------|----------------------|
-| Windows SDK **`signtool.exe`** | Native PE | Writable **`signtool.exe`**; map **`SignerSignEx3`**, **`WinVerifyTrust`** to docs and `psign-tool-windows` paths |
+| Windows SDK **`signtool.exe`** | Native PE | Writable **`signtool.exe`**; map **`SignerSignEx3`**, **`WinVerifyTrust`** to docs and `psign-tool` paths |
 | **`mssign32.dll`**, **`crypt32.dll`**, **`WINTRUST.dll`** | Native PE | Writable copies; follow **`SignerSignEx3`**, **`CryptMsg*`**, SIP glue vs [`windows-signing-components.md`](windows-signing-components.md) |
 | **AzureSignTool** | .NET | **`AzureSignTool.dll`** / **`AzureSign.Core.dll`** vs [`psign-azure-kv-rest`](../crates/psign-azure-kv-rest/) and [`migration-azuresigntool.md`](migration-azuresigntool.md) |
 | **Artifact Signing** managed client | .NET | **`Microsoft.ArtifactSigning.Client.dll`** vs [`psign-codesigning-rest`](../crates/psign-codesigning-rest/) |
@@ -143,7 +143,7 @@ When filing issues, prefer **parity scenario IDs** from [`parity-matrix.md`](par
 | Tier | Command / script | Platform |
 |------|-------------------|----------|
 | Unix CI | `cargo digest-test` / workflows in **`ci-unix.yml`** | Linux |
-| Unix local mirror | **`scripts/linux-portable-validation.sh`** (from repo root; bash); **`psign-tool-portable append-pe-pkcs7`** / **`pe-checksum --strict`** for PE layout experiments | Linux / WSL / Git Bash |
+| Unix local mirror | **`scripts/linux-portable-validation.sh`** (from repo root; bash); **`psign-tool portable append-pe-pkcs7`** / **`pe-checksum --strict`** for PE layout experiments | Linux / WSL / Git Bash |
 | Pipelines narrative | [`linux-signing-pipelines.md`](linux-signing-pipelines.md) | Linux-focused |
 | Windows parity | `./scripts/run-parity-diff.ps1`, `./scripts/ci/run-exhaustive-parity-ci.ps1` | Windows |
 | Writable native signing binaries | **`pwsh -File scripts/prepare-writable-signing-binaries.ps1`** → **`parity-output/writable-signing-binaries`** (gitignored) | Windows |

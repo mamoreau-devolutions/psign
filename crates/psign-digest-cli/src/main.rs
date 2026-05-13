@@ -1,7 +1,7 @@
-//! Cross-platform helper over [`psign_sip_digest`] — **no WinVerifyTrust**.
-//!
-//! Use this on Linux/macOS to compute PE image digests or to check PKCS#7 indirect-data consistency
-//! for formats implemented in `psign-sip-digest`. This does **not** replace full `psign` verify.
+// Cross-platform helper over `psign_sip_digest` — no WinVerifyTrust.
+//
+// Use this on Linux/macOS to compute PE image digests or to check PKCS#7 indirect-data consistency
+// for formats implemented in `psign-sip-digest`. This does not replace full `psign` verify.
 
 use anyhow::{Context, Result, anyhow};
 #[cfg(feature = "azure-kv-sign-portable")]
@@ -45,11 +45,11 @@ use psign_sip_digest::timestamp::{
 use psign_sip_digest::verify_pe;
 use psign_sip_digest::verify_script_digest_consistency;
 use serde::Deserialize;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
-#[command(name = "psign-tool-portable")]
+#[command(name = "psign-tool")]
 #[command(version, about = "Portable Authenticode SIP digest utilities (no Windows CryptoAPI)", long_about = None)]
 struct Cli {
     #[command(subcommand)]
@@ -589,13 +589,13 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         path: Option<PathBuf>,
     },
-    /// Azure Code Signing **`…:sign`** LRO (same REST contract as **`psign-tool-windows artifact-signing-submit`**). Requires **`--features artifact-signing-rest`** at build time.
+    /// Azure Code Signing **`…:sign`** LRO (same REST contract as **`psign-tool artifact-signing-submit`**). Requires **`--features artifact-signing-rest`** at build time.
     #[cfg(feature = "artifact-signing-rest")]
     ArtifactSigningSubmit {
         #[command(flatten)]
         args: ArtifactSigningSubmitPortableArgs,
     },
-    /// Azure Key Vault **`keys/sign`** over a **precomputed digest file** (RSA PKCS#1 or ECDSA). Requires **`--features azure-kv-sign-portable`**. Does **not** embed Authenticode — use **`psign-tool-windows`** for that.
+    /// Azure Key Vault **`keys/sign`** over a **precomputed digest file** (RSA PKCS#1 or ECDSA). Requires **`--features azure-kv-sign-portable`**. Does **not** embed Authenticode — use **`psign-tool`** for that.
     #[cfg(feature = "azure-kv-sign-portable")]
     AzureKeyVaultSignDigest {
         #[command(flatten)]
@@ -1185,7 +1185,15 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    let cli = Cli::parse();
+    run_from(std::env::args_os())
+}
+
+pub fn run_from<I, T>(args: I) -> Result<()>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
+    let cli = Cli::parse_from(args);
     match cli.command {
         Command::PeDigest {
             path,

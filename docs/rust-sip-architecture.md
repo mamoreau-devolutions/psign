@@ -17,7 +17,7 @@ Hand-rolled COFF/optional-header traversal was deferred: **`object`** + the **`a
 | [`object`](https://crates.io/crates/object) | `PeFile32` / `PeFile64` implementing `PeTrait` |
 | [`sha2`](https://crates.io/crates/sha2) | SHA-256 hasher passed into `authenticode_digest` |
 | [`cms`](https://crates.io/crates/cms) / [`der`](https://crates.io/crates/der) | PKCS#7 **`SignedData`** decode + **`ContentInfo`** re-encode (`encode_pkcs7_content_info_signed_data_der`); **new** **`SignerInfo`** / countersignature production still TODO |
-| **`pe_embed`** (in-tree) | **`WIN_CERTIFICATE`** PKCS#7 wrap + attribute-cert append + **`CheckSum`** refresh; exercised from **`psign-tool-portable`** (**`append-pe-pkcs7`**, **`pe-checksum`**) |
+| **`pe_embed`** (in-tree) | **`WIN_CERTIFICATE`** PKCS#7 wrap + attribute-cert append + **`CheckSum`** refresh; exercised from **`psign-tool portable`** (**`append-pe-pkcs7`**, **`pe-checksum`**) |
 
 **Why not hand-roll PE parsing?** The main `psign` binary still uses **`goblin`** in `psign-depgraph`; digest code standardizes on **`object`** to match `authenticode-rs` and avoid duplicate COFF logic.
 
@@ -37,7 +37,7 @@ Hand-rolled COFF/optional-header traversal was deferred: **`object`** + the **`a
 
 ## Linux / macOS CLI (`crates/psign-digest-cli`)
 
-The **`psign-tool-portable`** binary wraps **`psign-sip-digest`** for scripting and CI (e.g. **`pe-digest`**, **`pe-checksum`**, **`verify-pe`**, **`trust-verify-*`**, **`extract-pe-pkcs7`** / **`list-pe-pkcs7`** / **`append-pe-pkcs7`**, **`inspect-pe-spc-indirect`**, **`verify-msix`**, **`pe-has-page-hashes`**, **`pe-page-hash-info`**, **`verify-pe-page-hashes`**, **`pe-authenticode-ranges`**, …). It performs **digest vs PKCS#7 indirect data** checks, **explicit-anchor trust**, **experimental PE cert-table growth**, **PE image checksum parity**, **PE Authenticode digest segment listing**, and **PE page-hash tooling** (not a full **`WinVerifyTrust`** `/ph` clone).
+The **`psign-tool portable`** binary wraps **`psign-sip-digest`** for scripting and CI (e.g. **`pe-digest`**, **`pe-checksum`**, **`verify-pe`**, **`trust-verify-*`**, **`extract-pe-pkcs7`** / **`list-pe-pkcs7`** / **`append-pe-pkcs7`**, **`inspect-pe-spc-indirect`**, **`verify-msix`**, **`pe-has-page-hashes`**, **`pe-page-hash-info`**, **`verify-pe-page-hashes`**, **`pe-authenticode-ranges`**, …). It performs **digest vs PKCS#7 indirect data** checks, **explicit-anchor trust**, **experimental PE cert-table growth**, **PE image checksum parity**, **PE Authenticode digest segment listing**, and **PE page-hash tooling** (not a full **`WinVerifyTrust`** `/ph` clone).
 
 ## Win32 adapter (`src/win/sip_rust/`)
 

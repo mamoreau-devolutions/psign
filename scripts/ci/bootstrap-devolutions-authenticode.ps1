@@ -62,12 +62,12 @@ catch {
 
 $pfxPassword = "CodeSign123!"
 $lines = @(
-    "SIGNTOOL_RS_TEST_PFX=$pfxPath",
-    "SIGNTOOL_RS_TEST_PFX_PASSWORD=$pfxPassword",
-    "SIGNTOOL_RS_TIMESTAMP_URL=$TimestampUrl",
-    "SIGNTOOL_RS_MSIX_TEST_PFX=$pfxPath",
-    "SIGNTOOL_RS_MSIX_TEST_PFX_PASSWORD=$pfxPassword",
-    "SIGNTOOL_RS_MSIX_TIMESTAMP_URL=$TimestampUrl"
+    "PSIGN_TEST_PFX=$pfxPath",
+    "PSIGN_TEST_PFX_PASSWORD=$pfxPassword",
+    "PSIGN_TIMESTAMP_URL=$TimestampUrl",
+    "PSIGN_MSIX_TEST_PFX=$pfxPath",
+    "PSIGN_MSIX_TEST_PFX_PASSWORD=$pfxPassword",
+    "PSIGN_MSIX_TIMESTAMP_URL=$TimestampUrl"
 )
 
 # Rust signer signs from store via --cert-sha1 reliably for this PKI; native signtool keeps using /f PFX.
@@ -76,13 +76,13 @@ try {
     $imported = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\CurrentUser\My" -Password $secure -Exportable
     $thumb = $imported.Thumbprint
     $lines += @(
-        "SIGNTOOL_RS_TEST_CERT_SHA1=$thumb",
-        "SIGNTOOL_RS_MSIX_TEST_CERT_SHA1=$thumb"
+        "PSIGN_TEST_CERT_SHA1=$thumb",
+        "PSIGN_MSIX_TEST_CERT_SHA1=$thumb"
     )
     Write-Host "Imported test signing cert to CurrentUser\My (thumbprint $thumb)."
 }
 catch {
-    Write-Warning "Import-PfxCertificate to CurrentUser\My failed ($($_.Exception.Message)); set SIGNTOOL_RS_TEST_CERT_SHA1 manually if Rust --pfx signing fails."
+    Write-Warning "Import-PfxCertificate to CurrentUser\My failed ($($_.Exception.Message)); set PSIGN_TEST_CERT_SHA1 manually if Rust --pfx signing fails."
 }
 
 foreach ($line in $lines) {

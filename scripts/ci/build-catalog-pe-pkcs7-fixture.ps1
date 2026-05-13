@@ -13,8 +13,8 @@ if (-not (Test-Path -LiteralPath $pe)) { throw "Missing PE fixture: $pe" }
 New-Item -ItemType Directory -Force -Path (Split-Path $out) | Out-Null
 Push-Location $WorkspaceRoot
 try {
-    cargo run -p psign-digest-cli --bin psign-tool-portable --locked -- `
-        extract-pe-pkcs7 $pe --output $out
+    cargo run -p psign --bin psign-tool --locked -- `
+        portable extract-pe-pkcs7 $pe --output $out
     if ($LASTEXITCODE -ne 0) { throw "extract-pe-pkcs7 failed" }
 }
 finally {

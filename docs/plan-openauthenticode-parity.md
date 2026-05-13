@@ -6,9 +6,9 @@ This document lists **capabilities found there that psign does not fully mirror 
 
 ## Already broadly covered here
 
-- **PE, PowerShell-class scripts, WSH `.js`/`.vbs`/`.wsf`**, **MOF / PS1XML-style markers** — Windows signing uses `SignerSignEx3` + SIPs; portable digest checks live in `psign-sip-digest` / `psign-tool-portable`.
+- **PE, PowerShell-class scripts, WSH `.js`/`.vbs`/`.wsf`**, **MOF / PS1XML-style markers** — Windows signing uses `SignerSignEx3` + SIPs; portable digest checks live in `psign-sip-digest` / `psign-tool portable`.
 - **MSIX / APPX** — Windows path + portable ZIP digest verification (PSA uses a pure ZIP/CMS provider; we rely on the Windows SIP for signing).
-- **Azure Key Vault–backed signing** — `psign-tool-windows` + `--features azure-kv-sign` (RSA PKCS#1 v1.5 over digest).
+- **Azure Key Vault–backed signing** — `psign-tool` + `--features azure-kv-sign` (RSA PKCS#1 v1.5 over digest).
 - **Artifact Signing via Microsoft dlib** — `--dlib` / `--trusted-signing-dlib-root` + `--dmdf` (Windows only).
 - **Append signature** — `--append-signature` exists; **parity** with PSA’s nested PKCS#7 attribute (`1.3.6.1.4.1.311.2.4.1`) should be validated with fixtures.
 - **Remove / clear signature** — `remove` (and related flows) vs PSA `Clear-OpenAuthenticodeSignature`.
@@ -38,8 +38,8 @@ This document lists **capabilities found there that psign does not fully mirror 
 
 **Plan:**
 
-- Add a **`psign-tool-windows inspect-signature`** (or extend **`verify --dump`** if present) that prints **machine-readable** JSON: signer count, nested blobs, digest OID, **timestamp kind** (legacy vs RFC3161), signing time hints, leaf subject/thumbprint (no PowerShell dependency).
-- Share parsing logic with **`psign-tool-portable`** where possible (reuse `picky` / existing PKCS#7 helpers from trust crate).
+- Add a **`psign-tool inspect-signature`** (or extend **`verify --dump`** if present) that prints **machine-readable** JSON: signer count, nested blobs, digest OID, **timestamp kind** (legacy vs RFC3161), signing time hints, leaf subject/thumbprint (no PowerShell dependency).
+- Share parsing logic with **`psign-tool portable`** where possible (reuse `picky` / existing PKCS#7 helpers from trust crate).
 - Cross-test against PSA output on shared fixtures.
 
 ### 3. Verification semantics: timestamp-grace and optional custom trust store
@@ -87,7 +87,7 @@ This document lists **capabilities found there that psign does not fully mirror 
 
 **psign:** Uses **`SignerTimeStampEx3`** / crypto API.
 
-**Plan:** Low priority **integration test** or **`psign-tool-portable`** dev-only tool that speaks RFC3161 HTTP to compare tokens with Windows timestamp pipeline—only if timestamp discrepancies appear in parity reports.
+**Plan:** Low priority **integration test** or **`psign-tool portable`** dev-only tool that speaks RFC3161 HTTP to compare tokens with Windows timestamp pipeline—only if timestamp discrepancies appear in parity reports.
 
 ## Suggested phase order
 
