@@ -15,13 +15,6 @@ This repository is a **Rust port** of the Windows SDK **`signtool.exe`** (Authen
 
 **Important:** **`default-members`** include the root **`psign`** package plus the portable crates under **`crates/`**. A bare **`cargo build`** at the repo root builds the unified **`psign-tool`** executable from **`src/main.rs`**; portable functionality is invoked through **`psign-tool portable ...`**.
 
-## Cargo aliases (`.cargo/config.toml`)
-
-- **`cargo windows-bin`** — build **`psign-tool`** exe (**`-p psign --bin psign-tool`**).
-- **`cargo digest-check`** / **`cargo digest-test`** — portable digest/trust crates plus unified **`psign-tool portable ...`** integration tests (see **`.cargo/config.toml`**).
-- **`cargo unix-lib-check`** — **`psign`** library on non-Windows (portable-mode friendly).
-- **`cargo depgraph`** — **`psign-depgraph`** binary (uses explicit **`-p psign`** package selection).
-
 ## Commands agents should run
 
 **After substantive edits**

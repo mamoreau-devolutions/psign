@@ -24,7 +24,7 @@ differential parity tests against the native tool where CI fixtures allow.
 cargo build
 ```
 
-At the repo root, **`cargo build`** targets **`default-members`**, including the unified **`psign-tool`** executable from `src\main.rs` plus the portable digest / trust / package crates. On Windows, **`cargo windows-bin`** and **`cargo build -p psign --bin psign-tool`** remain explicit ways to build only that executable (see [`.cargo/config.toml`](.cargo/config.toml)). Optional Cargo features: **`azure-kv-sign`** (Key Vault digest callback), **`artifact-signing-rest`** (**`artifact-signing-submit`** LRO against **`*.codesigning.azure.net`**).
+At the repo root, **`cargo build`** targets **`default-members`**, including the unified **`psign-tool`** executable from `src\main.rs` plus the portable digest / trust / package crates. On Windows, **`cargo build -p psign --bin psign-tool`** remains the explicit way to build only that executable. Optional Cargo features: **`azure-kv-sign`** (Key Vault digest callback), **`artifact-signing-rest`** (**`artifact-signing-submit`** LRO against **`*.codesigning.azure.net`**).
 
 ## Dotnet tool package (.NET 10+)
 
@@ -69,8 +69,8 @@ cargo build -p psign --bin psign-tool --locked
 # Optional portable REST helpers (Linux/macOS):
 # cargo build -p psign --bin psign-tool --locked --features artifact-signing-rest
 # cargo build -p psign --bin psign-tool --locked --features azure-kv-sign
-cargo digest-test    # alias: portable crates + unified psign-tool portable integration tests
-cargo digest-check   # alias: `cargo check` on portable workspace crates (includes `psign-codesigning-rest`)
+cargo test -p psign-sip-digest -p psign-authenticode-trust -p psign-codesigning-rest -p psign-azure-kv-rest -p psign-digest-cli -p psign --locked
+cargo check -p psign-sip-digest -p psign-digest-cli -p psign-authenticode-trust -p psign-codesigning-rest -p psign-azure-kv-rest --locked
 ```
 
 Unix CI (`ci-unix`) runs **`cargo fmt`**, strict **`clippy -D warnings`** on those crates plus the **`psign` library**, and the digest CLI tests. Local mirror (bash): **`scripts/linux-portable-validation.sh`** from the repo root.
@@ -79,8 +79,6 @@ Unix CI (`ci-unix`) runs **`cargo fmt`**, strict **`clippy -D warnings`** on tho
 
 ```powershell
 cargo run -p psign --bin psign-depgraph -- --signtool "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe"
-# Same thing (the alias supplies explicit `-p psign` package selection):
-cargo depgraph -- --signtool "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe"
 ```
 
 Output files (gitignored **`parity-output/`**):

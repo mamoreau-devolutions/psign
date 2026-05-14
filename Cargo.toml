@@ -20,11 +20,18 @@ default-members = [
 ]
 resolver = "2"
 
+[workspace.package]
+license = "MIT"
+repository = "https://github.com/Devolutions/psign"
+
 [package]
 name = "psign"
 version = "0.1.0"
 edition = "2024"
 description = "Rust port of the Windows SDK signtool.exe (Authenticode sign/verify/timestamp) with portable digest helpers."
+license.workspace = true
+readme = "README.md"
+repository.workspace = true
 
 [features]
 default = []

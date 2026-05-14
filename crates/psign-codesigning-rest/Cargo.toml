@@ -3,6 +3,8 @@ name = "psign-codesigning-rest"
 version = "0.1.0"
 edition = "2024"
 description = "Azure Code Signing data-plane CertificateProfileOperations Sign LRO (portable, blocking HTTP)"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 anyhow = "1"
