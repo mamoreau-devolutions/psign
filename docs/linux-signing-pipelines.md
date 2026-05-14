@@ -14,7 +14,7 @@ After any Windows signing job:
 | CAB | `verify-cab`, `trust-verify-cab` |
 | MSI / ESD / MSIX / catalog / scripts | matching **`verify-*`** |
 
-Automation: **`cargo digest-test`**, **`scripts/linux-portable-validation.sh`**, GitHub **`ci-unix`**. Windows differential parity: **`scripts/run-parity-diff.ps1`** (see [`ci-parity.md`](ci-parity.md)).
+Automation: **`scripts/linux-portable-validation.sh`**, GitHub **`ci-unix`**, and the portable crate/test commands documented in [`roadmap-authenticode-linux.md`](roadmap-authenticode-linux.md). Windows differential parity: **`scripts/run-parity-diff.ps1`** (see [`ci-parity.md`](ci-parity.md)).
 
 ## 1.5 RFC 3161 TSA query/reply (DER only; no embed)
 

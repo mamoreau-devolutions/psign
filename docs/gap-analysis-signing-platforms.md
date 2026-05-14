@@ -192,7 +192,7 @@ When filing issues, prefer **parity scenario IDs** from [`parity-matrix.md`](par
 
 | Tier | Command / script | Platform |
 |------|-------------------|----------|
-| Unix CI | `cargo digest-test` / workflows in **`ci-unix.yml`** | Linux |
+| Unix CI | workflows in **`ci-unix.yml`** | Linux |
 | Unix local mirror | **`scripts/linux-portable-validation.sh`** (from repo root; bash); **`psign-tool portable append-pe-pkcs7`** / **`pe-checksum --strict`** for PE layout experiments | Linux / WSL / Git Bash |
 | Pipelines narrative | [`linux-signing-pipelines.md`](linux-signing-pipelines.md) | Linux-focused |
 | Windows parity | `./scripts/run-parity-diff.ps1`, `./scripts/ci/run-exhaustive-parity-ci.ps1` | Windows |

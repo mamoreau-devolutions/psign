@@ -12,6 +12,9 @@
     <Authors>Devolutions</Authors>
     <Description>RID-specific dotnet tool wrapper around prebuilt psign-tool native executables.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/Devolutions/psign</PackageProjectUrl>
+    <PackageTags>authenticode;signtool;code-signing;dotnet-tool</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/Devolutions/psign</RepositoryUrl>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>

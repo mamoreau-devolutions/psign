@@ -3,6 +3,8 @@ name = "psign-authenticode-trust"
 version = "0.1.0"
 edition = "2024"
 description = "Portable Authenticode PKCS#7 trust verification (anchors, chain, EKU) using picky-rs"
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 anyhow = "1"
