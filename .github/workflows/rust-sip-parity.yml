@@ -22,22 +22,22 @@ jobs:
         run: cargo test -p psign-sip-digest --lib rsa_pkcs1v15_signed_attrs_verify --locked
 
       - name: RS256 prehash CLI (PE + extracted PKCS#7, tiny32 + tiny64)
-        run: cargo test -p psign-digest-cli --locked signer_rs256_prehash
+        run: cargo test -p psign --test cli_pe_digest --locked signer_rs256_prehash
 
       - name: CAB RS256 prehash + extract (signed fixture + unsigned errors)
-        run: cargo test -p psign-digest-cli --locked cab_rs256_
+        run: cargo test -p psign --test cli_pe_digest --locked cab_rs256_
 
       - name: "CAB RS256 prehash helper (library: signed fixture + unsigned rejection)"
         run: cargo test -p psign-sip-digest --lib cab_rsa_sha256_signer_prehash --locked
 
       - name: MSI PKCS#7 extract + RS256 prehash CLI (OLE stub vs PE parity)
-        run: cargo test -p psign-digest-cli --locked msi_rs256_
+        run: cargo test -p psign --test cli_pe_digest --locked msi_rs256_
 
       - name: MSI PKCS#7 + RS256 helper (library)
         run: cargo test -p psign-sip-digest --lib msi_pkcs7_ --locked
 
       - name: Catalog RS256 prehash CLI (PE PKCS#7 as .cat fixture)
-        run: cargo test -p psign-digest-cli --locked cat_rs256_
+        run: cargo test -p psign --test cli_pe_digest --locked cat_rs256_
 
       - name: Catalog RS256 helper (library)
         run: cargo test -p psign-sip-digest --lib catalog_rsa_sha256_signer_prehash --locked
@@ -49,10 +49,10 @@ jobs:
         run: cargo test -p psign-sip-digest --lib _unsigned_errors_ --locked
 
       - name: Portable verify-negative CLI (PE/ESD/MSIX/script/CAB/trust)
-        run: cargo test -p psign-digest-cli --locked portable_verify_negative_
+        run: cargo test -p psign --test cli_pe_digest --locked portable_verify_negative_
 
       - name: Inspect PKCS#7 parity (PE vs extracted blob, CLI vs library)
-        run: cargo test -p psign-digest-cli --locked inspect_pkcs7_parity_
+        run: cargo test -p psign --test cli_pe_digest --locked inspect_pkcs7_parity_
 
       - name: Detached PKCS#7 trust (library; tiny32 anchors + digest mismatch)
         run: cargo test -p psign-authenticode-trust --lib detached_trust_ --locked
@@ -66,12 +66,12 @@ jobs:
           cargo test -p psign-authenticode-trust --lib nested_tstinfo --locked
           cargo test -p psign-authenticode-trust --lib time_rejects --locked
           cargo test -p psign-authenticode-trust --lib resolve_verification_ --locked
-          cargo test -p psign-digest-cli --locked trust_verify_pe_ok_require_valid_timestamp_pkcs9_signing_time_on_tiny32
-          cargo test -p psign-digest-cli --locked trust_verify_pe_ok_require_valid_timestamp_pkcs9_signing_time_on_tiny64
-          cargo test -p psign-digest-cli --locked portable_rfc3161_timestamp
+          cargo test -p psign --test cli_pe_digest --locked trust_verify_pe_ok_require_valid_timestamp_pkcs9_signing_time_on_tiny32
+          cargo test -p psign --test cli_pe_digest --locked trust_verify_pe_ok_require_valid_timestamp_pkcs9_signing_time_on_tiny64
+          cargo test -p psign --test cli_pe_digest --locked portable_rfc3161_timestamp
 
       - name: Build psign-tool portable (timestamp-http feature, compile-only)
-        run: cargo build -p psign-digest-cli --features timestamp-http --locked
+        run: cargo build -p psign --bin psign-tool --features timestamp-http --locked
 
       - name: "Artifact Signing REST (library + mock :sign LRO)"
         run: cargo test -p psign-codesigning-rest --locked
@@ -91,7 +91,7 @@ jobs:
         run: cargo test -p psign-sip-digest --lib --locked
 
       - name: Portable digest CLI (PE fixtures)
-        run: cargo test -p psign-digest-cli --locked
+        run: cargo test -p psign --test cli_pe_digest --locked
 
       - name: Optional signing parity (machine env)
         shell: pwsh

@@ -20,6 +20,9 @@
     "cleartext_package_extensions": [".msix", ".appx", ".msixbundle", ".appxbundle"],
     "encrypted_package_extensions": [".eappx", ".eappxbundle", ".emsix", ".emsixbundle"],
     "wim_esd_extensions": [".wim", ".esd"],
+    "p7x_extensions": [".p7x"],
+    "appinstaller_extensions": [".appinstaller"],
+    "appinstaller_signature_extensions": [".p7"],
     "optional_provider_extensions": [".vsix", ".vsto", ".application", ".deploy", ".manifest", ".docm", ".xlsm", ".pptm", ".xlam"]
   },
   "committed_vectors": [
@@ -342,6 +345,46 @@
       "storage": "generated",
       "tooling": "signtool",
       "expected_native": ["detached-sign-probe"],
+      "expected_rust_sip": ["trust-verify-detached-if-signed"]
+    },
+    {
+      "id": "generated-p7x-probe-matrix",
+      "family": "p7x",
+      "extensions": [".p7x"],
+      "states": ["unsigned"],
+      "storage": "generated",
+      "tooling": "appxsip-p7x-provider-probe",
+      "expected_native": ["sign-probe"],
+      "expected_rust_sip": ["unsupported"]
+    },
+    {
+      "id": "generated-p7x-artifact-matrix",
+      "family": "p7x",
+      "extensions": [".p7x"],
+      "states": ["package-signature-extracted"],
+      "storage": "generated",
+      "tooling": "makeappx-and-signtool",
+      "expected_native": ["generated-inside-signed-package"],
+      "expected_rust_sip": ["unsupported"]
+    },
+    {
+      "id": "generated-appinstaller-probe-matrix",
+      "family": "appinstaller",
+      "extensions": [".appinstaller"],
+      "states": ["unsigned"],
+      "storage": "generated",
+      "tooling": "appinstaller-xml",
+      "expected_native": ["sign-probe"],
+      "expected_rust_sip": ["unsupported"]
+    },
+    {
+      "id": "generated-appinstaller-signature-matrix",
+      "family": "appinstaller",
+      "extensions": [".p7"],
+      "states": ["detached-signed"],
+      "storage": "generated",
+      "tooling": "signtool-p7",
+      "expected_native": ["detached-sign-ok"],
       "expected_rust_sip": ["trust-verify-detached-if-signed"]
     },
     {

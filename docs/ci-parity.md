@@ -43,7 +43,7 @@ Runs on **`master`/`main`** pushes, **`workflow_dispatch`**, and a weekly cron.
 | Job | Runner | Role |
 |-----|--------|------|
 | **`portable-cms-rs256-linux`** | **`ubuntu-latest`** | **`rsa_pkcs1v15_signed_attrs_verify`**; **`signer_rs256_prehash`**; **`cab_rs256_`** / **`cab_rsa_sha256_signer_prehash`**; **`msi_rs256_`** / **`msi_pkcs7_`**; **`cat_rs256_`** / **`catalog_rsa_sha256_signer_prehash`**; **`wim_verify_rejects`**; **`_unsigned_errors_`** (script SIP); **`portable_verify_negative_`** (CLI: PE/ESD/MSIX/script/CAB/trust/catalog/detached/inspect + digest + RS256 signer prehash bad-input paths); **`inspect_pkcs7_parity_`**; **`detached_trust_`**; **`data_plane_base_url`** ([`psign-codesigning-rest`](../crates/psign-codesigning-rest/src/lib.rs)); **`psign-azure-kv-rest --lib`** ([`psign-azure-kv-rest`](../crates/psign-azure-kv-rest/src/lib.rs)) — Linux gates for Azure KV **`RS256`** plus portable verify/inspect/trust and REST URL helpers. |
-| **`rust-sip-golden`** | **`windows-latest`** | Full **`psign-sip-digest`** lib tests, **`psign-digest-cli`** integration tests, optional **`scripts/rust-sip-parity-pe.ps1`**. |
+| **`rust-sip-golden`** | **`windows-latest`** | Full **`psign-sip-digest`** lib tests, unified **`psign-tool portable ...`** integration tests, optional **`scripts/rust-sip-parity-pe.ps1`**. |
 
 These checks also run under **`ci-unix.yml`** / **`scripts/linux-portable-validation.sh`**; **`rust-sip-parity`** duplicates the CMS subset so parity dashboards stay meaningful without native **`signtool.exe`**.
 

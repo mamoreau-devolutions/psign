@@ -42,16 +42,16 @@ echo "== unit tests: azure-kv-rest =="
 cargo test -p psign-azure-kv-rest --lib --locked
 
 echo "== integration: psign-tool portable (digest-cli) =="
-cargo test -p psign-digest-cli --locked
+cargo test -p psign --test cli_pe_digest --locked
 
 echo "== integration: psign-tool portable (artifact-signing-rest) =="
-cargo test -p psign-digest-cli --features artifact-signing-rest --locked
+cargo test -p psign --test cli_pe_digest --features artifact-signing-rest --locked
 
 echo "== integration: psign-tool portable (azure-kv-sign-portable) =="
-cargo test -p psign-digest-cli --features azure-kv-sign-portable --locked
+cargo test -p psign --test cli_pe_digest --features azure-kv-sign --locked
 
 echo "== integration: psign-tool portable (timestamp-http) =="
-cargo test -p psign-digest-cli --features timestamp-http --locked
+cargo test -p psign --test cli_pe_digest --features timestamp-http --locked
 
 echo "== psign library tests (argv / response files) =="
 cargo test -p psign --lib --locked

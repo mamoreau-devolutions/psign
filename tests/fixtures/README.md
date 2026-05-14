@@ -25,7 +25,8 @@ manifests/hashes with the files.
 
 Package-signing fixtures live under `tests/fixtures/package-signing/`:
 
-- `unsigned/sample.nupkg` and `signed/sample.signed.nupkg` exercise NuGet
+- `unsigned/sample.nupkg`, `signed/sample.signed.nupkg`,
+  `unsigned/sample.snupkg`, and `signed/sample.signed.snupkg` exercise NuGet
   package-signature markers produced by `dotnet nuget sign`.
 - `unsigned/sample.vsix` and `signed/sample.signed.vsix` exercise OPC
   XMLDSig marker paths produced by
@@ -57,8 +58,8 @@ The generated matrix includes:
 
 - PE-backed aliases (`.exe`, `.dll`, `.sys`, `.ocx`, `.scr`, `.cpl`, `.efi`, `.mui`, `.winmd`) for both tiny32 and tiny64 PE sources.
 - PowerShell and WSH text variants for UTF-8, UTF-8 with BOM, UTF-16LE with BOM, UTF-16BE with BOM, CRLF, and LF.
-- Cleartext MSIX/AppX package rows, encrypted-package negative rows, CAB, real installer/catalog rows, tiny DISM-created WIM/ESD images, detached PKCS#7 inputs, and optional-provider probes.
-- Signed counterparts for native-supported PE/WinMD/CAB/MSIX, WIM/ESD, catalog, MSI/MSP, PowerShell UTF-8/UTF-8-BOM/UTF-16LE-BOM rows, WSH `.js`/`.jse`/`.vbs`/`.vbe`/`.wsf` rows, and all detached PKCS#7 content variants. PowerShell UTF-16BE-BOM and WSH `.wsc` rows are retained unsigned and recorded as native SignTool rejects; MST is retained as a native `/pa` verification reject.
+- Cleartext MSIX/AppX package rows, encrypted-package negative rows, CAB, real installer/catalog rows, tiny DISM-created WIM/ESD images, detached PKCS#7 inputs, App Installer descriptors, extracted AppX `AppxSignature.p7x` artifacts, and optional-provider probes.
+- Signed counterparts for native-supported PE/WinMD/CAB/MSIX, WIM/ESD, catalog, MSI/MSP, PowerShell UTF-8/UTF-8-BOM/UTF-16LE-BOM rows, WSH `.js`/`.jse`/`.vbs`/`.vbe`/`.wsf` rows, and all detached PKCS#7 content variants. PowerShell UTF-16BE-BOM, WSH `.wsc`, direct `.p7x` signing, direct `.appinstaller` signing, and optional-provider probe rows are retained unsigned and recorded as native SignTool rejects when current Windows tooling cannot embedded-sign them; MST is signed but retained as a native `/pa` verification reject. Real `.p7x` coverage comes from extracting `AppxSignature.p7x` out of a signed MSIX package, and real App Installer signing coverage is the unsigned XML plus a generated `.p7` companion signature.
 
 The checked-in tiny WIM/ESD files are preserved by the generator during `-Force`
 regeneration. If recreating them from scratch, run DISM capture/export from an

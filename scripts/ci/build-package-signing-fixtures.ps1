@@ -205,20 +205,27 @@ $signedDir = Join-Path $OutputDir "signed"
 New-Item -ItemType Directory -Force -Path $unsignedDir, $signedDir | Out-Null
 
 $unsignedNupkg = Join-Path $unsignedDir "sample.nupkg"
+$unsignedSnupkg = Join-Path $unsignedDir "sample.snupkg"
 $unsignedVsix = Join-Path $unsignedDir "sample.vsix"
 $signedNupkg = Join-Path $signedDir "sample.signed.nupkg"
+$signedSnupkg = Join-Path $signedDir "sample.signed.snupkg"
 $signedVsix = Join-Path $signedDir "sample.signed.vsix"
 
 New-UnsignedNuGetPackage -Path $unsignedNupkg
+New-UnsignedNuGetPackage -Path $unsignedSnupkg
 New-UnsignedVsixPackage -Path $unsignedVsix
 Copy-Item -LiteralPath $unsignedNupkg -Destination $signedNupkg -Force
+Copy-Item -LiteralPath $unsignedSnupkg -Destination $signedSnupkg -Force
 Copy-Item -LiteralPath $unsignedVsix -Destination $signedVsix -Force
 Invoke-DotnetNuGetSign -PackagePath $signedNupkg -CertificatePath $PfxPath
+Invoke-DotnetNuGetSign -PackagePath $signedSnupkg -CertificatePath $PfxPath
 Invoke-VsixSign -PackagePath $signedVsix -CertificatePath $PfxPath
 
 $entries = [System.Collections.Generic.List[object]]::new()
 Add-ManifestEntry -List $entries -Id "package-nupkg-unsigned" -Family "nuget" -State "unsigned" -Path $unsignedNupkg
 Add-ManifestEntry -List $entries -Id "package-nupkg-signed" -Family "nuget" -State "signed" -Path $signedNupkg -SourcePath $unsignedNupkg -Tool "dotnet nuget sign"
+Add-ManifestEntry -List $entries -Id "package-snupkg-unsigned" -Family "nuget-symbols" -State "unsigned" -Path $unsignedSnupkg
+Add-ManifestEntry -List $entries -Id "package-snupkg-signed" -Family "nuget-symbols" -State "signed" -Path $signedSnupkg -SourcePath $unsignedSnupkg -Tool "dotnet nuget sign"
 Add-ManifestEntry -List $entries -Id "package-vsix-unsigned" -Family "vsix" -State "unsigned" -Path $unsignedVsix
 Add-ManifestEntry -List $entries -Id "package-vsix-signed" -Family "vsix" -State "signed" -Path $signedVsix -SourcePath $unsignedVsix -Tool "System.IO.Packaging.PackageDigitalSignatureManager"
 
@@ -229,6 +236,7 @@ $manifest = [ordered]@{
     entries = $entries
 }
 $manifestPath = Join-Path $OutputDir "package-signing-fixtures.json"
-[System.IO.File]::WriteAllText($manifestPath, (($manifest | ConvertTo-Json -Depth 10) + "`r`n"), [System.Text.UTF8Encoding]::new($false))
+$manifestJson = ($manifest | ConvertTo-Json -Depth 10) -replace "`r`n", "`n"
+[System.IO.File]::WriteAllText($manifestPath, $manifestJson + "`n", [System.Text.UTF8Encoding]::new($false))
 
 Write-Host "Package signing fixtures: $OutputDir"

@@ -9,18 +9,18 @@ This repository is a **Rust port** of the Windows SDK **`signtool.exe`** (Authen
 | Root package (unified CLI + lib) | `Cargo.toml` (package **`psign`**) | **`psign-tool`** dispatches to Win32 code on Windows or portable Rust paths via `--mode`; **`windows`** crate feature deps stay under **`cfg(windows)`**. |
 | Portable digest library | `crates/psign-sip-digest` | No **`windows`** dependency; Linux-safe unit tests. |
 | Portable Authenticode trust | `crates/psign-authenticode-trust` | Anchors + picky chain; **`psign-tool portable`** **`trust-verify-pe`**, **`trust-verify-cab`**, **`trust-verify-catalog`**, **`trust-verify-detached`** — no OS trust store. |
-| Portable CLI runner | `crates/psign-digest-cli` | Callable by **`psign-tool portable ...`**; compatibility binary **`psign-tool-portable`** remains during transition. |
+| Portable CLI runner | `crates/psign-digest-cli` | Library used by **`psign-tool portable ...`**; no separate portable executable is emitted. |
 | Win32 implementation | `src/win/` | Verify, sign, timestamp, catalog, detached PKCS#7, etc. |
 | argv / response files | `src/native_argv.rs`, `src/response_argv.rs` | Shared by unified CLI and portable-mode builds. |
 
-**Important:** **`default-members`** are the three crates under **`crates/`** (digest, digest CLI, authenticode-trust). A bare **`cargo build`** or **`cargo test`** at the repo root does **not** build the **`psign`** binary unless you use **`--workspace`** or **`-p psign`**.
+**Important:** **`default-members`** include the root **`psign`** package plus the portable crates under **`crates/`**. A bare **`cargo build`** at the repo root builds the unified **`psign-tool`** executable from **`src/main.rs`**; portable functionality is invoked through **`psign-tool portable ...`**.
 
 ## Cargo aliases (`.cargo/config.toml`)
 
 - **`cargo windows-bin`** — build **`psign-tool`** exe (**`-p psign --bin psign-tool`**).
-- **`cargo digest-check`** / **`cargo digest-test`** — portable digest + trust crates (see **`.cargo/config.toml`**).
+- **`cargo digest-check`** / **`cargo digest-test`** — portable digest/trust crates plus unified **`psign-tool portable ...`** integration tests (see **`.cargo/config.toml`**).
 - **`cargo unix-lib-check`** — **`psign`** library on non-Windows (portable-mode friendly).
-- **`cargo depgraph`** — **`psign-depgraph`** binary (**needs `-p`** because of **`default-members`**).
+- **`cargo depgraph`** — **`psign-depgraph`** binary (uses explicit **`-p psign`** package selection).
 
 ## Commands agents should run
 
@@ -32,7 +32,7 @@ cargo clippy --workspace --all-targets --locked
 cargo test --workspace --locked
 ```
 
-On Linux/macOS, match **`ci-unix`**: fmt check, metadata **`--locked`**, clippy **`-D warnings`** on **`psign-sip-digest`**, **`psign-digest-cli`**, **`psign-authenticode-trust`**, **`psign --lib`**, then **`cargo test -p psign-sip-digest --lib`**, **`cargo test -p psign-authenticode-trust --lib`**, **`cargo test -p psign-digest-cli`**, and **`cargo test -p psign --lib`**.
+On Linux/macOS, match **`ci-unix`**: fmt check, metadata **`--locked`**, clippy **`-D warnings`** on **`psign-sip-digest`**, **`psign-digest-cli`**, **`psign-authenticode-trust`**, **`psign --lib`**, then **`cargo test -p psign-sip-digest --lib`**, **`cargo test -p psign-authenticode-trust --lib`**, **`cargo test -p psign --test cli_pe_digest`**, and **`cargo test -p psign --lib`**.
 
 **Windows-only parity** (when changing verify/sign/timestamp behavior): build **`psign`** and run **`scripts/run-parity-diff.ps1`** or **`scripts/ci/run-exhaustive-parity-ci.ps1`** with env vars described in **`docs/ci-parity.md`**.
 
