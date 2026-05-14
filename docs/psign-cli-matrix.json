@@ -239,6 +239,6 @@
       {"name": "rfc3161-timestamp-resp-inspect", "maps_to_native_concept": "Parse TimeStampResp PKIStatus (label + raw int), timeStampToken length + 16-octet TLV hex prefix (CMS sniffing), statusString, failInfo TLV + PKIFailureInfo bit names (not CryptVerifyTimeStampSignature)"},
       {"name": "rfc3161-timestamp-http-post", "maps_to_native_concept": "HTTPS POST TimeStampReq to TSA (optional build feature timestamp-http; not SignerTimeStampEx3)"}
     ],
-    "ci": "`ci-unix` runs `cargo test -p psign-digest-cli`; `rust-sip-parity.yml` job `portable-cms-rs256-linux` filters PE/CAB/MSI/catalog RS256 tests; Windows workflow also builds workspace and runs digest-cli tests."
+    "ci": "`ci-unix` runs unified `psign-tool portable ...` integration tests with `cargo test -p psign --test cli_pe_digest`; `rust-sip-parity.yml` job `portable-cms-rs256-linux` filters PE/CAB/MSI/catalog RS256 tests through the same root test target; Windows workflow also builds workspace and runs the unified portable CLI tests."
   }
 }

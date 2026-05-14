@@ -64,12 +64,12 @@ AzureSignTool documents HRESULT-style batch exits (`README` **Exit Codes**):
 | Partial success | `0x20000001` |
 | All failed | `0xA0000002` |
 
-Enable the same behavior with:
+Enable the same behavior directly on **`psign-tool`** with:
 
 - **`--exit-codes azuresigntool`** (alias `azure`), or  
 - Environment **`PSIGN_EXIT_CODES=azure`** (or `azuresigntool`).
 
-The helper binary **`psign-azure-sign-tool-compat`** sets the environment default to Azure HRESULT semantics before running the same CLI entry point.
+The old helper executable name is no longer emitted; use **`psign-tool sign --exit-codes azure ...`** as the AzureSignTool replacement invocation, or set **`PSIGN_EXIT_CODES=azure`** for scripts that need an environment-level default.
 
 Default **`signtool`** exit codes remain **`0` / `1` / `2`**.
 

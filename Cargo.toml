@@ -7,9 +7,10 @@ members = [
     "crates/psign-azure-kv-rest",
     "crates/psign-opc-sign",
 ]
-# Bare `cargo build` / `cargo test` at the repo root builds portable crates only (Linux/macOS friendly).
-# Use `-p psign` or `cargo build --workspace` for the full workspace including the Windows binary crate.
+# Bare `cargo build` / `cargo test` at the repo root includes the unified `psign-tool`
+# target plus the portable crates.
 default-members = [
+    ".",
     "crates/psign-sip-digest",
     "crates/psign-digest-cli",
     "crates/psign-authenticode-trust",
@@ -35,6 +36,8 @@ azure-kv-sign = [
 ]
 ## Azure Artifact Signing / Trusted Signing **data-plane** hash signing (REST LRO); experimental helper command `artifact-signing-submit`.
 artifact-signing-rest = ["dep:psign-codesigning-rest", "psign-digest-cli/artifact-signing-rest"]
+## Portable RFC 3161 TSA HTTP POST helper under `psign-tool portable`.
+timestamp-http = ["psign-digest-cli/timestamp-http"]
 
 [dependencies]
 psign-sip-digest = { path = "crates/psign-sip-digest" }
@@ -68,22 +71,18 @@ windows = { version = "0.59", features = [
     "Win32_System_Registry",
 ] }
 
-[target.'cfg(windows)'.dev-dependencies]
+[dev-dependencies]
 assert_cmd = "2"
 predicates = "3"
-psign-authenticode-trust = { path = "crates/psign-authenticode-trust" }
+rand = "0.8"
+rsa = { version = "0.9.10", features = ["sha2"] }
+tempfile = "3"
+x509-cert = { version = "0.2.5", features = ["builder"] }
+zip = { version = "0.6.6", default-features = false, features = ["deflate"] }
 
 [[bin]]
 name = "psign-tool"
 path = "src/main.rs"
-
-[[bin]]
-name = "psign-tool-windows"
-path = "src/bin/psign_tool_windows.rs"
-
-[[bin]]
-name = "psign-azure-sign-tool-compat"
-path = "src/bin/azure_sign_tool_compat.rs"
 
 [[bin]]
 name = "psign-depgraph"

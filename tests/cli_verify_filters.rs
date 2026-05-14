@@ -5,7 +5,9 @@
 use assert_cmd::Command;
 use clap::Parser;
 use predicates::prelude::*;
-use psign::cli::{Cli, Command as SubCommand, DigestAlgorithm, RustSipBackend, VerifyPolicy};
+use psign::cli::{
+    Cli, Command as SubCommand, DigestAlgorithm, RustSipBackend, SignExitCodes, VerifyPolicy,
+};
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -115,6 +117,87 @@ fn sign_accepts_multiple_trailing_files() {
     assert_eq!(s.files.len(), 2);
     assert_eq!(s.files[0], Path::new("one.dll"));
     assert_eq!(s.files[1], Path::new("two.dll"));
+}
+
+#[test]
+fn sign_accepts_azuresigntool_exit_code_modes() {
+    for value in ["azure", "azuresigntool"] {
+        let c = Cli::try_parse_from([
+            "psign-tool",
+            "sign",
+            "--f",
+            "missing.pfx",
+            "--fd",
+            "sha256",
+            "--exit-codes",
+            value,
+            "one.dll",
+        ])
+        .unwrap_or_else(|e| panic!("parse --exit-codes {value}: {e}"));
+        let SubCommand::Sign(s) = c.command else {
+            panic!("expected sign");
+        };
+        assert_eq!(s.exit_codes, Some(SignExitCodes::Azuresigntool));
+    }
+}
+
+#[test]
+fn sign_explicit_azure_exit_codes_replaces_compat_binary_default() {
+    let c = Cli::try_parse_from([
+        "psign-tool",
+        "sign",
+        "--f",
+        "missing.pfx",
+        "--fd",
+        "sha256",
+        "--continue-on-error",
+        "--exit-codes",
+        "azure",
+        "definitely-missing-for-azure-exit-code-test.dll",
+    ])
+    .expect("parse");
+    let SubCommand::Sign(s) = c.command else {
+        panic!("expected sign");
+    };
+    let out = psign::win::sign::sign_file(&s, &c.global).expect("continue-on-error output");
+    assert_eq!(out.exit_code, psign::AZURE_SIGN_EXIT_ALL_FAILED);
+    assert!(out.stdout.contains("Failed:"));
+}
+
+#[test]
+fn sign_env_azure_exit_codes_replaces_compat_binary_default() {
+    let c = Cli::try_parse_from([
+        "psign-tool",
+        "sign",
+        "--f",
+        "missing.pfx",
+        "--fd",
+        "sha256",
+        "--continue-on-error",
+        "definitely-missing-for-azure-env-exit-code-test.dll",
+    ])
+    .expect("parse");
+    let SubCommand::Sign(s) = c.command else {
+        panic!("expected sign");
+    };
+
+    let previous_exit_codes = std::env::var_os(psign::ENV_EXIT_CODES);
+
+    // SAFETY: this test is the only test in this suite that mutates PSIGN_EXIT_CODES.
+    unsafe {
+        std::env::set_var(psign::ENV_EXIT_CODES, "azure");
+    }
+    let out = psign::win::sign::sign_file(&s, &c.global).expect("continue-on-error output");
+    // SAFETY: restore the process environment immediately after the scoped assertion.
+    unsafe {
+        if let Some(value) = previous_exit_codes {
+            std::env::set_var(psign::ENV_EXIT_CODES, value);
+        } else {
+            std::env::remove_var(psign::ENV_EXIT_CODES);
+        }
+    }
+    assert_eq!(out.exit_code, psign::AZURE_SIGN_EXIT_ALL_FAILED);
+    assert!(out.stdout.contains("Failed:"));
 }
 
 #[test]

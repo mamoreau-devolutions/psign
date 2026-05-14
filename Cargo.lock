@@ -2014,14 +2014,18 @@ dependencies = [
  "psign-codesigning-rest",
  "psign-digest-cli",
  "psign-sip-digest",
+ "rand 0.8.6",
  "rayon",
  "reqwest",
+ "rsa 0.9.10",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tempfile",
  "uuid",
  "windows",
  "x509-cert",
+ "zip",
 ]
 
 [[package]]

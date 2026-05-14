@@ -27,9 +27,15 @@ use x509_cert::serial_number::SerialNumber;
 use x509_cert::spki::SubjectPublicKeyInfoOwned;
 use x509_cert::time::Validity;
 
+fn portable_cmd() -> Command {
+    let mut cmd = Command::cargo_bin("psign-tool").unwrap();
+    cmd.arg("portable");
+    cmd
+}
+
 #[test]
 fn binary_reports_name_and_version_flag() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("--version");
     cmd.assert()
         .success()
@@ -39,7 +45,7 @@ fn binary_reports_name_and_version_flag() {
 
 #[test]
 fn help_lists_core_subcommands() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("--help");
     let assert = cmd.assert().success();
     let out = std::str::from_utf8(&assert.get_output().stdout).expect("utf-8 help output");
@@ -93,7 +99,21 @@ fn help_lists_core_subcommands() {
 fn nupkg_signature_info_detects_root_signature_marker() {
     let package = package_fixture("signed/sample.signed.nupkg");
 
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
+    cmd.arg("nupkg-signature-info").arg(&package);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("signed=yes"))
+        .stdout(predicate::str::contains("signature_file=.signature.p7s"))
+        .stdout(predicate::str::contains("signature_len="))
+        .stdout(predicate::str::contains("signature_stored=yes"));
+}
+
+#[test]
+fn snupkg_signature_info_detects_root_signature_marker() {
+    let package = package_fixture("signed/sample.signed.snupkg");
+
+    let mut cmd = portable_cmd();
     cmd.arg("nupkg-signature-info").arg(&package);
     cmd.assert()
         .success()
@@ -108,7 +128,22 @@ fn nupkg_digest_matches_unsigned_package_bytes() {
     let package = package_fixture("unsigned/sample.nupkg");
     let expected = hex_lower(&Sha256::digest(std::fs::read(&package).unwrap()));
 
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
+    cmd.arg("nupkg-digest")
+        .arg(&package)
+        .arg("--algorithm")
+        .arg("sha256");
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains(expected));
+}
+
+#[test]
+fn snupkg_digest_matches_unsigned_package_bytes() {
+    let package = package_fixture("unsigned/sample.snupkg");
+    let expected = hex_lower(&Sha256::digest(std::fs::read(&package).unwrap()));
+
+    let mut cmd = portable_cmd();
     cmd.arg("nupkg-digest")
         .arg(&package)
         .arg("--algorithm")
@@ -122,7 +157,7 @@ fn nupkg_digest_matches_unsigned_package_bytes() {
 fn nupkg_digest_rejects_signed_package_fixture() {
     let package = package_fixture("signed/sample.signed.nupkg");
 
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("nupkg-digest")
         .arg(&package)
         .arg("--algorithm")
@@ -136,7 +171,7 @@ fn nupkg_digest_rejects_signed_package_fixture() {
 fn vsix_signature_info_detects_opc_signature_parts() {
     let package = package_fixture("signed/sample.signed.vsix");
 
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("vsix-signature-info").arg(&package);
     cmd.assert()
         .success()
@@ -181,7 +216,7 @@ fn rdp_embeds_external_pkcs7_signature_for_text_encodings() {
     ] {
         let fixture = repo.join("tests/fixtures/rdp").join(name);
         let out = dir.path().join(format!("{name}.signed.rdp"));
-        let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+        let mut cmd = portable_cmd();
         cmd.arg("rdp")
             .arg("--signature-pkcs7")
             .arg(&pkcs7)
@@ -218,7 +253,7 @@ fn rdp_rejects_malformed_missing_full_address() {
     let out = dir.path().join("signed.rdp");
     std::fs::write(&pkcs7, b"pkcs7").unwrap();
 
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("rdp")
         .arg("--signature-pkcs7")
         .arg(&pkcs7)
@@ -240,7 +275,7 @@ fn rdp_portable_cert_key_signs_with_detached_pkcs7() {
     let out = dir.path().join("signed.rdp");
     write_test_rsa_cert_key(&cert, &key);
 
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("rdp")
         .arg("--cert")
         .arg(&cert)
@@ -313,7 +348,7 @@ fn generated_signed_corpus_verifies_with_portable_cli() {
     let signed = manifest["signed"]
         .as_array()
         .expect("signed corpus entries");
-    assert_eq!(signed.len(), 101, "signed corpus coverage changed");
+    assert_eq!(signed.len(), 103, "signed corpus coverage changed");
 
     let mut verified = 0usize;
     for entry in signed {
@@ -323,7 +358,7 @@ fn generated_signed_corpus_verifies_with_portable_cli() {
         if state == "detached-signed" {
             let content = repo_path(&repo, entry["source_path"].as_str().expect("source path"));
             let signature = repo_path(&repo, entry["path"].as_str().expect("signature path"));
-            let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+            let mut cmd = portable_cmd();
             cmd.arg("trust-verify-detached")
                 .arg(content)
                 .arg(signature)
@@ -333,9 +368,18 @@ fn generated_signed_corpus_verifies_with_portable_cli() {
             verified += 1;
             continue;
         }
+        if state == "package-signature-extracted" {
+            let path = repo_path(&repo, entry["path"].as_str().expect("entry path"));
+            let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("read {id}: {e}"));
+            assert!(
+                bytes.starts_with(b"PKCX"),
+                "extracted AppxSignature.p7x fixture must start with PKCX header: {id}"
+            );
+            continue;
+        }
 
         let path = repo_path(&repo, entry["path"].as_str().expect("entry path"));
-        let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+        let mut cmd = portable_cmd();
         match family {
             "pe" | "winmd" => {
                 cmd.arg("trust-verify-pe")
@@ -380,14 +424,14 @@ fn generated_signed_corpus_verifies_with_portable_cli() {
     }
 
     assert_eq!(
-        verified, 101,
+        verified, 102,
         "portable corpus verification coverage changed"
     );
 }
 
 #[test]
 fn signer_rs256_prehash_help_documents_signer_index_pe_subcommand() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["pe-signer-rs256-prehash", "--help"]);
     let assert = cmd.assert().success();
     let out = std::str::from_utf8(&assert.get_output().stdout).expect("utf-8 help");
@@ -399,7 +443,7 @@ fn signer_rs256_prehash_help_documents_signer_index_pe_subcommand() {
 
 #[test]
 fn signer_rs256_prehash_help_documents_signer_index_pkcs7_subcommand() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["pkcs7-signer-rs256-prehash", "--help"]);
     let assert = cmd.assert().success();
     let out = std::str::from_utf8(&assert.get_output().stdout).expect("utf-8 help");
@@ -425,7 +469,7 @@ fn assert_pe_signer_rs256_prehash_raw_matches_library(fixture: &std::path::Path)
 
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("prehash.bin");
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args([
         "pe-signer-rs256-prehash",
         "--signer-index",
@@ -453,7 +497,7 @@ fn pe_signer_rs256_prehash_raw_matches_pkcs7_library_tiny64() {
 fn assert_pkcs7_signer_rs256_prehash_matches_pe_signer_after_extract(fixture: &std::path::Path) {
     let dir = tempfile::tempdir().unwrap();
     let pkcs7_path = dir.path().join("extracted.p7");
-    let mut ext = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut ext = portable_cmd();
     ext.arg("extract-pe-pkcs7")
         .arg(fixture)
         .arg("--output")
@@ -461,7 +505,7 @@ fn assert_pkcs7_signer_rs256_prehash_matches_pe_signer_after_extract(fixture: &s
     ext.assert().success();
 
     let out_pkcs7 = dir.path().join("prehash_pkcs7.bin");
-    let mut pkcs7_cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut pkcs7_cmd = portable_cmd();
     pkcs7_cmd
         .args([
             "pkcs7-signer-rs256-prehash",
@@ -476,7 +520,7 @@ fn assert_pkcs7_signer_rs256_prehash_matches_pe_signer_after_extract(fixture: &s
     pkcs7_cmd.assert().success();
 
     let out_pe = dir.path().join("prehash_pe.bin");
-    let mut pe_cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut pe_cmd = portable_cmd();
     pe_cmd
         .args([
             "pe-signer-rs256-prehash",
@@ -509,7 +553,7 @@ fn pkcs7_signer_rs256_prehash_matches_pe_signer_after_extract_tiny64() {
 
 #[test]
 fn pe_signer_rs256_prehash_fails_when_signer_index_out_of_range_tiny32() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args([
         "pe-signer-rs256-prehash",
         "--signer-index",
@@ -534,7 +578,7 @@ fn cab_rs256_extract_errors_unsigned_cab_cli() {
     let dir = tempfile::tempdir().unwrap();
     let cab = dir.path().join("unsigned.cab");
     std::fs::write(&cab, minimal_unsigned_cab_bytes()).unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("extract-cab-pkcs7").arg(&cab);
     cmd.assert().failure();
 }
@@ -544,7 +588,7 @@ fn cab_rs256_signer_errors_unsigned_cab_cli() {
     let dir = tempfile::tempdir().unwrap();
     let cab = dir.path().join("unsigned.cab");
     std::fs::write(&cab, minimal_unsigned_cab_bytes()).unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["cab-signer-rs256-prehash", "--encoding", "raw"])
         .arg(&cab);
     cmd.assert().failure();
@@ -552,7 +596,7 @@ fn cab_rs256_signer_errors_unsigned_cab_cli() {
 
 fn tiny_signed_cab_fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/fixtures/cab-authenticode-upstream/tiny-signed.cab")
+        .join("tests/fixtures/cab-authenticode-upstream/tiny-signed.cab")
 }
 
 #[test]
@@ -561,7 +605,7 @@ fn cab_rs256_extract_pkcs7_stdout_matches_library_tiny_signed_cab() {
     let expected = cab_digest::cab_signature_pkcs7_der(&cab_bytes)
         .expect("cab pkcs7")
         .to_vec();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("extract-cab-pkcs7").arg(tiny_signed_cab_fixture());
     let assert = cmd.assert().success();
     assert_eq!(
@@ -581,7 +625,7 @@ fn cab_rs256_signer_matches_library_tiny_signed_cab() {
 
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("prehash.bin");
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args([
         "cab-signer-rs256-prehash",
         "--signer-index",
@@ -600,7 +644,7 @@ fn cab_rs256_signer_matches_library_tiny_signed_cab() {
 fn cab_rs256_signer_matches_pkcs7_cli_after_extract_tiny_signed_cab() {
     let dir = tempfile::tempdir().unwrap();
     let pkcs7_path = dir.path().join("cab.p7");
-    let mut ext = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut ext = portable_cmd();
     ext.arg("extract-cab-pkcs7")
         .arg(tiny_signed_cab_fixture())
         .arg("--output")
@@ -608,7 +652,7 @@ fn cab_rs256_signer_matches_pkcs7_cli_after_extract_tiny_signed_cab() {
     ext.assert().success();
 
     let out_cab = dir.path().join("from_cab.bin");
-    let mut cab_cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cab_cmd = portable_cmd();
     cab_cmd
         .args(["cab-signer-rs256-prehash", "--encoding", "raw", "--output"])
         .arg(&out_cab)
@@ -616,7 +660,7 @@ fn cab_rs256_signer_matches_pkcs7_cli_after_extract_tiny_signed_cab() {
     cab_cmd.assert().success();
 
     let out_pkcs7 = dir.path().join("from_pkcs7.bin");
-    let mut pk7 = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut pk7 = portable_cmd();
     pk7.args([
         "pkcs7-signer-rs256-prehash",
         "--signer-index",
@@ -638,14 +682,14 @@ fn cab_rs256_signer_matches_pkcs7_cli_after_extract_tiny_signed_cab() {
 
 #[test]
 fn cab_rs256_verify_cab_digest_ok_tiny_signed_cab() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("verify-cab").arg(tiny_signed_cab_fixture());
     cmd.assert().success();
 }
 
 fn tiny_msi_pkcs7_stub_fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/fixtures/msi-authenticode-upstream/tiny-pkcs7-stub.msi")
+        .join("tests/fixtures/msi-authenticode-upstream/tiny-pkcs7-stub.msi")
 }
 
 #[test]
@@ -653,19 +697,19 @@ fn msi_rs256_extract_errors_non_ole_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("not.msi");
     std::fs::write(&p, b"not ole").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("extract-msi-pkcs7").arg(&p);
     cmd.assert().failure();
 }
 
 fn tiny32_pe_pkcs7_as_cat_fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/fixtures/catalog-authenticode-upstream/tiny32-content.cat")
+        .join("tests/fixtures/catalog-authenticode-upstream/tiny32-content.cat")
 }
 
 #[test]
 fn cat_rs256_verify_catalog_fails_on_pe_pkcs7_as_cat() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("verify-catalog")
         .arg(tiny32_pe_pkcs7_as_cat_fixture());
     cmd.assert().failure();
@@ -675,7 +719,7 @@ fn cat_rs256_verify_catalog_fails_on_pe_pkcs7_as_cat() {
 fn cat_rs256_signer_matches_pkcs7_cli_on_tiny32_content_cat() {
     let dir = tempfile::tempdir().unwrap();
     let out_cat = dir.path().join("from_cat.bin");
-    let mut cat_cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cat_cmd = portable_cmd();
     cat_cmd
         .args([
             "catalog-signer-rs256-prehash",
@@ -688,7 +732,7 @@ fn cat_rs256_signer_matches_pkcs7_cli_on_tiny32_content_cat() {
     cat_cmd.assert().success();
 
     let out_pkcs7 = dir.path().join("from_pkcs7.bin");
-    let mut pk7 = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut pk7 = portable_cmd();
     pk7.args([
         "pkcs7-signer-rs256-prehash",
         "--encoding",
@@ -709,7 +753,7 @@ fn cat_rs256_signer_matches_pkcs7_cli_on_tiny32_content_cat() {
 fn cat_rs256_signer_matches_pe_signer_tiny32() {
     let dir = tempfile::tempdir().unwrap();
     let out_pe = dir.path().join("pe.bin");
-    let mut pe_cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut pe_cmd = portable_cmd();
     pe_cmd
         .args([
             "pe-signer-rs256-prehash",
@@ -724,7 +768,7 @@ fn cat_rs256_signer_matches_pe_signer_tiny32() {
     pe_cmd.assert().success();
 
     let out_cat = dir.path().join("cat.bin");
-    let mut cat_cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cat_cmd = portable_cmd();
     cat_cmd
         .args([
             "catalog-signer-rs256-prehash",
@@ -750,7 +794,7 @@ fn cat_rs256_signer_matches_pe_signer_tiny32() {
 
 #[test]
 fn msi_rs256_verify_msi_fails_on_pkcs7_stub() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("verify-msi").arg(tiny_msi_pkcs7_stub_fixture());
     cmd.assert().failure();
 }
@@ -759,7 +803,7 @@ fn msi_rs256_verify_msi_fails_on_pkcs7_stub() {
 fn msi_rs256_extract_pkcs7_stdout_matches_library_stub() {
     let msi_bytes = std::fs::read(tiny_msi_pkcs7_stub_fixture()).unwrap();
     let expected = msi_digest::msi_digital_signature_pkcs7_der(&msi_bytes).expect("lib");
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("extract-msi-pkcs7")
         .arg(tiny_msi_pkcs7_stub_fixture());
     let assert = cmd.assert().success();
@@ -770,7 +814,7 @@ fn msi_rs256_extract_pkcs7_stdout_matches_library_stub() {
 fn msi_rs256_signer_matches_pe_signer_tiny32_and_stub() {
     let dir = tempfile::tempdir().unwrap();
     let out_pe = dir.path().join("pe.bin");
-    let mut pe_cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut pe_cmd = portable_cmd();
     pe_cmd
         .args([
             "pe-signer-rs256-prehash",
@@ -785,7 +829,7 @@ fn msi_rs256_signer_matches_pe_signer_tiny32_and_stub() {
     pe_cmd.assert().success();
 
     let out_msi = dir.path().join("msi.bin");
-    let mut msi_cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut msi_cmd = portable_cmd();
     msi_cmd
         .args([
             "msi-signer-rs256-prehash",
@@ -810,7 +854,7 @@ fn msi_rs256_signer_matches_pe_signer_tiny32_and_stub() {
 fn msi_rs256_signer_matches_pkcs7_cli_after_extract_stub() {
     let dir = tempfile::tempdir().unwrap();
     let pkcs7_path = dir.path().join("sig.p7");
-    let mut ext = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut ext = portable_cmd();
     ext.arg("extract-msi-pkcs7")
         .arg(tiny_msi_pkcs7_stub_fixture())
         .arg("--output")
@@ -818,7 +862,7 @@ fn msi_rs256_signer_matches_pkcs7_cli_after_extract_stub() {
     ext.assert().success();
 
     let out_msi = dir.path().join("from_msi.bin");
-    let mut msi_cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut msi_cmd = portable_cmd();
     msi_cmd
         .args(["msi-signer-rs256-prehash", "--encoding", "raw", "--output"])
         .arg(&out_msi)
@@ -826,7 +870,7 @@ fn msi_rs256_signer_matches_pkcs7_cli_after_extract_stub() {
     msi_cmd.assert().success();
 
     let out_pkcs7 = dir.path().join("from_pkcs7.bin");
-    let mut pk7 = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut pk7 = portable_cmd();
     pk7.args([
         "pkcs7-signer-rs256-prehash",
         "--encoding",
@@ -847,7 +891,7 @@ fn msi_rs256_signer_matches_pkcs7_cli_after_extract_stub() {
 fn pe_digest_raw_output_file_matches_known_sha256_tiny32() {
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("digest.bin");
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args([
         "pe-digest",
         "--algorithm",
@@ -865,10 +909,10 @@ fn pe_digest_raw_output_file_matches_known_sha256_tiny32() {
     assert_eq!(raw, decode_hex_lower(expected_hex));
 }
 
-#[cfg(feature = "azure-kv-sign-portable")]
+#[cfg(feature = "azure-kv-sign")]
 #[test]
 fn help_lists_azure_key_vault_sign_digest_when_feature_enabled() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("--help");
     let assert = cmd.assert().success();
     let out = std::str::from_utf8(&assert.get_output().stdout).expect("utf-8 help");
@@ -881,7 +925,7 @@ fn help_lists_azure_key_vault_sign_digest_when_feature_enabled() {
 #[cfg(feature = "artifact-signing-rest")]
 #[test]
 fn help_lists_artifact_signing_submit_when_feature_enabled() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("--help");
     let assert = cmd.assert().success();
     let out = std::str::from_utf8(&assert.get_output().stdout).expect("utf-8 help");
@@ -900,7 +944,7 @@ fn tiny64_fixture() -> PathBuf {
 }
 
 fn repo_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
 fn repo_path(repo_root: &Path, rel: &str) -> PathBuf {
@@ -915,7 +959,7 @@ fn anchor_dir(repo_root: &Path) -> PathBuf {
 #[test]
 fn pe_checksum_tiny32_reports_match_and_strict_ok() {
     let fixture = tiny32_fixture();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("pe-checksum").arg(&fixture);
     let assert = cmd.assert().success();
     let out = std::str::from_utf8(&assert.get_output().stdout).expect("utf8");
@@ -924,7 +968,7 @@ fn pe_checksum_tiny32_reports_match_and_strict_ok() {
         "expected match=yes on signed fixture, got {out:?}"
     );
 
-    let mut strict = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut strict = portable_cmd();
     strict.arg("pe-checksum").arg("--strict").arg(&fixture);
     strict.assert().success();
 }
@@ -932,7 +976,7 @@ fn pe_checksum_tiny32_reports_match_and_strict_ok() {
 #[test]
 fn pe_digest_sha256_tiny32_matches_upstream_golden_fixture() {
     let fixture = tiny32_fixture();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["pe-digest", "--algorithm", "sha256"])
         .arg(&fixture);
     cmd.assert()
@@ -943,7 +987,7 @@ fn pe_digest_sha256_tiny32_matches_upstream_golden_fixture() {
 #[test]
 fn pe_digest_sha256_tiny64_matches_upstream_golden_fixture() {
     let fixture = tiny64_fixture();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["pe-digest", "--algorithm", "sha256"])
         .arg(&fixture);
     cmd.assert()
@@ -960,7 +1004,7 @@ fn trust_verify_pe_succeeds_with_extracted_embedded_root_anchor() {
     let der = root.to_der().expect("root DER");
     std::fs::write(dir.path().join("anchor.crt"), der).expect("write anchor");
 
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("trust-verify-pe")
         .arg("--anchor-dir")
         .arg(dir.path())
@@ -980,7 +1024,7 @@ fn trust_verify_pe_ok_with_prefer_timestamp_signing_time_and_as_of() {
     let der = root.to_der().expect("root DER");
     std::fs::write(dir.path().join("anchor.crt"), der).expect("write anchor");
 
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("trust-verify-pe")
         .arg("--anchor-dir")
         .arg(dir.path())
@@ -1003,7 +1047,7 @@ fn trust_verify_pe_ok_require_valid_timestamp_pkcs9_signing_time_on_tiny32() {
     let der = root.to_der().expect("root DER");
     std::fs::write(dir.path().join("anchor.crt"), der).expect("write anchor");
 
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("trust-verify-pe")
         .arg("--anchor-dir")
         .arg(dir.path())
@@ -1025,7 +1069,7 @@ fn trust_verify_pe_ok_require_valid_timestamp_pkcs9_signing_time_on_tiny64() {
     let der = root.to_der().expect("root DER");
     std::fs::write(dir.path().join("anchor.crt"), der).expect("write anchor");
 
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("trust-verify-pe")
         .arg("--anchor-dir")
         .arg(dir.path())
@@ -1039,7 +1083,7 @@ fn trust_verify_pe_ok_require_valid_timestamp_pkcs9_signing_time_on_tiny64() {
 
 #[test]
 fn trust_verify_pe_errors_without_configured_anchors() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("trust-verify-pe").arg(tiny32_fixture());
     cmd.assert()
         .failure()
@@ -1048,14 +1092,14 @@ fn trust_verify_pe_errors_without_configured_anchors() {
 
 #[test]
 fn verify_pe_pkcs7_indirect_digest_matches_on_tiny32_fixture() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("verify-pe").arg(tiny32_fixture());
     cmd.assert().success();
 }
 
 #[test]
 fn inspect_authenticode_pe_outputs_json_with_signers() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["inspect-authenticode", "--input", "pe"])
         .arg(tiny32_fixture());
     let assert = cmd.assert().success();
@@ -1089,7 +1133,7 @@ fn extract_pe_pkcs7_stdout_matches_verify_pe_helper() {
     let pe = std::fs::read(tiny32_fixture()).expect("read tiny32");
     let expected =
         psign_sip_digest::verify_pe::pe_first_pkcs7_signed_data_der(&pe).expect("library extract");
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("extract-pe-pkcs7").arg(tiny32_fixture());
     let assert = cmd.assert().success();
     assert_eq!(
@@ -1106,7 +1150,7 @@ fn extract_pe_pkcs7_output_file_matches_verify_pe_helper() {
         psign_sip_digest::verify_pe::pe_first_pkcs7_signed_data_der(&pe).expect("library extract");
     let dir = tempfile::tempdir().expect("tempdir");
     let out_path = dir.path().join("embedded.p7");
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("extract-pe-pkcs7")
         .arg(tiny32_fixture())
         .arg("--output")
@@ -1118,7 +1162,7 @@ fn extract_pe_pkcs7_output_file_matches_verify_pe_helper() {
 
 #[test]
 fn list_pe_pkcs7_reports_single_entry_on_tiny_fixture() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("list-pe-pkcs7").arg(tiny32_fixture());
     let assert = cmd.assert().success();
     let out = std::str::from_utf8(&assert.get_output().stdout).expect("utf8");
@@ -1134,7 +1178,7 @@ fn list_pe_pkcs7_reports_single_entry_on_tiny_fixture() {
 
 #[test]
 fn extract_pe_pkcs7_index_out_of_range_fails() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("extract-pe-pkcs7")
         .arg(tiny32_fixture())
         .arg("--index")
@@ -1150,14 +1194,14 @@ fn append_pe_pkcs7_duplicate_row_lists_two_entries() {
     let out_pe = dir.path().join("b.exe");
     std::fs::copy(tiny32_fixture(), &pe_copy).expect("copy fixture");
 
-    let mut ext = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut ext = portable_cmd();
     ext.arg("extract-pe-pkcs7")
         .arg(&pe_copy)
         .arg("--output")
         .arg(&pkcs7_path);
     ext.assert().success();
 
-    let mut app = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut app = portable_cmd();
     app.arg("append-pe-pkcs7")
         .arg("--pe")
         .arg(&pe_copy)
@@ -1167,7 +1211,7 @@ fn append_pe_pkcs7_duplicate_row_lists_two_entries() {
         .arg(&out_pe);
     app.assert().success();
 
-    let mut lst = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut lst = portable_cmd();
     lst.arg("list-pe-pkcs7").arg(&out_pe);
     let assert = lst.assert().success();
     let out = std::str::from_utf8(&assert.get_output().stdout).expect("utf8");
@@ -1176,7 +1220,7 @@ fn append_pe_pkcs7_duplicate_row_lists_two_entries() {
         "expected pkcs7_entries=2, got {out:?}"
     );
 
-    let mut chk = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut chk = portable_cmd();
     chk.arg("pe-checksum").arg("--strict").arg(&out_pe);
     let chk_assert = chk.assert().success();
     let chk_out = std::str::from_utf8(&chk_assert.get_output().stdout).expect("utf8");
@@ -1188,7 +1232,7 @@ fn append_pe_pkcs7_duplicate_row_lists_two_entries() {
 
 #[test]
 fn inspect_pe_spc_indirect_matches_sip_digest_on_tiny_fixture() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("inspect-pe-spc-indirect").arg(tiny32_fixture());
     let assert = cmd.assert().success();
     let out = std::str::from_utf8(&assert.get_output().stdout).expect("utf8");
@@ -1210,7 +1254,7 @@ fn inspect_pe_spc_indirect_matches_sip_digest_on_tiny_fixture() {
 
 #[test]
 fn inspect_pe_spc_indirect_explicit_index_zero_matches_default() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("inspect-pe-spc-indirect")
         .arg(tiny32_fixture())
         .arg("--index")
@@ -1227,7 +1271,7 @@ fn inspect_pe_spc_indirect_explicit_index_zero_matches_default() {
 
 #[test]
 fn inspect_pe_spc_indirect_index_out_of_range_fails() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("inspect-pe-spc-indirect")
         .arg(tiny32_fixture())
         .arg("--index")
@@ -1237,7 +1281,7 @@ fn inspect_pe_spc_indirect_index_out_of_range_fails() {
 
 #[test]
 fn verify_pe_pkcs7_indirect_digest_matches_on_tiny64_fixture() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("verify-pe").arg(tiny64_fixture());
     cmd.assert().success();
 }
@@ -1245,7 +1289,7 @@ fn verify_pe_pkcs7_indirect_digest_matches_on_tiny64_fixture() {
 #[test]
 fn pe_has_page_hashes_is_no_on_upstream_tiny_fixtures() {
     for fixture in [tiny32_fixture(), tiny64_fixture()] {
-        let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+        let mut cmd = portable_cmd();
         cmd.arg("pe-has-page-hashes").arg(&fixture);
         cmd.assert().success().stdout("no\n");
     }
@@ -1254,7 +1298,7 @@ fn pe_has_page_hashes_is_no_on_upstream_tiny_fixtures() {
 #[test]
 fn pe_page_hash_info_is_empty_on_upstream_tiny_fixtures() {
     for fixture in [tiny32_fixture(), tiny64_fixture()] {
-        let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+        let mut cmd = portable_cmd();
         cmd.arg("pe-page-hash-info").arg(&fixture);
         cmd.assert().success().stdout("");
     }
@@ -1262,14 +1306,14 @@ fn pe_page_hash_info_is_empty_on_upstream_tiny_fixtures() {
 
 #[test]
 fn verify_pe_page_hashes_fails_when_upstream_tiny_has_no_page_hash_attrs() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("verify-pe-page-hashes").arg(tiny32_fixture());
     cmd.assert().failure();
 }
 
 #[test]
 fn pe_authenticode_ranges_prints_start_end_lines_on_tiny_fixture() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("pe-authenticode-ranges").arg(tiny32_fixture());
     let assert = cmd.assert().success();
     let out = std::str::from_utf8(&assert.get_output().stdout).expect("utf8");
@@ -1291,7 +1335,7 @@ fn artifact_signing_metadata_check_accepts_valid_json_file() {
         r#"{"Endpoint":"https://example.test/rpcsign","CodeSigningAccountName":"acct","CertificateProfileName":"prof","ExcludeCredentials":["ManagedIdentityCredential"]}"#,
     )
     .unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["artifact-signing-metadata-check", "--path"])
         .arg(&path);
     cmd.assert().success().stdout(predicate::str::contains(
@@ -1308,7 +1352,7 @@ fn artifact_signing_metadata_check_rejects_empty_profile_name() {
         r#"{"Endpoint":"https://example.test/rpcsign","CodeSigningAccountName":"acct","CertificateProfileName":"  "}"#,
     )
     .unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["artifact-signing-metadata-check", "--path"])
         .arg(&path);
     cmd.assert().failure();
@@ -1328,7 +1372,7 @@ fn portable_verify_negative_pe_not_pe_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("not-pe.exe");
     std::fs::write(&p, b"not-a-pe-image").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("verify-pe").arg(&p);
     cmd.assert().failure();
 }
@@ -1338,7 +1382,7 @@ fn portable_verify_negative_esd_not_wim_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("nope.wim");
     std::fs::write(&p, b"not-wim-bytes").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("verify-esd").arg(&p);
     cmd.assert().failure();
 }
@@ -1348,7 +1392,7 @@ fn portable_verify_negative_esd_unsigned_minimal_header_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("unsigned.wim");
     std::fs::write(&p, minimal_unsigned_wim_header_bytes()).unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("verify-esd").arg(&p);
     cmd.assert().failure();
 }
@@ -1360,7 +1404,7 @@ fn portable_verify_negative_esd_bad_header_size_cli() {
     h[8..12].copy_from_slice(&100u32.to_le_bytes());
     let p = dir.path().join("badhdr.wim");
     std::fs::write(&p, &h).unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("verify-esd").arg(&p);
     cmd.assert().failure();
 }
@@ -1370,7 +1414,7 @@ fn portable_verify_negative_msix_encrypted_extension_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("fake.emsix");
     std::fs::write(&p, b"not-a-real-package").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("verify-msix").arg(&p);
     let assert = cmd.assert().failure();
     let err = std::str::from_utf8(&assert.get_output().stderr).expect("utf8 stderr");
@@ -1385,29 +1429,29 @@ fn portable_verify_negative_msix_non_zip_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("garbage.msix");
     std::fs::write(&p, b"not-zip").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("verify-msix").arg(&p);
     cmd.assert().failure();
 }
 
 fn unsigned_sample_ps1_fixture() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/unsigned-sample.ps1")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/unsigned-sample.ps1")
 }
 
 fn unsigned_sample_vbs_fixture() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/unsigned-sample.vbs")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/unsigned-sample.vbs")
 }
 
 #[test]
 fn portable_verify_negative_script_unsigned_ps1_cli() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("verify-script").arg(unsigned_sample_ps1_fixture());
     cmd.assert().failure();
 }
 
 #[test]
 fn portable_verify_negative_script_unsigned_vbs_cli() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("verify-script").arg(unsigned_sample_vbs_fixture());
     cmd.assert().failure();
 }
@@ -1417,14 +1461,14 @@ fn portable_verify_negative_cab_unsigned_cli() {
     let dir = tempfile::tempdir().unwrap();
     let cab = dir.path().join("unsigned.cab");
     std::fs::write(&cab, minimal_unsigned_cab_bytes()).unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("verify-cab").arg(&cab);
     cmd.assert().failure();
 }
 
 #[test]
 fn portable_verify_negative_trust_cab_no_anchors_cli() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("trust-verify-cab").arg(tiny_signed_cab_fixture());
     cmd.assert()
         .failure()
@@ -1457,7 +1501,7 @@ fn inspect_pkcs7_parity_cli_stdout_matches_library_tiny32() {
     let dir = tempfile::tempdir().expect("tempdir");
     let blob = dir.path().join("row0.p7");
     std::fs::write(&blob, &der).expect("write pkcs7");
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["inspect-authenticode", "--input", "pkcs7"])
         .arg(&blob);
     let assert = cmd.assert().success();
@@ -1486,7 +1530,7 @@ fn portable_verify_negative_inspect_authenticode_invalid_pkcs7_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("bad.p7");
     std::fs::write(&p, b"not-valid-der-pkcs7").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["inspect-authenticode", "--input", "pkcs7"])
         .arg(&p);
     cmd.assert().failure();
@@ -1497,7 +1541,7 @@ fn portable_verify_negative_verify_catalog_garbage_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("noise.cat");
     std::fs::write(&p, b"not-a-catalog").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("verify-catalog").arg(&p);
     cmd.assert().failure();
 }
@@ -1510,7 +1554,7 @@ fn portable_verify_negative_trust_catalog_tiny32_content_cat_cli() {
     let dir = tempfile::tempdir().expect("tempdir");
     std::fs::write(dir.path().join("anchor.crt"), root.to_der().expect("der")).expect("anchor");
 
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("trust-verify-catalog")
         .arg("--anchor-dir")
         .arg(dir.path())
@@ -1531,7 +1575,7 @@ fn portable_verify_negative_trust_detached_pe_digest_mismatch_cli() {
     let work_pe = dir.path().join("subject.exe");
     std::fs::write(&work_pe, &pe_bytes).expect("copy pe");
 
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("trust-verify-detached")
         .arg("--anchor-dir")
         .arg(dir.path())
@@ -1545,7 +1589,7 @@ fn portable_verify_negative_trust_detached_pe_digest_mismatch_cli() {
 
 #[test]
 fn artifact_signing_metadata_check_accepts_valid_json_stdin() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("artifact-signing-metadata-check")
         .write_stdin(r#"{"Endpoint":"https://example.test/rpcsign","CodeSigningAccountName":"acct","CertificateProfileName":"prof"}"#);
     cmd.assert().success().stdout(predicate::str::contains(
@@ -1555,7 +1599,7 @@ fn artifact_signing_metadata_check_accepts_valid_json_stdin() {
 
 #[test]
 fn artifact_signing_metadata_check_stdin_empty_fails() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("artifact-signing-metadata-check").write_stdin("");
     cmd.assert().failure();
 }
@@ -1565,7 +1609,7 @@ fn portable_verify_negative_pe_digest_not_pe_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("not.exe");
     std::fs::write(&p, b"not-a-pe").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["pe-digest", "--algorithm", "sha256"]).arg(&p);
     cmd.assert().failure();
 }
@@ -1574,7 +1618,7 @@ fn portable_verify_negative_pe_digest_not_pe_cli() {
 fn portable_verify_negative_pe_digest_missing_file_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("missing.exe");
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["pe-digest", "--algorithm", "sha256"]).arg(&p);
     cmd.assert().failure();
 }
@@ -1584,7 +1628,7 @@ fn portable_verify_negative_extract_pe_pkcs7_not_pe_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("junk.exe");
     std::fs::write(&p, b"no-pe").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("extract-pe-pkcs7").arg(&p);
     cmd.assert().failure();
 }
@@ -1594,7 +1638,7 @@ fn portable_verify_negative_list_pe_pkcs7_not_pe_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("junk.exe");
     std::fs::write(&p, b"no-pe").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("list-pe-pkcs7").arg(&p);
     cmd.assert().failure();
 }
@@ -1604,7 +1648,7 @@ fn portable_verify_negative_cab_digest_non_mscf_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("nocab.cab");
     std::fs::write(&p, b"not-mscf").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["cab-digest", "--algorithm", "sha256"]).arg(&p);
     cmd.assert().failure();
 }
@@ -1614,7 +1658,7 @@ fn portable_verify_negative_inspect_pe_spc_indirect_not_pe_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("nope.exe");
     std::fs::write(&p, b"x").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("inspect-pe-spc-indirect").arg(&p);
     cmd.assert().failure();
 }
@@ -1629,7 +1673,7 @@ fn portable_verify_negative_trust_detached_no_anchors_cli() {
     let work_pe = dir.path().join("subject.exe");
     std::fs::write(&work_pe, &pe_bytes).expect("copy pe");
 
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("trust-verify-detached")
         .arg(&work_pe)
         .arg(dir.path().join("sig.p7"));
@@ -1643,7 +1687,7 @@ fn portable_verify_negative_pe_signer_rs256_prehash_not_pe_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("nope.exe");
     std::fs::write(&p, b"not-pe").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["pe-signer-rs256-prehash", "--encoding", "raw", "--output"])
         .arg(dir.path().join("out.bin"))
         .arg(&p);
@@ -1655,7 +1699,7 @@ fn portable_verify_negative_pkcs7_signer_rs256_prehash_invalid_der_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("bad.p7");
     std::fs::write(&p, b"not-der").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args([
         "pkcs7-signer-rs256-prehash",
         "--encoding",
@@ -1672,7 +1716,7 @@ fn portable_verify_negative_catalog_signer_rs256_prehash_invalid_der_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("bad.cat");
     std::fs::write(&p, b"not-der").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args([
         "catalog-signer-rs256-prehash",
         "--encoding",
@@ -1689,7 +1733,7 @@ fn portable_verify_negative_inspect_authenticode_pe_not_pe_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("not.exe");
     std::fs::write(&p, b"not-pe-image").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["inspect-authenticode", "--input", "pe"]).arg(&p);
     cmd.assert().failure();
 }
@@ -1704,7 +1748,7 @@ fn portable_verify_negative_trust_verify_pe_not_pe_with_anchors_cli() {
     let junk = dir.path().join("junk.exe");
     std::fs::write(&junk, b"not-pe").expect("junk");
 
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("trust-verify-pe")
         .arg("--anchor-dir")
         .arg(dir.path())
@@ -1718,7 +1762,7 @@ fn portable_verify_negative_msi_signer_rs256_non_ole_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("fake.msi");
     std::fs::write(&p, b"not ole").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["msi-signer-rs256-prehash", "--encoding", "raw", "--output"])
         .arg(dir.path().join("out.bin"))
         .arg(&p);
@@ -1730,7 +1774,7 @@ fn portable_verify_negative_cab_signer_rs256_non_cab_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("fake.cab");
     std::fs::write(&p, b"not-mscf-cab").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["cab-signer-rs256-prehash", "--encoding", "raw", "--output"])
         .arg(dir.path().join("out.bin"))
         .arg(&p);
@@ -1743,7 +1787,7 @@ fn portable_verify_negative_append_pe_pkcs7_pe_not_pe_cli() {
     let junk_pe = dir.path().join("junk.exe");
     std::fs::write(&junk_pe, b"not-pe").expect("junk pe");
     let pkcs7_path = dir.path().join("sig.der");
-    let mut ext = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut ext = portable_cmd();
     ext.arg("extract-pe-pkcs7")
         .arg(tiny32_fixture())
         .arg("--output")
@@ -1751,7 +1795,7 @@ fn portable_verify_negative_append_pe_pkcs7_pe_not_pe_cli() {
     ext.assert().success();
 
     let out_pe = dir.path().join("out.exe");
-    let mut app = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut app = portable_cmd();
     app.arg("append-pe-pkcs7")
         .arg("--pe")
         .arg(&junk_pe)
@@ -1769,7 +1813,7 @@ fn portable_verify_negative_append_pe_pkcs7_missing_pkcs7_cli() {
     std::fs::copy(tiny32_fixture(), &pe_copy).expect("copy tiny32");
     let missing_p7 = dir.path().join("does-not-exist.der");
     let out_pe = dir.path().join("out.exe");
-    let mut app = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut app = portable_cmd();
     app.arg("append-pe-pkcs7")
         .arg("--pe")
         .arg(&pe_copy)
@@ -1785,7 +1829,7 @@ fn portable_verify_negative_append_pe_pkcs7_missing_pe_cli() {
     let dir = tempfile::tempdir().expect("tempdir");
     let missing_pe = dir.path().join("missing.exe");
     let pkcs7_path = dir.path().join("sig.der");
-    let mut ext = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut ext = portable_cmd();
     ext.arg("extract-pe-pkcs7")
         .arg(tiny32_fixture())
         .arg("--output")
@@ -1793,7 +1837,7 @@ fn portable_verify_negative_append_pe_pkcs7_missing_pe_cli() {
     ext.assert().success();
 
     let out_pe = dir.path().join("out.exe");
-    let mut app = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut app = portable_cmd();
     app.arg("append-pe-pkcs7")
         .arg("--pe")
         .arg(&missing_pe)
@@ -1809,7 +1853,7 @@ fn portable_verify_negative_pe_checksum_not_pe_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("x.exe");
     std::fs::write(&p, b"nope").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("pe-checksum").arg(&p);
     cmd.assert().failure();
 }
@@ -1819,7 +1863,7 @@ fn portable_verify_negative_pe_has_page_hashes_not_pe_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("x.exe");
     std::fs::write(&p, b"nope").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("pe-has-page-hashes").arg(&p);
     cmd.assert().failure();
 }
@@ -1829,7 +1873,7 @@ fn portable_verify_negative_pe_page_hash_info_not_pe_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("x.exe");
     std::fs::write(&p, b"nope").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("pe-page-hash-info").arg(&p);
     cmd.assert().failure();
 }
@@ -1839,7 +1883,7 @@ fn portable_verify_negative_pe_authenticode_ranges_not_pe_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("x.exe");
     std::fs::write(&p, b"nope").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("pe-authenticode-ranges").arg(&p);
     cmd.assert().failure();
 }
@@ -1849,14 +1893,14 @@ fn portable_verify_negative_verify_pe_page_hashes_not_pe_cli() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("x.exe");
     std::fs::write(&p, b"nope").unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.arg("verify-pe-page-hashes").arg(&p);
     cmd.assert().failure();
 }
 
 #[test]
 fn portable_rfc3161_timestamp_req_sha256_zeros_hex_stdout_line() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args([
         "rfc3161-timestamp-req",
         "--algorithm",
@@ -1882,7 +1926,7 @@ fn portable_rfc3161_timestamp_req_sha256_zeros_hex_stdout_line() {
 
 #[test]
 fn portable_rfc3161_timestamp_req_sha1_hex_contains_sha1_algorithm_identifier() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args([
         "rfc3161-timestamp-req",
         "--algorithm",
@@ -1909,7 +1953,7 @@ fn portable_rfc3161_timestamp_req_sha1_hex_contains_sha1_algorithm_identifier() 
 #[test]
 fn portable_rfc3161_timestamp_req_sha384_hex_contains_sha384_algorithm_identifier() {
     let digest = "00".repeat(48);
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args([
         "rfc3161-timestamp-req",
         "--algorithm",
@@ -1936,7 +1980,7 @@ fn portable_rfc3161_timestamp_req_sha384_hex_contains_sha384_algorithm_identifie
 #[test]
 fn portable_rfc3161_timestamp_req_sha512_hex_contains_sha512_algorithm_identifier() {
     let digest = "00".repeat(64);
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args([
         "rfc3161-timestamp-req",
         "--algorithm",
@@ -1963,7 +2007,7 @@ fn portable_rfc3161_timestamp_req_sha512_hex_contains_sha512_algorithm_identifie
 /// **`--nonce`** and **`--cert-req`** extend **`TimeStampReq`** after **`messageImprint`** (RFC 3161 field order).
 #[test]
 fn portable_rfc3161_timestamp_req_nonce_and_cert_req_hex_contains_extensions() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args([
         "rfc3161-timestamp-req",
         "--algorithm",
@@ -1997,7 +2041,7 @@ fn portable_rfc3161_timestamp_req_nonce_and_cert_req_hex_contains_extensions() {
 
 #[test]
 fn portable_rfc3161_timestamp_req_nonce_u64_max_hex_length_and_integer_tlv() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args([
         "rfc3161-timestamp-req",
         "--algorithm",
@@ -2032,7 +2076,7 @@ fn portable_rfc3161_timestamp_req_digest_file_matches_der_len() {
     let dir = tempfile::tempdir().unwrap();
     let df = dir.path().join("imprint.bin");
     std::fs::write(&df, [0u8; 32]).unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args([
         "rfc3161-timestamp-req",
         "--digest-file",
@@ -2051,7 +2095,7 @@ fn portable_rfc3161_timestamp_req_digest_file_matches_der_len() {
 
 #[test]
 fn portable_rfc3161_timestamp_req_sha256_zeros_der_stdout_len() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args([
         "rfc3161-timestamp-req",
         "--algorithm",
@@ -2072,7 +2116,7 @@ fn portable_rfc3161_timestamp_req_sha256_zeros_der_stdout_len() {
 
 #[test]
 fn portable_rfc3161_timestamp_req_errors_without_digest_input() {
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["rfc3161-timestamp-req", "--algorithm", "sha256"]);
     cmd.assert()
         .failure()
@@ -2084,7 +2128,7 @@ fn portable_rfc3161_timestamp_resp_inspect_granted_fixture() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("ts.der");
     std::fs::write(&p, [0x30u8, 0x05, 0x30, 0x03, 0x02, 0x01, 0x00]).unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["rfc3161-timestamp-resp-inspect", p.to_str().unwrap()]);
     cmd.assert()
         .success()
@@ -2100,7 +2144,7 @@ fn portable_rfc3161_timestamp_resp_inspect_granted_fixture() {
 
 fn fixture_ts_resp_granted_outer_len81() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/fixtures/rfc3161/ts_resp_granted_outer_len81.der")
+        .join("tests/fixtures/rfc3161/ts_resp_granted_outer_len81.der")
 }
 
 /// Workspace **`tests/fixtures/rfc3161/ts_resp_granted_outer_len81.der`**: granted + long **`PKIFreeText`**, root length **`0x81`**.
@@ -2110,7 +2154,7 @@ fn portable_rfc3161_timestamp_resp_inspect_fixture_outer_sequence_len81() {
     assert!(path.is_file(), "missing fixture {:?}", path);
     let der = std::fs::read(&path).expect("read fixture");
     assert_eq!(der.len(), 138);
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["rfc3161-timestamp-resp-inspect", path.to_str().unwrap()]);
     let assert = cmd.assert().success();
     let stdout = std::str::from_utf8(&assert.get_output().stdout).expect("utf-8");
@@ -2139,7 +2183,7 @@ fn portable_rfc3161_timestamp_resp_inspect_granted_with_fail_info_hex() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("ts.der");
     std::fs::write(&p, der.as_slice()).unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["rfc3161-timestamp-resp-inspect", p.to_str().unwrap()]);
     cmd.assert()
         .success()
@@ -2160,7 +2204,7 @@ fn portable_rfc3161_timestamp_resp_inspect_granted_with_token_prefix_hex() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("ts.der");
     std::fs::write(&p, der.as_slice()).unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["rfc3161-timestamp-resp-inspect", p.to_str().unwrap()]);
     cmd.assert()
         .success()
@@ -2177,7 +2221,7 @@ fn portable_rfc3161_timestamp_resp_inspect_granted_long_token_prefix_hex_truncat
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("ts.der");
     std::fs::write(&p, &der).unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["rfc3161-timestamp-resp-inspect", p.to_str().unwrap()]);
     cmd.assert()
         .success()
@@ -2196,7 +2240,7 @@ fn portable_rfc3161_timestamp_resp_inspect_rejection_multi_status_strings_json()
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("ts.der");
     std::fs::write(&p, der.as_slice()).unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["rfc3161-timestamp-resp-inspect", p.to_str().unwrap()]);
     cmd.assert()
         .success()
@@ -2214,7 +2258,7 @@ fn portable_rfc3161_timestamp_resp_inspect_rejection_empty_pkifreetext() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("ts.der");
     std::fs::write(&p, der.as_slice()).unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["rfc3161-timestamp-resp-inspect", p.to_str().unwrap()]);
     cmd.assert()
         .success()
@@ -2232,7 +2276,7 @@ fn portable_rfc3161_timestamp_resp_inspect_rejection_with_status_string() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("ts.der");
     std::fs::write(&p, der.as_slice()).unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["rfc3161-timestamp-resp-inspect", p.to_str().unwrap()]);
     cmd.assert()
         .success()
@@ -2252,7 +2296,7 @@ fn portable_rfc3161_timestamp_resp_inspect_waiting_status() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("ts.der");
     std::fs::write(&p, der.as_slice()).unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["rfc3161-timestamp-resp-inspect", p.to_str().unwrap()]);
     cmd.assert()
         .success()
@@ -2268,7 +2312,7 @@ fn portable_rfc3161_timestamp_resp_inspect_unknown_pki_status_int_128() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("ts.der");
     std::fs::write(&p, der.as_slice()).unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["rfc3161-timestamp-resp-inspect", p.to_str().unwrap()]);
     cmd.assert()
         .success()
@@ -2284,7 +2328,7 @@ fn portable_rfc3161_timestamp_resp_inspect_unknown_pki_status_int() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("ts.der");
     std::fs::write(&p, der.as_slice()).unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["rfc3161-timestamp-resp-inspect", p.to_str().unwrap()]);
     cmd.assert()
         .success()
@@ -2303,7 +2347,7 @@ fn portable_rfc3161_timestamp_resp_inspect_fail_info_flags_null_when_bit_string_
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("ts.der");
     std::fs::write(&p, der.as_slice()).unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["rfc3161-timestamp-resp-inspect", p.to_str().unwrap()]);
     cmd.assert()
         .success()
@@ -2322,7 +2366,7 @@ fn portable_rfc3161_timestamp_resp_inspect_rejects_fail_info_before_status_strin
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("ts.der");
     std::fs::write(&p, der.as_slice()).unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["rfc3161-timestamp-resp-inspect", p.to_str().unwrap()]);
     cmd.assert()
         .failure()
@@ -2337,7 +2381,7 @@ fn portable_rfc3161_timestamp_resp_inspect_rejects_oversized_pki_status_integer(
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("ts.der");
     std::fs::write(&p, der.as_slice()).unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["rfc3161-timestamp-resp-inspect", p.to_str().unwrap()]);
     cmd.assert()
         .failure()
@@ -2352,7 +2396,7 @@ fn portable_rfc3161_timestamp_resp_inspect_rejects_pkifreetext_ia5string() {
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("ts.der");
     std::fs::write(&p, der.as_slice()).unwrap();
-    let mut cmd = Command::cargo_bin("psign-tool-portable").unwrap();
+    let mut cmd = portable_cmd();
     cmd.args(["rfc3161-timestamp-resp-inspect", p.to_str().unwrap()]);
     cmd.assert()
         .failure()

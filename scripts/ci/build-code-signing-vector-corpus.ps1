@@ -115,9 +115,24 @@ function Add-ReportEntry {
     $List.Add($entry)
 }
 
+function New-ArtifactVector {
+    param(
+        [Parameter(Mandatory)][string]$Id,
+        [Parameter(Mandatory)][string]$Family,
+        [Parameter(Mandatory)][string]$Extension,
+        [Parameter(Mandatory)][string]$SourcePath
+    )
+    [pscustomobject]@{
+        id = $Id
+        family = $Family
+        extension = $Extension
+        path = $SourcePath
+    }
+}
+
 function Should-SignEmbedded {
     param($Vector)
-    if ($Vector.state -match "negative|placeholder|content|ci-generated-signature|probe" -and -not $SignProbeRows) {
+    if ($Vector.state -match "negative|placeholder|content|ci-generated-signature|probe" -and $Vector.family -ne "optional-provider" -and -not $SignProbeRows) {
         return $false
     }
     switch ($Vector.family) {
@@ -132,8 +147,11 @@ function Should-SignEmbedded {
             return @(".msix", ".appx", ".msixbundle", ".appxbundle") -contains [string]$Vector.extension
         }
         "installer" {
-            return @(".msi", ".msp") -contains [string]$Vector.extension
+            return @(".msi", ".msp", ".mst") -contains [string]$Vector.extension
         }
+        "appinstaller" { return $true }
+        "p7x" { return $true }
+        "optional-provider" { return $true }
         "catalog" {
             return [string]$Vector.extension -eq ".cat" -and $Vector.state -eq "unsigned"
         }
@@ -148,6 +166,9 @@ function Is-ExpectedNativeSignReject {
     param($Vector, [string]$Output)
     if (($Vector.family -eq "powershell-script") -and ($Vector.encoding -eq "utf16be-bom")) {
         return $Output -match "SignerSign\(\) failed" -and $Output -match "0x8007000d"
+    }
+    if ($Vector.expected_native -match "reject|probe") {
+        return $Output -match "SignTool Error|SignerSign\(\) failed|This file format cannot be signed|No certificates were found|0x8007000b|0x8007000d|0x80092006|0x80070057"
     }
     return $false
 }
@@ -165,6 +186,7 @@ function Invoke-SignTool {
     }
 }
 
+$appInstallerVectors = @()
 foreach ($vector in $unsigned.vectors) {
     $src = Join-Path $WorkspaceRoot $vector.path
     if (-not (Test-Path -LiteralPath $src)) {
@@ -173,6 +195,9 @@ foreach ($vector in $unsigned.vectors) {
     }
 
     if (Should-SignEmbedded -Vector $vector) {
+        if ($vector.family -eq "appinstaller") {
+            $appInstallerVectors += $vector
+        }
         $rel = [string]$vector.path
         $prefix = (Convert-ToManifestPath -Path (Resolve-Path -LiteralPath $UnsignedDir -Relative)).TrimEnd('\')
         if ($rel.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -189,7 +214,18 @@ foreach ($vector in $unsigned.vectors) {
         $args += @($dest)
         $result = Invoke-SignTool -Arguments $args
         if ($result.ExitCode -eq 0) {
-            Add-ReportEntry -List $signedEntries -Vector $vector -Status "signed" -Path $dest
+            if ($vector.state -eq "native-pa-verify-rejected") {
+                $verify = Invoke-SignTool -Arguments @("verify", "/pa", $dest)
+                if ($verify.ExitCode -eq 0) {
+                    Add-ReportEntry -List $signedEntries -Vector $vector -Status "signed" -Path $dest
+                }
+                else {
+                    Add-ReportEntry -List $skippedEntries -Vector $vector -Status "signed-native-pa-verify-rejected" -Path $dest -Message $verify.Output
+                }
+            }
+            else {
+                Add-ReportEntry -List $signedEntries -Vector $vector -Status "signed" -Path $dest
+            }
         }
         elseif (Is-ExpectedNativeSignReject -Vector $vector -Output $result.Output) {
             Remove-Item -LiteralPath $dest -Force -ErrorAction SilentlyContinue
@@ -211,6 +247,47 @@ foreach ($vector in $unsigned.vectors) {
     }
     else {
         Add-ReportEntry -List $skippedEntries -Vector $vector -Status "skipped"
+    }
+}
+
+$signedMsix = $signedEntries | Where-Object { $_.id -eq "generated-msix-msix" -and $_.state -eq "signed" } | Select-Object -First 1
+if ($signedMsix) {
+    $packagePath = Join-Path $WorkspaceRoot ([string]$signedMsix.path)
+    $p7xPath = Join-Path $SignedDir "p7x\appxsignature-from-sample-msix.p7x"
+    New-Item -ItemType Directory -Force -Path (Split-Path $p7xPath -Parent) | Out-Null
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($packagePath)
+    try {
+        $signatureEntry = $zip.Entries | Where-Object { $_.FullName -eq "AppxSignature.p7x" } | Select-Object -First 1
+        if ($signatureEntry) {
+            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($signatureEntry, $p7xPath, $true)
+            $artifact = New-ArtifactVector -Id "generated-p7x-appxsignature-from-msix" -Family "p7x" -Extension ".p7x" -SourcePath ([string]$signedMsix.path)
+            Add-ReportEntry -List $signedEntries -Vector $artifact -Status "package-signature-extracted" -Path $p7xPath
+        }
+        else {
+            $artifact = New-ArtifactVector -Id "generated-p7x-appxsignature-from-msix" -Family "p7x" -Extension ".p7x" -SourcePath ([string]$signedMsix.path)
+            Add-ReportEntry -List $failedEntries -Vector $artifact -Status "package-signature-missing" -Message "AppxSignature.p7x not found in $($signedMsix.path)."
+        }
+    }
+    finally {
+        $zip.Dispose()
+    }
+}
+
+foreach ($appInstaller in $appInstallerVectors) {
+    $src = Join-Path $WorkspaceRoot $appInstaller.path
+    $outDir = Join-Path $SignedDir "appinstaller"
+    New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+    $args = @("sign", "/fd", "SHA256", "/f", $PfxPath, "/p", $PfxPassword, "/p7", $outDir, "/p7ce", "DetachedSignedData", "/p7co", "1.2.840.113549.1.7.2", $src)
+    $result = Invoke-SignTool -Arguments $args
+    $p7 = Get-ChildItem -LiteralPath $outDir -File -Filter "*.p7" -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq ((Split-Path ([string]$appInstaller.path) -Leaf) + ".p7") } | Select-Object -First 1
+    if ($result.ExitCode -eq 0 -and $p7) {
+        $artifact = New-ArtifactVector -Id ($appInstaller.id + "-detached-pkcs7") -Family "appinstaller" -Extension ".p7" -SourcePath ([string]$appInstaller.path)
+        Add-ReportEntry -List $signedEntries -Vector $artifact -Status "detached-signed" -Path $p7.FullName
+    }
+    else {
+        $artifact = New-ArtifactVector -Id ($appInstaller.id + "-detached-pkcs7") -Family "appinstaller" -Extension ".p7" -SourcePath ([string]$appInstaller.path)
+        Add-ReportEntry -List $failedEntries -Vector $artifact -Status "detached-sign-failed" -Message $result.Output
     }
 }
 
@@ -241,7 +318,8 @@ $signedJson = [ordered]@{
     skipped = $skippedEntries
     failed = $failedEntries
 } | ConvertTo-Json -Depth 10
-[System.IO.File]::WriteAllText($signedManifest, $signedJson + "`r`n", [System.Text.UTF8Encoding]::new($false))
+$signedJson = $signedJson -replace "`r`n", "`n"
+[System.IO.File]::WriteAllText($signedManifest, $signedJson + "`n", [System.Text.UTF8Encoding]::new($false))
 
 Write-Host "Unsigned vectors: $($unsigned.vectors.Count)"
 Write-Host "Signed vectors:   $($signedEntries.Count)"

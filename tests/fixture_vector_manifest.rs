@@ -138,6 +138,38 @@ fn code_signing_vector_manifest_matrix_covers_required_extensions() {
                 .expect("optional_provider_extensions"),
         ),
     );
+    assert_group_covers(
+        &manifest,
+        "generated-p7x-probe-matrix",
+        "extensions",
+        string_set(axes["p7x_extensions"].as_array().expect("p7x_extensions")),
+    );
+    assert_group_covers(
+        &manifest,
+        "generated-p7x-artifact-matrix",
+        "extensions",
+        string_set(axes["p7x_extensions"].as_array().expect("p7x_extensions")),
+    );
+    assert_group_covers(
+        &manifest,
+        "generated-appinstaller-probe-matrix",
+        "extensions",
+        string_set(
+            axes["appinstaller_extensions"]
+                .as_array()
+                .expect("appinstaller_extensions"),
+        ),
+    );
+    assert_group_covers(
+        &manifest,
+        "generated-appinstaller-signature-matrix",
+        "extensions",
+        string_set(
+            axes["appinstaller_signature_extensions"]
+                .as_array()
+                .expect("appinstaller_signature_extensions"),
+        ),
+    );
 }
 
 #[test]
@@ -211,6 +243,28 @@ fn generated_signed_corpus_manifest_matches_files_and_has_no_failures() {
             .any(|entry| entry["state"] == "native-sign-rejected"),
         "generated signed corpus should record native signing rejects"
     );
+    assert!(
+        signed
+            .iter()
+            .any(|entry| entry["state"] == "package-signature-extracted"
+                && entry["family"] == "p7x"
+                && entry["path"]
+                    .as_str()
+                    .expect("p7x path")
+                    .ends_with("appxsignature-from-sample-msix.p7x")),
+        "generated signed corpus should include extracted AppxSignature.p7x"
+    );
+    assert!(
+        signed
+            .iter()
+            .any(|entry| entry["state"] == "detached-signed"
+                && entry["family"] == "appinstaller"
+                && entry["path"]
+                    .as_str()
+                    .expect("appinstaller signature path")
+                    .ends_with("sample.appinstaller.p7")),
+        "generated signed corpus should include App Installer detached signature"
+    );
 }
 
 #[test]
@@ -232,7 +286,7 @@ fn package_signing_fixture_manifest_matches_files() {
     let entries = manifest["entries"]
         .as_array()
         .expect("package signing entries must be an array");
-    assert_eq!(entries.len(), 4, "package signing fixture count");
+    assert_eq!(entries.len(), 6, "package signing fixture count");
     assert_hash_entries(entries);
 
     let families: HashSet<_> = entries
@@ -241,7 +295,11 @@ fn package_signing_fixture_manifest_matches_files() {
         .collect();
     assert_eq!(
         families,
-        HashSet::from(["nuget".to_owned(), "vsix".to_owned()])
+        HashSet::from([
+            "nuget".to_owned(),
+            "nuget-symbols".to_owned(),
+            "vsix".to_owned()
+        ])
     );
 
     let states: HashSet<_> = entries

@@ -27,7 +27,7 @@ struct SignedCorpusEntry {
 fn committed_signed_corpus_verifies_with_psign() {
     let repo = repo_root();
     let manifest = signed_manifest();
-    assert_eq!(manifest.signed.len(), 101, "signed corpus coverage changed");
+    assert_eq!(manifest.signed.len(), 103, "signed corpus coverage changed");
 
     for entry in &manifest.signed {
         if entry.state == "detached-signed" {
@@ -36,6 +36,8 @@ fn committed_signed_corpus_verifies_with_psign() {
                 &repo_path(&repo, &entry.path),
                 &entry.id,
             );
+        } else if entry.state == "package-signature-extracted" {
+            assert_appx_signature_p7x(&repo_path(&repo, &entry.path), &entry.id);
         } else {
             verify_embedded_with_psign(&repo_path(&repo, &entry.path), &entry.id);
         }
@@ -46,7 +48,7 @@ fn committed_signed_corpus_verifies_with_psign() {
 fn committed_signed_corpus_matches_portable_supported_verification() {
     let repo = repo_root();
     let manifest = signed_manifest();
-    assert_eq!(manifest.signed.len(), 101, "signed corpus coverage changed");
+    assert_eq!(manifest.signed.len(), 103, "signed corpus coverage changed");
 
     let mut parity_count = 0usize;
     for entry in &manifest.signed {
@@ -55,6 +57,9 @@ fn committed_signed_corpus_matches_portable_supported_verification() {
             let signature = repo_path(&repo, &entry.path);
             verify_detached_with_psign(&content, &signature, &entry.id);
             verify_detached_with_portable(&repo, &content, &signature, &entry.id);
+        } else if entry.state == "package-signature-extracted" {
+            assert_appx_signature_p7x(&repo_path(&repo, &entry.path), &entry.id);
+            continue;
         } else if let Some(args) =
             portable_args_for_entry(&repo, entry, &repo_path(&repo, &entry.path))
         {
@@ -72,7 +77,7 @@ fn committed_signed_corpus_matches_portable_supported_verification() {
         parity_count += 1;
     }
 
-    assert_eq!(parity_count, 101, "portable parity coverage changed");
+    assert_eq!(parity_count, 102, "portable parity coverage changed");
 }
 
 #[test]
@@ -143,7 +148,7 @@ fn unsigned_corpus_freshly_signed_with_native_signtool_verifies_with_psign() {
         signed_count += 1;
     }
 
-    assert_eq!(signed_count, 101, "fresh native signing coverage changed");
+    assert_eq!(signed_count, 102, "fresh native signing coverage changed");
 }
 
 #[test]
@@ -229,6 +234,14 @@ fn verify_detached_with_psign(content: &Path, p7: &Path, label: &str) {
         .output()
         .unwrap_or_else(|e| panic!("run psign detached verify for {label}: {e}"));
     assert_success(verify, &format!("psign detached verify {label}"));
+}
+
+fn assert_appx_signature_p7x(path: &Path, label: &str) {
+    let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("read {label}: {e}"));
+    assert!(
+        bytes.starts_with(b"PKCX"),
+        "extracted AppxSignature.p7x fixture must start with PKCX header: {label}"
+    );
 }
 
 fn verify_detached_with_portable(repo: &Path, content: &Path, p7: &Path, label: &str) {

@@ -24,7 +24,7 @@ differential parity tests against the native tool where CI fixtures allow.
 cargo build
 ```
 
-At the repo root, **`cargo build`** targets **`default-members`** only (**portable digest / trust / package crates**). On Windows, build the **`psign-tool`** executable with **`cargo windows-bin`** or **`cargo build -p psign --bin psign-tool`** (see [`.cargo/config.toml`](.cargo/config.toml)). Optional Cargo features: **`azure-kv-sign`** (Key Vault digest callback), **`artifact-signing-rest`** (**`artifact-signing-submit`** LRO against **`*.codesigning.azure.net`**).
+At the repo root, **`cargo build`** targets **`default-members`**, including the unified **`psign-tool`** executable from `src\main.rs` plus the portable digest / trust / package crates. On Windows, **`cargo windows-bin`** and **`cargo build -p psign --bin psign-tool`** remain explicit ways to build only that executable (see [`.cargo/config.toml`](.cargo/config.toml)). Optional Cargo features: **`azure-kv-sign`** (Key Vault digest callback), **`artifact-signing-rest`** (**`artifact-signing-submit`** LRO against **`*.codesigning.azure.net`**).
 
 ## Dotnet tool package (.NET 10+)
 
@@ -69,7 +69,7 @@ cargo build -p psign --bin psign-tool --locked
 # Optional portable REST helpers (Linux/macOS):
 # cargo build -p psign --bin psign-tool --locked --features artifact-signing-rest
 # cargo build -p psign --bin psign-tool --locked --features azure-kv-sign
-cargo digest-test    # alias: sip-digest + authenticode-trust + codesigning-rest lib tests + digest-cli integration tests
+cargo digest-test    # alias: portable crates + unified psign-tool portable integration tests
 cargo digest-check   # alias: `cargo check` on portable workspace crates (includes `psign-codesigning-rest`)
 ```
 
@@ -79,7 +79,7 @@ Unix CI (`ci-unix`) runs **`cargo fmt`**, strict **`clippy -D warnings`** on tho
 
 ```powershell
 cargo run -p psign --bin psign-depgraph -- --signtool "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe"
-# Same thing (workspace default-members omit the main crate; the alias supplies `-p psign`):
+# Same thing (the alias supplies explicit `-p psign` package selection):
 cargo depgraph -- --signtool "C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe"
 ```
 

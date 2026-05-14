@@ -555,6 +555,24 @@ foreach ($encoding in @("utf8", "utf16le-bom")) {
 }
 Write-BytesVector -RelativePath "detached\signature-placeholder.p7" -Bytes ([System.Text.Encoding]::ASCII.GetBytes("CI replaces this with detached PKCS#7`r`n")) -Id "generated-detached-placeholder-p7" -Family "detached-pkcs7" -Extension ".p7" -State "ci-generated-signature" -ExpectedNative "detached-sign-probe" -ExpectedRustSip "trust-verify-detached-if-signed" -Tooling "signtool"
 
+Write-BytesVector -RelativePath "p7x\sample.p7x" -Bytes ([System.Text.Encoding]::ASCII.GetBytes("PKCX`r`npsign P7X provider probe`r`n")) -Id "generated-p7x-sample" -Family "p7x" -Extension ".p7x" -State "unsigned" -ExpectedNative "sign-probe" -ExpectedRustSip "unsupported" -Tooling "appxsip-p7x-provider-probe"
+
+$appInstallerXml = @'
+<?xml version="1.0" encoding="utf-8"?>
+<AppInstaller
+  Uri="https://example.invalid/psign/sample.appinstaller"
+  Version="1.0.0.0"
+  xmlns="http://schemas.microsoft.com/appx/appinstaller/2018">
+  <MainPackage
+    Name="Psign.Sample"
+    Publisher="CN=Test Code Signing Certificate"
+    Version="1.0.0.0"
+    ProcessorArchitecture="x64"
+    Uri="https://example.invalid/psign/sample.msix" />
+</AppInstaller>
+'@
+Write-BytesVector -RelativePath "appinstaller\sample.appinstaller" -Bytes ([System.Text.UTF8Encoding]::new($false).GetBytes($appInstallerXml)) -Id "generated-appinstaller-sample" -Family "appinstaller" -Extension ".appinstaller" -State "unsigned" -ExpectedNative "sign-probe" -ExpectedRustSip "unsupported" -Tooling "appinstaller-xml"
+
 foreach ($ext in @(".vsix", ".vsto", ".application", ".deploy", ".manifest", ".docm", ".xlsm", ".pptm", ".xlam")) {
     $safeExt = $ext.TrimStart('.')
     $bytes = [System.Text.Encoding]::ASCII.GetBytes("psign optional provider probe for $ext`r`n")
@@ -568,7 +586,8 @@ $generatedJson = @{
     source_pe64  = (Resolve-Path -LiteralPath $Pe64Source -Relative)
     vectors      = $entries
 } | ConvertTo-Json -Depth 8
-[System.IO.File]::WriteAllText($generatedManifest, $generatedJson + "`r`n", [System.Text.UTF8Encoding]::new($false))
+$generatedJson = $generatedJson -replace "`r`n", "`n"
+[System.IO.File]::WriteAllText($generatedManifest, $generatedJson + "`n", [System.Text.UTF8Encoding]::new($false))
 
 if ($ArchivePath) {
     if (Test-Path -LiteralPath $ArchivePath) {

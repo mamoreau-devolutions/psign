@@ -1,11 +1,11 @@
 [alias]
-# Main Windows CLI (`default-members` omit root crate — always pass `-p psign`).
+# Main Windows CLI (also built by bare `cargo build` via workspace default-members).
 windows-bin = "build -p psign --bin psign-tool --locked"
 # Portable Authenticode digest stack (no Win32). See docs/roadmap-authenticode-linux.md.
 digest-check = "check -p psign-sip-digest -p psign-digest-cli -p psign-authenticode-trust -p psign-codesigning-rest -p psign-azure-kv-rest --locked"
-# `psign-digest-cli` has integration tests only — keep it last so `--lib` does not silence them.
-digest-test = "test -p psign-sip-digest --lib -p psign-authenticode-trust --lib -p psign-codesigning-rest --lib -p psign-azure-kv-rest --lib -p psign-digest-cli --locked"
+# Includes unified `psign-tool portable ...` integration tests from the root package.
+digest-test = "test -p psign-sip-digest -p psign-authenticode-trust -p psign-codesigning-rest -p psign-azure-kv-rest -p psign-digest-cli -p psign --locked"
 # Matches ci-unix `psign` stub + portable lib (no `win` module on Linux).
 unix-lib-check = "check -p psign --lib --locked"
-# `default-members` omits the main crate; use this instead of `cargo run --bin psign-depgraph`.
+# Explicit package selection avoids ambiguity with workspace default-members.
 depgraph = "run -p psign --bin psign-depgraph --locked"

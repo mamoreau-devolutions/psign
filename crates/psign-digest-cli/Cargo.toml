@@ -3,6 +3,7 @@ name = "psign-digest-cli"
 version = "0.1.0"
 edition = "2024"
 description = "Linux/macOS-friendly CLI over portable Authenticode SIP digests (psign-sip-digest)"
+autobins = false
 
 [features]
 default = []
@@ -16,10 +17,6 @@ timestamp-http = ["dep:reqwest"]
 [lib]
 name = "psign_digest_cli"
 path = "src/lib.rs"
-
-[[bin]]
-name = "psign-tool-portable"
-path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"

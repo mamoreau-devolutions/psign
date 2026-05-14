@@ -49,13 +49,13 @@ jobs:
         run: cargo test -p psign-azure-kv-rest --locked
 
       - name: Portable digest CLI (integration smoke)
-        run: cargo test -p psign-digest-cli --locked
+        run: cargo test -p psign --test cli_pe_digest --locked
 
       - name: Portable digest CLI (artifact-signing-rest subcommand)
-        run: cargo test -p psign-digest-cli --features artifact-signing-rest --locked
+        run: cargo test -p psign --test cli_pe_digest --features artifact-signing-rest --locked
 
       - name: Portable digest CLI (azure-kv-sign-portable subcommand)
-        run: cargo test -p psign-digest-cli --features azure-kv-sign-portable --locked
+        run: cargo test -p psign --test cli_pe_digest --features azure-kv-sign --locked
 
       - name: Check psign stub binary + portable lib
         run: cargo check -p psign --bins --lib --locked

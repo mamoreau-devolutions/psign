@@ -324,8 +324,3 @@ pub fn run_tool_cli() -> ! {
 
     std::process::exit(batch_exit);
 }
-
-#[cfg(windows)]
-pub fn run_windows_cli() -> ! {
-    run_tool_cli();
-}
