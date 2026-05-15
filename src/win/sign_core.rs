@@ -958,14 +958,20 @@ pub(crate) fn authenticode_sign_embedded(
         .as_deref()
         .or(args.seal_timestamp_url.as_deref());
     let ts_digest_for_report = match (&sign_rfc3161_ts, &args.legacy_timestamp_url) {
-        (Some(_), None) => args.timestamp_digest.unwrap_or(resolved_digest),
+        (Some(_), None) => args.timestamp_digest.ok_or_else(|| {
+            anyhow!("No /td flag specified. RFC3161 timestamping requires --timestamp-digest (/td)")
+        })?,
         _ => resolved_digest,
     };
 
     let (stamp_policy, oid_stamp, url_stamp) = match (&sign_rfc3161_ts, &args.legacy_timestamp_url)
     {
         (Some(u), None) => {
-            let td = args.timestamp_digest.unwrap_or(resolved_digest);
+            let td = args.timestamp_digest.ok_or_else(|| {
+                anyhow!(
+                    "No /td flag specified. RFC3161 timestamping requires --timestamp-digest (/td)"
+                )
+            })?;
             (
                 Some(SIGNER_TIMESTAMP_RFC3161),
                 CString::new(digest_oid(td)).context("invalid digest OID")?,

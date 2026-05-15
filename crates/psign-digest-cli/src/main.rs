@@ -41,7 +41,8 @@ use psign_sip_digest::pkcs7_wire;
 use psign_sip_digest::rdp;
 use psign_sip_digest::timestamp::{
     Rfc3161PkiStatus, Rfc3161TimestampRequestPlan, build_timestamp_request_bytes,
-    parse_time_stamp_resp_der, pkifailure_info_flag_labels_from_bit_string_tlv,
+    parse_time_stamp_resp_der, parse_time_stamp_token_tst_info,
+    pkifailure_info_flag_labels_from_bit_string_tlv,
 };
 use psign_sip_digest::verify_pe;
 use psign_sip_digest::verify_script_digest_consistency;
@@ -212,8 +213,17 @@ fn run_rfc3161_timestamp_req(
     Ok(())
 }
 
-fn run_rfc3161_timestamp_resp_inspect(path: &Path) -> Result<()> {
+fn run_rfc3161_timestamp_resp_inspect(
+    path: &Path,
+    expect_digest_hex: Option<&str>,
+    expect_nonce: Option<u64>,
+) -> Result<()> {
     let bytes = std::fs::read(path).with_context(|| format!("read {}", path.display()))?;
+    let expected_digest = expect_digest_hex
+        .map(normalize_even_hex)
+        .transpose()
+        .context("parse --expect-digest-hex")?;
+    let expected_nonce = expect_nonce.map(rfc3161_nonce_hex);
     let p = parse_time_stamp_resp_der(&bytes).ok_or_else(|| {
         anyhow!("could not parse TimeStampResp DER (definite ASN.1 subset or trailing garbage)")
     })?;
@@ -245,6 +255,52 @@ fn run_rfc3161_timestamp_resp_inspect(path: &Path) -> Result<()> {
         },
     };
     println!("fail_info_flags_json={flags_json}");
+    if let Some(tst) = p.time_stamp_token.and_then(parse_time_stamp_token_tst_info) {
+        println!("tst_info_present=yes");
+        println!("tst_info_policy_oid={}", tst.policy_oid);
+        println!(
+            "tst_info_message_imprint_digest_alg_oid={}",
+            tst.message_imprint_digest_alg_oid
+        );
+        println!(
+            "tst_info_message_imprint_hashed_message_hex={}",
+            hex_lower(&tst.message_imprint_hashed_message)
+        );
+        println!("tst_info_serial_hex={}", tst.serial_number_hex);
+        println!("tst_info_gen_time={}", tst.gen_time);
+        println!(
+            "tst_info_nonce_hex={}",
+            tst.nonce_hex.as_deref().unwrap_or("-")
+        );
+        if let Some(expected) = expected_digest.as_deref() {
+            println!(
+                "tst_info_message_imprint_match={}",
+                if hex_lower(&tst.message_imprint_hashed_message) == expected {
+                    "yes"
+                } else {
+                    "no"
+                }
+            );
+        }
+        if let Some(expected) = expected_nonce.as_deref() {
+            println!(
+                "tst_info_nonce_match={}",
+                if tst.nonce_hex.as_deref() == Some(expected) {
+                    "yes"
+                } else {
+                    "no"
+                }
+            );
+        }
+    } else {
+        println!("tst_info_present=no");
+        if expected_digest.is_some() {
+            println!("tst_info_message_imprint_match=no");
+        }
+        if expected_nonce.is_some() {
+            println!("tst_info_nonce_match=no");
+        }
+    }
     Ok(())
 }
 
@@ -624,7 +680,15 @@ enum Command {
         output: TimestampReqOutput,
     },
     /// Parse **RFC 3161** **`TimeStampResp`** DER (**`application/timestamp-reply`**) and print **`pki_status`**, **`pki_status_int`**, **`granted`**, optional **`time_stamp_token`** length, first **16** octets of the token TLV as hex (**`time_stamp_token_prefix_hex`**, for CMS **`ContentInfo`** sniffing), **`status_strings_json`**, **`fail_info_tlv_hex`**, **`fail_info_flags_json`**. Does **not** verify CMS / TSA crypto.
-    Rfc3161TimestampRespInspect { path: PathBuf },
+    Rfc3161TimestampRespInspect {
+        path: PathBuf,
+        /// Expected **`TSTInfo.messageImprint.hashedMessage`** hex for request-binding diagnostics.
+        #[arg(long, value_name = "HEX")]
+        expect_digest_hex: Option<String>,
+        /// Expected **`TSTInfo.nonce`** integer for request-binding diagnostics.
+        #[arg(long)]
+        expect_nonce: Option<u64>,
+    },
     /// POST **`TimeStampReq`** DER to a TSA (**`Content-Type: application/timestamp-query`**) and write **`TimeStampResp`** DER to stdout or **`--output`**. Requires **`--features timestamp-http`**. Does **not** verify the timestamp token.
     #[cfg(feature = "timestamp-http")]
     Rfc3161TimestampHttpPost {
@@ -732,6 +796,31 @@ impl From<HashAlg> for PeAuthenticodeHashKind {
 
 fn hex_lower(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn normalize_even_hex(s: &str) -> Result<String> {
+    let hex = s.trim().strip_prefix("0x").unwrap_or(s.trim());
+    let hex = hex.strip_prefix("0X").unwrap_or(hex);
+    if hex.is_empty() || !hex.len().is_multiple_of(2) {
+        return Err(anyhow!("expected a non-empty even-length hex string"));
+    }
+    if !hex.as_bytes().iter().all(u8::is_ascii_hexdigit) {
+        return Err(anyhow!("invalid hex"));
+    }
+    Ok(hex.to_ascii_lowercase())
+}
+
+fn rfc3161_nonce_hex(nonce: u64) -> String {
+    if nonce == 0 {
+        return "00".to_string();
+    }
+    let bytes = nonce.to_be_bytes();
+    let first = bytes.iter().position(|&b| b != 0).unwrap_or(bytes.len() - 1);
+    let mut value = bytes[first..].to_vec();
+    if value[0] & 0x80 != 0 {
+        value.insert(0, 0);
+    }
+    hex_lower(&value)
 }
 
 /// Lowercase hex of the first **16** octets of the raw **`timeStampToken`** TLV (**`-`** when absent).
@@ -1678,8 +1767,12 @@ where
         } => {
             run_rfc3161_timestamp_req(algorithm, digest_file, digest_hex, nonce, cert_req, output)?;
         }
-        Command::Rfc3161TimestampRespInspect { path } => {
-            run_rfc3161_timestamp_resp_inspect(&path)?;
+        Command::Rfc3161TimestampRespInspect {
+            path,
+            expect_digest_hex,
+            expect_nonce,
+        } => {
+            run_rfc3161_timestamp_resp_inspect(&path, expect_digest_hex.as_deref(), expect_nonce)?;
         }
         #[cfg(feature = "timestamp-http")]
         Command::Rfc3161TimestampHttpPost {

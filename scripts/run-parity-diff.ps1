@@ -405,7 +405,7 @@ $results += [PSCustomObject]@{
 
 # Optional: native /tseal vs rust --tseal exit codes on the same signed artifact.
 if ($env:PSIGN_SIGNED_FIXTURE -and $env:PSIGN_TIMESTAMP_URL) {
-    $expectedScenarioIds += @("timestamp_tseal_exit_parity", "timestamp_tr_two_targets_exit_match")
+    $expectedScenarioIds += @("timestamp_tseal_exit_parity", "timestamp_tr_missing_td_exit_match", "timestamp_tr_two_targets_exit_match")
     $tsUrl = $env:PSIGN_TIMESTAMP_URL
     $signedPath = $env:PSIGN_SIGNED_FIXTURE
     $saved = $ErrorActionPreference
@@ -414,6 +414,14 @@ if ($env:PSIGN_SIGNED_FIXTURE -and $env:PSIGN_TIMESTAMP_URL) {
     $nativeTsealExit = $LASTEXITCODE
     & "$rustBin" timestamp --tseal $tsUrl --td sha256 $signedPath 2>&1 | Out-Null
     $rustTsealExit = $LASTEXITCODE
+
+    $tmpTsMissingTd = Join-Path $env:TEMP "psign_ts_tr_missing_td.exe"
+    Copy-Item -LiteralPath $signedPath -Destination $tmpTsMissingTd -Force
+    & "$nativeSignTool" timestamp /tr $tsUrl $tmpTsMissingTd 2>&1 | Out-Null
+    $nativeTrMissingTd = $LASTEXITCODE
+    & "$rustBin" timestamp --rfc3161-url $tsUrl $tmpTsMissingTd 2>&1 | Out-Null
+    $rustTrMissingTd = $LASTEXITCODE
+    Remove-Item -LiteralPath $tmpTsMissingTd -Force -ErrorAction SilentlyContinue
 
     $tmpTs1 = Join-Path $env:TEMP "psign_ts_tr_two_1.exe"
     $tmpTs2 = Join-Path $env:TEMP "psign_ts_tr_two_2.exe"
@@ -434,6 +442,12 @@ if ($env:PSIGN_SIGNED_FIXTURE -and $env:PSIGN_TIMESTAMP_URL) {
         classification = if ($nativeTsealExit -ne $rustTsealExit) { "semantic_mismatch" } else { "exit_match" }
     }
     $trTwoClassification = if ($nativeTrTwo -ne $rustTrTwo) { "semantic_mismatch" } else { "exit_match" }
+    $results += [PSCustomObject]@{
+        id = "timestamp_tr_missing_td_exit_match"
+        nativeExitCode = $nativeTrMissingTd
+        rustExitCode = $rustTrMissingTd
+        classification = if ($nativeTrMissingTd -ne $rustTrMissingTd) { "semantic_mismatch" } else { "exit_match" }
+    }
     $results += [PSCustomObject]@{
         id = "timestamp_tr_two_targets_exit_match"
         nativeExitCode = $nativeTrTwo

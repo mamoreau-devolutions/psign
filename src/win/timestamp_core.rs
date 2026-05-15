@@ -91,7 +91,10 @@ pub fn timestamp_with_mssign32(
             .encode_wide()
             .chain(once(0))
             .collect();
-        let oid_c = alg_oid_narrow(args.digest)?;
+        let digest = args.digest.ok_or_else(|| {
+            anyhow!("No /td flag specified. RFC3161 timestamping requires --digest (/td)")
+        })?;
+        let oid_c = alg_oid_narrow(digest)?;
         let idx = args.signature_index.unwrap_or(0);
         // Win32 metadata types the OID parameter as `PCWSTR`, but `SignerTimeStampEx3` interprets it like
         // `SignerSignEx3` — a narrow, null-terminated OID string (`szOID_*`), not UTF-16.
@@ -128,7 +131,7 @@ pub fn timestamp_with_mssign32(
                 Some(SIGNER_TIMESTAMP_AUTHENTICODE),
                 &subject,
                 PCWSTR(url_w.as_ptr()),
-                alg_id(args.digest),
+                alg_id(args.digest.unwrap_or(DigestAlgorithm::Sha256)),
                 std::ptr::null(),
                 std::ptr::null(),
             )

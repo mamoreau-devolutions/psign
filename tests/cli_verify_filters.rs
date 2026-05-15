@@ -502,6 +502,24 @@ fn timestamp_nosealwarn_not_implemented() {
 }
 
 #[test]
+fn timestamp_p7_not_implemented() {
+    Command::cargo_bin("psign-tool")
+        .expect("binary available")
+        .args([
+            "timestamp",
+            "--tr",
+            "http://ts.example/rfc3161",
+            "--td",
+            "sha256",
+            "--p7",
+            "x.p7",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("/p7"));
+}
+
+#[test]
 fn verify_tw_alias_equivalent_to_long_flag() {
     let c = Cli::try_parse_from(["psign-tool", "verify", "--tw", "--policy", "pa", "x.exe"])
         .expect("parse");
@@ -555,6 +573,29 @@ fn sign_tr_and_tseal_conflict() {
         ])
         .is_err()
     );
+}
+
+#[test]
+#[cfg(windows)]
+fn sign_rfc3161_without_td_errors_before_cert_load() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("unsigned.exe");
+    std::fs::write(&target, b"not a real pe").unwrap();
+    Command::cargo_bin("psign-tool")
+        .expect("binary available")
+        .args([
+            "sign",
+            "--f",
+            "missing.pfx",
+            "--fd",
+            "sha256",
+            "--tr",
+            "http://timestamp.example/ts",
+            target.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("No /td flag specified"));
 }
 
 #[test]
@@ -683,7 +724,7 @@ fn timestamp_native_style_aliases_parse() {
         panic!("expected timestamp");
     };
     assert_eq!(t.rfc3161_url.as_deref(), Some("http://ts.example/rfc3161"));
-    assert_eq!(t.digest, DigestAlgorithm::Sha384);
+    assert_eq!(t.digest, Some(DigestAlgorithm::Sha384));
     assert_eq!(t.signature_index, Some(1));
 }
 
@@ -707,6 +748,7 @@ fn timestamp_tseal_url_parses() {
         t.seal_timestamp_url.as_deref(),
         Some("http://ts.example/seal")
     );
+    assert_eq!(t.digest, Some(DigestAlgorithm::Sha256));
 }
 
 #[test]
@@ -725,6 +767,25 @@ fn timestamp_tr_and_tseal_conflict() {
         ])
         .is_err()
     );
+}
+
+#[test]
+#[cfg(windows)]
+fn timestamp_rfc3161_without_td_errors_before_file_timestamping() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("signed.exe");
+    std::fs::write(&target, b"not a real signed pe").unwrap();
+    Command::cargo_bin("psign-tool")
+        .expect("binary available")
+        .args([
+            "timestamp",
+            "--tr",
+            "http://timestamp.example/ts",
+            target.to_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("No /td flag specified"));
 }
 
 #[test]

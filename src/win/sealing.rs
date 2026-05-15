@@ -45,6 +45,13 @@ pub fn validate_sign_constraints_paths<'a>(
             "--timestamp-digest requires --timestamp-url or --seal-timestamp-url (RFC3161 sign-time timestamp)"
         ));
     }
+    if (args.timestamp_url.is_some() || args.seal_timestamp_url.is_some())
+        && args.timestamp_digest.is_none()
+    {
+        return Err(anyhow!(
+            "No /td flag specified. RFC3161 timestamping requires --timestamp-digest (/td)"
+        ));
+    }
     if args.timestamp_url.is_some() && args.legacy_timestamp_url.is_some() {
         return Err(anyhow!(
             "choose either --timestamp-url (RFC3161) or --legacy-timestamp-url (/t), not both"
@@ -137,6 +144,11 @@ pub fn validate_timestamp_constraints(args: &TimestampArgs) -> Result<()> {
     if count != 1 {
         return Err(anyhow!(
             "choose exactly one timestamp mode: --rfc3161-url, --legacy-url, or --seal-timestamp-url (/tseal)"
+        ));
+    }
+    if (has_rfc3161 || has_seal) && args.digest.is_none() {
+        return Err(anyhow!(
+            "No /td flag specified. RFC3161 timestamping requires --digest (/td)"
         ));
     }
 

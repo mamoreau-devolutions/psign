@@ -18,7 +18,18 @@ Automation: **`scripts/linux-portable-validation.sh`**, GitHub **`ci-unix`**, an
 
 ## 1.5 RFC 3161 TSA query/reply (DER only; no embed)
 
-**`psign-tool portable rfc3161-timestamp-req`** builds **`TimeStampReq`** DER from **`--digest-hex`** / **`--digest-file`** (message-imprint preimage; optional **`--nonce`**, **`--cert-req`**). **`rfc3161-timestamp-resp-inspect`** prints **`pki_status`** / **`pki_status_int`** (raw **`PKIStatus`** INTEGER) / **`granted`** / token length, **`time_stamp_token_prefix_hex`** (first **16** octets of the **`timeStampToken`** TLV), **`status_strings_json`**, **`fail_info_tlv_hex`**, and **`fail_info_flags_json`** from **`TimeStampResp`** DER. Build with **`--features timestamp-http`** for **`rfc3161-timestamp-http-post --url …`** (Rustls POST **`application/timestamp-query`**, response DER to stdout / **`--output`**); otherwise use **`curl`** or OpenSSL **`ts`**. Wiring the token into **`SignerInfo`** as an Authenticode countersignature still goes through **`psign-tool`** / **`SignerTimeStampEx3`** (or future portable CMS) today.
+**`psign-tool portable rfc3161-timestamp-req`** builds **`TimeStampReq`** DER from **`--digest-hex`** / **`--digest-file`** (message-imprint preimage; optional **`--nonce`**, **`--cert-req`**). **`rfc3161-timestamp-resp-inspect`** prints **`pki_status`** / **`pki_status_int`** (raw **`PKIStatus`** INTEGER) / **`granted`** / token length, **`time_stamp_token_prefix_hex`** (first **16** octets of the **`timeStampToken`** TLV), **`status_strings_json`**, **`fail_info_tlv_hex`**, and **`fail_info_flags_json`** from **`TimeStampResp`** DER. When the token is a parseable CMS **`id-ct-TSTInfo`** timestamp token, it also prints structural **`tst_info_*`** fields for policy OID, message-imprint digest OID/hash, serial, **`genTime`**, and nonce; **`--expect-digest-hex`** and **`--expect-nonce`** add request-binding diagnostics (`tst_info_message_imprint_match`, `tst_info_nonce_match`). These fields are diagnostic only and do not imply TSA trust or CMS signature validation. Build with **`--features timestamp-http`** for **`rfc3161-timestamp-http-post --url …`** (Rustls POST **`application/timestamp-query`**, response DER to stdout / **`--output`**); otherwise use **`curl`** or OpenSSL **`ts`**. Wiring the token into **`SignerInfo`** as an Authenticode countersignature still goes through **`psign-tool`** / **`SignerTimeStampEx3`** (or future portable CMS) today.
+
+For deterministic local tests, build **`psign-server`** with **`--features timestamp-server`** and run:
+
+```bash
+cargo run --features timestamp-server --bin psign-server -- \
+  timestamp-server --listen 127.0.0.1:48161 --gen-time 20240102030405Z
+```
+
+It serves RFC 3161 **`POST`** requests as **`application/timestamp-reply`** with a generated test TSA certificate and signed **`TimeStampToken`**. Use **`--max-requests 1`** for one-shot integration tests, **`--status rejection`** / **`--status waiting`** for non-granted **`PKIStatus`**, or **`--response-mode bad-alg|malformed-der|http-error|mismatched-imprint|invalid-signature`** for deterministic negative paths. This server is development/test infrastructure, not a production TSA.
+
+For Windows parser/trust experiments, **`--cert-output PATH`** writes the generated root CA certificate and **`--tsa-cert-output PATH`** writes the generated TSA leaf certificate. The token includes the leaf and root certificates; local trust-store setup is still test-only.
 
 ## 2. Azure Artifact Signing — digest + REST on Linux, embed on Windows
 

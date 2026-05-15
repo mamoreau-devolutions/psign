@@ -45,6 +45,8 @@ azure-kv-sign = [
 artifact-signing-rest = ["dep:psign-codesigning-rest", "psign-digest-cli/artifact-signing-rest"]
 ## Portable RFC 3161 TSA HTTP POST helper under `psign-tool portable`.
 timestamp-http = ["psign-digest-cli/timestamp-http"]
+## Local RFC 3161 timestamp test server (`psign-server`).
+timestamp-server = ["dep:cms", "dep:der", "dep:rand", "dep:rsa", "dep:x509-cert"]
 
 [dependencies]
 psign-sip-digest = { path = "crates/psign-sip-digest" }
@@ -56,6 +58,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 goblin = "0.9"
+cms = { version = "0.2.3", features = ["builder"], optional = true }
+der = { version = "0.7", features = ["derive"], optional = true }
+rand = { version = "0.8", optional = true }
+rsa = { version = "0.9.10", features = ["sha2"], optional = true }
+x509-cert = { version = "0.2.5", features = ["builder"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
 x509-cert = "0.2.5"
@@ -94,3 +101,8 @@ path = "src/main.rs"
 [[bin]]
 name = "psign-depgraph"
 path = "src/bin/depgraph.rs"
+
+[[bin]]
+name = "psign-server"
+path = "src/bin/psign-server.rs"
+required-features = ["timestamp-server"]

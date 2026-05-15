@@ -2214,6 +2214,211 @@ fn portable_rfc3161_timestamp_resp_inspect_granted_with_token_prefix_hex() {
         ));
 }
 
+#[cfg(all(feature = "timestamp-server", feature = "timestamp-http"))]
+struct PsignServerGuard(std::process::Child);
+
+#[cfg(all(feature = "timestamp-server", feature = "timestamp-http"))]
+impl Drop for PsignServerGuard {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[cfg(all(feature = "timestamp-server", feature = "timestamp-http"))]
+fn spawn_psign_server(extra_args: &[&str]) -> (PsignServerGuard, String) {
+    let mut server_cmd = std::process::Command::new(assert_cmd::cargo::cargo_bin("psign-server"));
+    server_cmd.args([
+        "timestamp-server",
+        "--listen",
+        "127.0.0.1:0",
+        "--gen-time",
+        "20240102030405Z",
+        "--max-requests",
+        "1",
+    ]);
+    server_cmd.args(extra_args);
+    server_cmd.stdout(std::process::Stdio::piped());
+    server_cmd.stderr(std::process::Stdio::piped());
+    let mut guard = PsignServerGuard(server_cmd.spawn().expect("spawn psign-server"));
+    let stdout = guard.0.stdout.take().expect("server stdout");
+    let mut reader = std::io::BufReader::new(stdout);
+    let mut line = String::new();
+    std::io::BufRead::read_line(&mut reader, &mut line).expect("read listening line");
+    let url = line
+        .trim()
+        .strip_prefix("psign-server timestamp-server listening on ")
+        .expect("listening URL")
+        .to_string();
+    (guard, url)
+}
+
+#[cfg(all(feature = "timestamp-server", feature = "timestamp-http"))]
+fn post_timestamp_request(
+    url: &str,
+    digest_hex: &str,
+    resp_path: &Path,
+) -> assert_cmd::assert::Assert {
+    let mut post = portable_cmd();
+    post.args([
+        "rfc3161-timestamp-http-post",
+        "--url",
+        url,
+        "--digest-hex",
+        digest_hex,
+        "--nonce",
+        "7",
+        "--output",
+        resp_path.to_str().unwrap(),
+    ]);
+    post.assert()
+}
+
+#[cfg(all(feature = "timestamp-server", feature = "timestamp-http"))]
+#[test]
+fn portable_rfc3161_http_post_to_psign_server_inspects_tstinfo() {
+    let dir = tempfile::tempdir().unwrap();
+    let resp_path = dir.path().join("ts.der");
+    let (mut guard, url) = spawn_psign_server(&[]);
+
+    let digest_hex = "11".repeat(32);
+    post_timestamp_request(&url, &digest_hex, &resp_path).success();
+    let status = guard.0.wait().expect("server exit");
+    assert!(status.success(), "server failed with {status}");
+
+    let mut inspect = portable_cmd();
+    inspect.args([
+        "rfc3161-timestamp-resp-inspect",
+        "--expect-digest-hex",
+        &digest_hex,
+        "--expect-nonce",
+        "7",
+        resp_path.to_str().unwrap(),
+    ]);
+    inspect
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("pki_status=granted"))
+        .stdout(predicate::str::contains("tst_info_present=yes"))
+        .stdout(predicate::str::contains(
+            "tst_info_policy_oid=1.3.6.1.4.1.311.97.99.1",
+        ))
+        .stdout(predicate::str::contains(
+            "tst_info_message_imprint_digest_alg_oid=2.16.840.1.101.3.4.2.1",
+        ))
+        .stdout(predicate::str::contains(format!(
+            "tst_info_message_imprint_hashed_message_hex={digest_hex}"
+        )))
+        .stdout(predicate::str::contains(
+            "tst_info_gen_time=20240102030405Z",
+        ))
+        .stdout(predicate::str::contains("tst_info_nonce_hex=07"))
+        .stdout(predicate::str::contains(
+            "tst_info_message_imprint_match=yes",
+        ))
+        .stdout(predicate::str::contains("tst_info_nonce_match=yes"));
+}
+
+#[cfg(all(feature = "timestamp-server", feature = "timestamp-http"))]
+#[test]
+fn portable_rfc3161_http_post_to_psign_server_detects_mismatched_imprint() {
+    let dir = tempfile::tempdir().unwrap();
+    let resp_path = dir.path().join("mismatched.der");
+    let (mut guard, url) = spawn_psign_server(&["--response-mode", "mismatched-imprint"]);
+
+    let digest_hex = "11".repeat(32);
+    post_timestamp_request(&url, &digest_hex, &resp_path).success();
+    let status = guard.0.wait().expect("server exit");
+    assert!(status.success(), "server failed with {status}");
+
+    let mut inspect = portable_cmd();
+    inspect.args([
+        "rfc3161-timestamp-resp-inspect",
+        "--expect-digest-hex",
+        &digest_hex,
+        "--expect-nonce",
+        "7",
+        resp_path.to_str().unwrap(),
+    ]);
+    inspect
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("pki_status=granted"))
+        .stdout(predicate::str::contains("tst_info_present=yes"))
+        .stdout(predicate::str::contains(
+            "tst_info_message_imprint_match=no",
+        ))
+        .stdout(predicate::str::contains("tst_info_nonce_match=yes"));
+}
+
+#[cfg(all(feature = "timestamp-server", feature = "timestamp-http"))]
+#[test]
+fn portable_rfc3161_http_post_to_psign_server_bad_alg_is_inspectable() {
+    let dir = tempfile::tempdir().unwrap();
+    let resp_path = dir.path().join("bad-alg.der");
+    let (mut guard, url) = spawn_psign_server(&["--response-mode", "bad-alg"]);
+
+    let digest_hex = "11".repeat(32);
+    post_timestamp_request(&url, &digest_hex, &resp_path).success();
+    let status = guard.0.wait().expect("server exit");
+    assert!(status.success(), "server failed with {status}");
+
+    let mut inspect = portable_cmd();
+    inspect.args([
+        "rfc3161-timestamp-resp-inspect",
+        resp_path.to_str().unwrap(),
+    ]);
+    inspect
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("pki_status=rejection"))
+        .stdout(predicate::str::contains("granted=no"))
+        .stdout(predicate::str::contains(
+            "status_strings_json=[\"psign-server configured badAlg\"]",
+        ))
+        .stdout(predicate::str::contains(
+            "fail_info_flags_json=[\"badAlg\"]",
+        ))
+        .stdout(predicate::str::contains("tst_info_present=no"));
+}
+
+#[cfg(all(feature = "timestamp-server", feature = "timestamp-http"))]
+#[test]
+fn portable_rfc3161_http_post_to_psign_server_malformed_der_fails_inspect() {
+    let dir = tempfile::tempdir().unwrap();
+    let resp_path = dir.path().join("malformed.der");
+    let (mut guard, url) = spawn_psign_server(&["--response-mode", "malformed-der"]);
+
+    let digest_hex = "11".repeat(32);
+    post_timestamp_request(&url, &digest_hex, &resp_path).success();
+    let status = guard.0.wait().expect("server exit");
+    assert!(status.success(), "server failed with {status}");
+
+    let mut inspect = portable_cmd();
+    inspect.args([
+        "rfc3161-timestamp-resp-inspect",
+        resp_path.to_str().unwrap(),
+    ]);
+    inspect.assert().failure().stderr(predicate::str::contains(
+        "could not parse TimeStampResp DER",
+    ));
+}
+
+#[cfg(all(feature = "timestamp-server", feature = "timestamp-http"))]
+#[test]
+fn portable_rfc3161_http_post_to_psign_server_http_error_fails_post() {
+    let dir = tempfile::tempdir().unwrap();
+    let resp_path = dir.path().join("http-error.der");
+    let (mut guard, url) = spawn_psign_server(&["--response-mode", "http-error"]);
+
+    let digest_hex = "11".repeat(32);
+    post_timestamp_request(&url, &digest_hex, &resp_path)
+        .failure()
+        .stderr(predicate::str::contains("TSA HTTP 500"));
+    let status = guard.0.wait().expect("server exit");
+    assert!(status.success(), "server failed with {status}");
+}
+
 #[test]
 fn portable_rfc3161_timestamp_resp_inspect_granted_long_token_prefix_hex_truncates() {
     let mut der = vec![0x30, 0x1b, 0x30, 0x03, 0x02, 0x01, 0x00, 0x30, 0x14];

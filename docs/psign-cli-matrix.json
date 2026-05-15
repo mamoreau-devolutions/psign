@@ -51,7 +51,7 @@
       {"native": "/sha1", "rust": "--cert-sha1", "tier": "P0", "status": "implemented"},
       {"native": "/sm", "rust": "--machine-store", "tier": "P0", "status": "implemented"},
       {"native": "/t", "rust": "--legacy-timestamp-url", "tier": "P0", "status": "implemented", "notes": "Mutually exclusive with --timestamp-url"},
-      {"native": "/td", "rust": "--timestamp-digest", "tier": "P0", "status": "implemented", "notes": "Native signtool throws `No /td flag specified` on RFC3161 sign-time timestamp paths when omitted; psign currently falls back to the file digest"},
+      {"native": "/td", "rust": "--timestamp-digest", "tier": "P0", "status": "implemented", "notes": "Required for RFC3161 sign-time timestamp paths (`/tr` and `/tseal`); legacy `/t` does not require it"},
       {"native": "/tr", "rust": "--timestamp-url", "tier": "P0", "status": "implemented"},
       {"native": "/tseal", "rust": "--seal-timestamp-url (--tseal)", "tier": "P0", "status": "implemented", "notes": "Sign-time sealed RFC3161 URL; mutually exclusive with /tr and /t; same SignerSignEx3 RFC3161 path as /tr here"},
       {"native": "/u", "rust": "--eku-oid", "tier": "P0", "status": "implemented"},
@@ -110,7 +110,7 @@
       {"native": "/tr", "rust": "--rfc3161-url", "tier": "P0", "status": "implemented"},
       {"native": "/tseal", "rust": "--seal-timestamp-url (--tseal)", "tier": "P0", "status": "implemented", "notes": "Mutually exclusive with /tr and /t; uses same SignerTimeStampEx3 RFC3161 path as /tr in this build"},
       {"native": "/t", "rust": "--legacy-url", "tier": "P0", "status": "implemented"},
-      {"native": "/td", "rust": "--digest", "tier": "P0", "status": "implemented", "notes": "Native signtool throws `No /td flag specified` for `/tr` timestamp when omitted; psign currently defaults to SHA-256"},
+      {"native": "/td", "rust": "--digest", "tier": "P0", "status": "implemented", "notes": "Required for RFC3161 timestamp paths (`/tr` and `/tseal`); legacy `/t` does not require it"},
       {"native": "/tp", "rust": "--signature-index", "tier": "P0", "status": "implemented"},
       {"native": "/p7", "rust": "--timestamp-pkcs7-files", "tier": "P1", "status": "partial", "notes": "Explicit error"},
       {"native": "/force", "rust": "--remove-seal (--force)", "tier": "P1", "status": "partial", "notes": "CLI + argv; explicit not-implemented error"},
@@ -236,7 +236,7 @@
       {"name": "nupkg-digest", "maps_to_native_concept": "Unsigned NuGet package byte hash used by the package-signature properties document (SHA-256/384/512; rejects already signed packages)"},
       {"name": "vsix-signature-info", "maps_to_native_concept": "VSIX OPC XMLDSig marker inspection under package digital-signature service parts (not SIP; groundwork for portable VSIX XMLDSig signing)"},
       {"name": "rfc3161-timestamp-req", "maps_to_native_concept": "RFC 3161 TimeStampReq DER from imprint preimage (TSA application/timestamp-query body)"},
-      {"name": "rfc3161-timestamp-resp-inspect", "maps_to_native_concept": "Parse TimeStampResp PKIStatus (label + raw int), timeStampToken length + 16-octet TLV hex prefix (CMS sniffing), statusString, failInfo TLV + PKIFailureInfo bit names (not CryptVerifyTimeStampSignature)"},
+      {"name": "rfc3161-timestamp-resp-inspect", "maps_to_native_concept": "Parse TimeStampResp PKIStatus (label + raw int), timeStampToken length + 16-octet TLV hex prefix (CMS sniffing), statusString, failInfo TLV + PKIFailureInfo bit names, structural TSTInfo fields, and optional expected imprint/nonce diagnostics (not CryptVerifyTimeStampSignature)"},
       {"name": "rfc3161-timestamp-http-post", "maps_to_native_concept": "HTTPS POST TimeStampReq to TSA (optional build feature timestamp-http; not SignerTimeStampEx3)"}
     ],
     "ci": "`ci-unix` runs unified `psign-tool portable ...` integration tests with `cargo test -p psign --test cli_pe_digest`; `rust-sip-parity.yml` job `portable-cms-rs256-linux` filters PE/CAB/MSI/catalog RS256 tests through the same root test target; Windows workflow also builds workspace and runs the unified portable CLI tests."
