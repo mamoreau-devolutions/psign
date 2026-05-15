@@ -555,9 +555,9 @@ pub struct TimestampArgs {
         conflicts_with_all = ["rfc3161_url", "legacy_url"]
     )]
     pub seal_timestamp_url: Option<String>,
-    /// Timestamp digest algorithm (native `/td`).
-    #[arg(long, visible_alias = "td", value_enum, default_value_t = DigestAlgorithm::Sha256)]
-    pub digest: DigestAlgorithm,
+    /// Timestamp digest algorithm (native `/td`; required with RFC3161 `/tr` and `/tseal`).
+    #[arg(long, visible_alias = "td", value_enum)]
+    pub digest: Option<DigestAlgorithm>,
     /// Timestamp the signature at this index (native `/tp`).
     #[arg(long, visible_alias = "tp")]
     pub signature_index: Option<u32>,

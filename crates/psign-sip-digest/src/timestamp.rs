@@ -10,6 +10,11 @@
 //! (**`PKIFailureInfo`**) **`BIT STRING`** values can be decoded to RFC 2510 Appendix A bit names
 //! (**`badAlg`** … **`badPOP`**) for logging; **CMS signature / `MessageImprint` verification** remain out of scope.
 
+use cms::content_info::ContentInfo;
+use cms::signed_data::SignedData;
+use der::asn1::ObjectIdentifier;
+use der::{Decode, SliceReader};
+
 /// Plan for a single **`TimeStampReq`**.
 #[derive(Debug, Clone)]
 pub struct Rfc3161TimestampRequestPlan {
@@ -207,6 +212,20 @@ pub struct ParsedTimeStampResp<'a> {
     pub status_strings: Vec<String>,
     /// Raw **`PKIFailureInfo`** **`BIT STRING`** TLV bytes (tag **`0x03`**) when present.
     pub fail_info_tlv: Option<&'a [u8]>,
+}
+
+/// Parsed **RFC 3161 `TSTInfo`** fields from a **`timeStampToken`**.
+///
+/// This is structural parsing only. It does **not** verify the CMS signature, TSA chain, EKU,
+/// nonce binding to a request, or **`MessageImprint`** against an Authenticode signature value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedRfc3161TstInfo {
+    pub policy_oid: String,
+    pub message_imprint_digest_alg_oid: String,
+    pub message_imprint_hashed_message: Vec<u8>,
+    pub serial_number_hex: String,
+    pub gen_time: String,
+    pub nonce_hex: Option<String>,
 }
 
 /// Decode a **`PKIFailureInfo`**-style **`BIT STRING`** TLV (tag **`0x03`**) into sorted RFC 2510
@@ -433,6 +452,143 @@ pub fn parse_time_stamp_resp_der(input: &[u8]) -> Option<ParsedTimeStampResp<'_>
     })
 }
 
+/// Parse a **`timeStampToken`** **`ContentInfo`** and return its encapsulated **`TSTInfo`** fields.
+///
+/// This intentionally performs structural extraction only; callers must layer CMS signature, TSA
+/// certificate, nonce, and **`MessageImprint`** verification on top before treating the timestamp
+/// as trusted.
+pub fn parse_time_stamp_token_tst_info(token_tlv: &[u8]) -> Option<ParsedRfc3161TstInfo> {
+    const ID_SIGNED_DATA: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.7.2");
+    const ID_CT_TSTINFO: ObjectIdentifier =
+        ObjectIdentifier::new_unwrap("1.2.840.113549.1.9.16.1.4");
+
+    let mut r = SliceReader::new(token_tlv).ok()?;
+    let ci = ContentInfo::decode(&mut r).ok()?;
+    if ci.content_type != ID_SIGNED_DATA {
+        return None;
+    }
+    let sd: SignedData = ci.content.decode_as().ok()?;
+    if sd.encap_content_info.econtent_type != ID_CT_TSTINFO {
+        return None;
+    }
+    let any = sd.encap_content_info.econtent.as_ref()?;
+    let tstinfo_der = peel_to_tstinfo_sequence(any.value())?;
+    parse_tst_info_der(tstinfo_der)
+}
+
+/// Parse **RFC 3161 `TSTInfo`** DER enough for deterministic timestamp tests and diagnostics.
+pub fn parse_tst_info_der(tstinfo_der: &[u8]) -> Option<ParsedRfc3161TstInfo> {
+    let outer = der_tlv_body(tstinfo_der)?;
+    if tstinfo_der.first().copied()? != 0x30 {
+        return None;
+    }
+    let mut pos = outer;
+    let (version, rest) = der_read_tlv0(pos)?;
+    pos = rest;
+    if version.first().copied()? != 0x02 {
+        return None;
+    }
+    let (policy_tlv, rest) = der_read_tlv0(pos)?;
+    pos = rest;
+    let policy_oid = oid_tlv_to_string(policy_tlv)?;
+
+    let (message_imprint_tlv, rest) = der_read_tlv0(pos)?;
+    pos = rest;
+    let (message_imprint_digest_alg_oid, message_imprint_hashed_message) =
+        parse_message_imprint(message_imprint_tlv)?;
+
+    let (serial_tlv, rest) = der_read_tlv0(pos)?;
+    pos = rest;
+    if serial_tlv.first().copied()? != 0x02 {
+        return None;
+    }
+    let serial_number_hex = hex_lower(der_tlv_body(serial_tlv)?);
+
+    let (gen_time_tlv, rest) = der_read_tlv0(pos)?;
+    pos = rest;
+    if gen_time_tlv.first().copied()? != 0x18 {
+        return None;
+    }
+    let gen_time = std::str::from_utf8(der_tlv_body(gen_time_tlv)?)
+        .ok()?
+        .to_string();
+
+    let mut nonce_hex = None;
+    while !pos.is_empty() {
+        let (tlv, rest) = der_read_tlv0(pos)?;
+        pos = rest;
+        match tlv.first().copied()? {
+            0x02 => nonce_hex = Some(hex_lower(der_tlv_body(tlv)?)),
+            0x30 | 0x01 | 0xa0 | 0xa1 => {}
+            _ => return None,
+        }
+    }
+
+    Some(ParsedRfc3161TstInfo {
+        policy_oid,
+        message_imprint_digest_alg_oid,
+        message_imprint_hashed_message,
+        serial_number_hex,
+        gen_time,
+        nonce_hex,
+    })
+}
+
+fn parse_message_imprint(message_imprint_tlv: &[u8]) -> Option<(String, Vec<u8>)> {
+    if message_imprint_tlv.first().copied()? != 0x30 {
+        return None;
+    }
+    let body = der_tlv_body(message_imprint_tlv)?;
+    let (alg_tlv, rest) = der_read_tlv0(body)?;
+    let (hashed_tlv, tail) = der_read_tlv0(rest)?;
+    if !tail.is_empty() || hashed_tlv.first().copied()? != 0x04 {
+        return None;
+    }
+    let alg_oid = algorithm_identifier_oid(alg_tlv)?;
+    let hashed = der_tlv_body(hashed_tlv)?.to_vec();
+    Some((alg_oid, hashed))
+}
+
+fn algorithm_identifier_oid(alg_tlv: &[u8]) -> Option<String> {
+    if alg_tlv.first().copied()? != 0x30 {
+        return None;
+    }
+    let body = der_tlv_body(alg_tlv)?;
+    let (oid_tlv, _rest) = der_read_tlv0(body)?;
+    oid_tlv_to_string(oid_tlv)
+}
+
+fn oid_tlv_to_string(oid_tlv: &[u8]) -> Option<String> {
+    if oid_tlv.first().copied()? != 0x06 {
+        return None;
+    }
+    ObjectIdentifier::from_der(oid_tlv)
+        .ok()
+        .map(|oid| oid.to_string())
+}
+
+fn peel_to_tstinfo_sequence(mut sl: &[u8]) -> Option<&[u8]> {
+    for _ in 0..8 {
+        match sl.first().copied()? {
+            0x30 => return Some(sl),
+            0x04 => sl = der_tlv_body(sl)?,
+            tag if tag == 0xa0 || tag == 0xa1 => sl = der_tlv_body(sl)?,
+            _ => return None,
+        }
+    }
+    None
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for &b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -553,6 +709,47 @@ mod tests {
                 "{oid}: hashedMessage"
             );
         }
+    }
+
+    #[test]
+    fn parse_tst_info_extracts_core_fields_and_nonce() {
+        let mut imprint_body = Vec::new();
+        imprint_body.extend_from_slice(
+            digest_alg_spec("2.16.840.1.101.3.4.2.1")
+                .unwrap()
+                .algorithm_identifier_der,
+        );
+        imprint_body.push(0x04);
+        imprint_body.push(32);
+        imprint_body.extend_from_slice(&[0x22u8; 32]);
+        let mut imprint = vec![0x30];
+        push_der_definite_length(&mut imprint, imprint_body.len());
+        imprint.extend_from_slice(&imprint_body);
+
+        let mut body = vec![0x02, 0x01, 0x01];
+        body.extend_from_slice(&[0x06, 0x03, 0x2a, 0x03, 0x04]);
+        body.extend_from_slice(&imprint);
+        body.extend_from_slice(&[0x02, 0x01, 0x7f]);
+        body.extend_from_slice(&[
+            0x18, 0x0f, b'2', b'0', b'2', b'4', b'0', b'1', b'0', b'2', b'0', b'3', b'0', b'4',
+            b'0', b'5', b'Z',
+        ]);
+        body.extend_from_slice(&[0x02, 0x01, 0x09]);
+
+        let mut tstinfo = vec![0x30];
+        push_der_definite_length(&mut tstinfo, body.len());
+        tstinfo.extend_from_slice(&body);
+
+        let parsed = parse_tst_info_der(&tstinfo).expect("TSTInfo");
+        assert_eq!(parsed.policy_oid, "1.2.3.4");
+        assert_eq!(
+            parsed.message_imprint_digest_alg_oid,
+            "2.16.840.1.101.3.4.2.1"
+        );
+        assert_eq!(parsed.message_imprint_hashed_message, vec![0x22; 32]);
+        assert_eq!(parsed.serial_number_hex, "7f");
+        assert_eq!(parsed.gen_time, "20240102030405Z");
+        assert_eq!(parsed.nonce_hex.as_deref(), Some("09"));
     }
 
     /// Minimal **`TimeStampResp`**: **`granted`**, no token.

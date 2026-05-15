@@ -21,6 +21,16 @@ Artifacts: `parity-output/parity-report.json`, `parity-output/msix-parity-sign-r
 
 Optional parity scenarios are gated on environment variables (`PSIGN_MSIX_*`, `PSIGN_SIGNED_FIXTURE` + timestamp URL, detached PKCS#7 paths, catalog paths, and so on). If only a **subset** is set—for example an MSIX fixture path without the matching PFX and RFC3161 URL—the script still appends those scenarios and you may see `semantic_mismatch` rows that disappear once variables are cleared or the full matrix is provided.
 
+For deterministic timestamp experiments without a public TSA, build **`psign-server`** with **`--features timestamp-server`** and point timestamp env vars (for example **`PSIGN_TIMESTAMP_URL`**) at its local URL. Example one-shot server:
+
+```powershell
+cargo run --features timestamp-server --bin psign-server -- timestamp-server --listen 127.0.0.1:48161 --max-requests 1
+```
+
+The server returns RFC 3161 **`TimeStampResp`** DER with a generated test TSA certificate and supports **`--status rejection`** / **`--status waiting`** plus **`--response-mode bad-alg|malformed-der|http-error|mismatched-imprint|invalid-signature`** for deterministic negative paths. It is intended for local/CI tests only, not production timestamping.
+
+For a local Windows timestamp parity run, use [`scripts/run-local-timestamp-parity.ps1`](../scripts/run-local-timestamp-parity.ps1). It builds **`psign-server`**, prepares a signed PE fixture with the Devolutions test certificate, starts a local RFC 3161 server, exports **`PSIGN_TIMESTAMP_URL`**, and runs **`scripts/run-parity-diff.ps1`**. The server can also write its generated test certificates with **`--cert-output`** (root CA) and **`--tsa-cert-output`** (TSA leaf) for manual Windows trust experiments.
+
 For a **baseline** report matching the static tier (verify/remove scenarios only, no optional blocks), clear process env vars whose names start with `PSIGN_`, then run `scripts/run-parity-diff.ps1`. Expect **21** scenarios, `missingScenarioCount: 0`, and `semanticMismatchCount: 0` (UTF-16 `@rsp` remains `documented_native_utf16_rsp_gap`, not a semantic failure).
 
 ## Tier 2 — Extensions (`parity-extensions.yml`)
