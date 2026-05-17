@@ -4,7 +4,7 @@ use crate::trust_pkcs7::{
     verify_authenticode_pkcs7_trust, verify_pkcs9_message_digest_pkcs7_trust,
 };
 use crate::trust_verify_pe::{TrustVerifyPeOptions, TrustVerifyPeReport, load_trust_material};
-use crate::verification_instant::resolve_verification_instant_for_pkcs7;
+use crate::verification_instant::resolve_verification_instant_for_pkcs7_with_trust;
 use anyhow::{Result, anyhow};
 use authenticode::AuthenticodeSignature;
 use digest::Digest;
@@ -33,10 +33,14 @@ pub fn trust_verify_detached_bytes(
     let normalized = normalize_pkcs7_der_for_authenticode(pkcs7_der);
     let slice = normalized.as_ref();
 
-    let verification_instant = resolve_verification_instant_for_pkcs7(
+    let verification_instant = resolve_verification_instant_for_pkcs7_with_trust(
         slice,
         &opts.policy,
         opts.verification_instant_override.as_ref(),
+        &anchors,
+        &anchor_certs,
+        &opts.online,
+        opts.verbose_chain,
     )?;
 
     match AuthenticodeSignature::from_bytes(slice) {
@@ -55,6 +59,7 @@ pub fn trust_verify_detached_bytes(
                 &anchors,
                 &anchor_certs,
                 &opts.policy,
+                &opts.online,
                 &verification_instant,
                 opts.verbose_chain,
             )?;
@@ -84,6 +89,7 @@ pub fn trust_verify_detached_bytes(
                 &anchors,
                 &anchor_certs,
                 &opts.policy,
+                &opts.online,
                 &verification_instant,
                 opts.verbose_chain,
             )?;

@@ -117,7 +117,13 @@ fn run_portable_args(args: &[std::ffi::OsString]) -> anyhow::Result<CommandOutpu
     } else {
         argv.extend(args.iter().cloned());
     }
-    psign_digest_cli::run_from(argv)?;
+    std::thread::Builder::new()
+        .name("psign-portable-cli".to_string())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(move || psign_digest_cli::run_from(argv))
+        .map_err(|e| anyhow::anyhow!("spawn portable CLI runner: {e}"))?
+        .join()
+        .map_err(|_| anyhow::anyhow!("portable CLI runner panicked"))??;
     Ok(CommandOutput::ok(String::new()))
 }
 
@@ -182,6 +188,18 @@ fn portable_verify_unsupported(args: &crate::cli::VerifyArgs) -> bool {
         || args.enclave_policy
 }
 
+fn portable_verify_trust_requested(args: &crate::cli::VerifyArgs) -> bool {
+    args.anchor_dir.is_some()
+        || !args.trusted_ca.is_empty()
+        || args.online_aia
+        || args.aia_url_override.is_some()
+        || args.online_ocsp
+        || args.ocsp_url_override.is_some()
+        || args.revocation_mode.is_some()
+        || args.crl_url_override.is_some()
+        || args.as_of.is_some()
+}
+
 fn execute_portable_verify(args: &crate::cli::VerifyArgs) -> anyhow::Result<CommandOutput> {
     if portable_verify_unsupported(args) {
         return Err(anyhow::anyhow!(
@@ -189,11 +207,59 @@ fn execute_portable_verify(args: &crate::cli::VerifyArgs) -> anyhow::Result<Comm
         ));
     }
     for path in &args.files {
-        let command = portable_command_for_path(path)?;
-        let argv = [
-            std::ffi::OsString::from(command),
-            path.as_os_str().to_os_string(),
-        ];
+        let command = if portable_verify_trust_requested(args) {
+            match portable_command_for_path(path)? {
+                "verify-pe" => "trust-verify-pe",
+                "verify-cab" => "trust-verify-cab",
+                "verify-msi" => "trust-verify-msi",
+                "verify-esd" => "trust-verify-esd",
+                "verify-catalog" => "trust-verify-catalog",
+                other => {
+                    return Err(anyhow::anyhow!(
+                        "--mode portable verify trust options are not supported for inferred command {other}"
+                    ));
+                }
+            }
+        } else {
+            portable_command_for_path(path)?
+        };
+        let mut argv = Vec::new();
+        argv.push(std::ffi::OsString::from(command));
+        if let Some(dir) = &args.anchor_dir {
+            argv.push(std::ffi::OsString::from("--anchor-dir"));
+            argv.push(dir.as_os_str().to_os_string());
+        }
+        for ca in &args.trusted_ca {
+            argv.push(std::ffi::OsString::from("--trusted-ca"));
+            argv.push(ca.as_os_str().to_os_string());
+        }
+        if args.online_aia {
+            argv.push(std::ffi::OsString::from("--online-aia"));
+        }
+        if let Some(url) = &args.aia_url_override {
+            argv.push(std::ffi::OsString::from("--aia-url-override"));
+            argv.push(std::ffi::OsString::from(url));
+        }
+        if args.online_ocsp {
+            argv.push(std::ffi::OsString::from("--online-ocsp"));
+        }
+        if let Some(url) = &args.ocsp_url_override {
+            argv.push(std::ffi::OsString::from("--ocsp-url-override"));
+            argv.push(std::ffi::OsString::from(url));
+        }
+        if let Some(mode) = args.revocation_mode {
+            argv.push(std::ffi::OsString::from("--revocation-mode"));
+            argv.push(std::ffi::OsString::from(mode.as_arg()));
+        }
+        if let Some(url) = &args.crl_url_override {
+            argv.push(std::ffi::OsString::from("--crl-url-override"));
+            argv.push(std::ffi::OsString::from(url));
+        }
+        if let Some(as_of) = &args.as_of {
+            argv.push(std::ffi::OsString::from("--as-of"));
+            argv.push(std::ffi::OsString::from(as_of));
+        }
+        argv.push(path.as_os_str().to_os_string());
         run_portable_args(&argv)?;
     }
     Ok(CommandOutput::ok(String::new()))

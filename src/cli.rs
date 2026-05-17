@@ -77,6 +77,23 @@ pub enum VerifyPolicy {
     Pg,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+pub enum PortableRevocationMode {
+    Off,
+    BestEffort,
+    Require,
+}
+
+impl PortableRevocationMode {
+    pub fn as_arg(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::BestEffort => "best-effort",
+            Self::Require => "require",
+        }
+    }
+}
+
 /// Experimental Rust SIP backend selector (`sign --rust-sip …`, `PSIGN_RUST_SIP`).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 pub enum RustSipBackend {
@@ -321,6 +338,33 @@ pub struct VerifyArgs {
     /// Verify with enclave signing policy (native `/enclave`) — not implemented.
     #[arg(long, visible_alias = "enclave")]
     pub enclave_policy: bool,
+    /// Portable trust anchor directory (`.crt`/`.cer`/`.pem`); does not modify OS certificate stores.
+    #[arg(long)]
+    pub anchor_dir: Option<PathBuf>,
+    /// Portable trust anchor CA certificate file; repeatable and does not modify OS certificate stores.
+    #[arg(long, action = clap::ArgAction::Append)]
+    pub trusted_ca: Vec<PathBuf>,
+    /// Portable trust: fetch missing issuers from AIA `caIssuers` HTTP URLs.
+    #[arg(long)]
+    pub online_aia: bool,
+    /// Portable trust: deterministic AIA issuer URL override for local tests.
+    #[arg(long)]
+    pub aia_url_override: Option<String>,
+    /// Portable trust: query OCSP responders while applying online revocation policy.
+    #[arg(long)]
+    pub online_ocsp: bool,
+    /// Portable trust: deterministic OCSP responder URL override for local tests.
+    #[arg(long)]
+    pub ocsp_url_override: Option<String>,
+    /// Portable trust: online revocation policy for CRL checks.
+    #[arg(long, value_enum)]
+    pub revocation_mode: Option<PortableRevocationMode>,
+    /// Portable trust: deterministic CRL URL override for local tests.
+    #[arg(long)]
+    pub crl_url_override: Option<String>,
+    /// Portable trust: fixed verification date (YYYY-MM-DD).
+    #[arg(long)]
+    pub as_of: Option<String>,
     /// Files to verify (native `<filename(s)>`; one or more trailing paths).
     #[arg(required = true)]
     pub files: Vec<PathBuf>,

@@ -5,7 +5,7 @@ use picky::x509::certificate::Cert;
 use sha1::{Digest, Sha1};
 use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct AnchorStore {
@@ -72,6 +72,25 @@ impl AnchorStore {
                 "no certificates loaded from anchor dir {} (expected .crt/.cer/.pem)",
                 dir.display()
             ));
+        }
+
+        let mut store = Self::empty();
+        store.merge_cert_thumbprints(&certs)?;
+        Ok((store, certs))
+    }
+
+    /// Parse explicitly supplied certificate files and use them as trust anchors.
+    pub fn load_files(paths: &[PathBuf]) -> Result<(Self, Vec<Cert>)> {
+        let mut certs = Vec::new();
+        for path in paths {
+            let raw = fs::read(path).with_context(|| format!("read anchor {}", path.display()))?;
+            let parsed = parse_cert_bytes(&raw)
+                .with_context(|| format!("parse anchor certificate {}", path.display()))?;
+            certs.push(parsed);
+        }
+
+        if certs.is_empty() {
+            return Err(anyhow!("no trusted CA files were supplied"));
         }
 
         let mut store = Self::empty();

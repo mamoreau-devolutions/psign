@@ -46,7 +46,7 @@ artifact-signing-rest = ["dep:psign-codesigning-rest", "psign-digest-cli/artifac
 ## Portable RFC 3161 TSA HTTP POST helper under `psign-tool portable`.
 timestamp-http = ["psign-digest-cli/timestamp-http"]
 ## Local RFC 3161 timestamp test server (`psign-server`).
-timestamp-server = ["dep:cms", "dep:der", "dep:rand", "dep:rsa", "dep:x509-cert"]
+timestamp-server = ["dep:cms", "dep:der", "dep:rand", "dep:rsa", "dep:sha1", "dep:x509-cert"]
 
 [dependencies]
 psign-sip-digest = { path = "crates/psign-sip-digest" }
@@ -57,6 +57,7 @@ clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+sha1 = { version = "0.10", optional = true }
 goblin = "0.9"
 cms = { version = "0.2.3", features = ["builder"], optional = true }
 der = { version = "0.7", features = ["derive"], optional = true }

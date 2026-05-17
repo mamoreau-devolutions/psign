@@ -10,6 +10,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use psign_authenticode_trust::{
     AuthenticodeTrustPolicy, TrustVerifyPeOptions, TrustVerifyPeReport,
     inspect_authenticode_pkcs7_der, inspect_pe_authenticode, parse_verification_date_ymd,
+    policy::{OnlineTrustOptions, RevocationMode},
     trust_verify_cab_bytes, trust_verify_catalog_bytes, trust_verify_detached_bytes,
     trust_verify_msi_bytes, trust_verify_pe_bytes, trust_verify_wim_esd_path,
 };
@@ -62,6 +63,9 @@ struct Cli {
 struct TrustVerifySharedArgs {
     #[arg(long, value_name = "DIR")]
     anchor_dir: Option<PathBuf>,
+    /// Trust this CA certificate file as an anchor (repeatable, PEM or DER).
+    #[arg(long, value_name = "PATH", action = clap::ArgAction::Append)]
+    trusted_ca: Vec<PathBuf>,
     #[arg(long, value_name = "PATH")]
     authroot_cab: Option<PathBuf>,
     /// Require **`--authroot-cab`** file SHA-256 (64 lowercase hex chars) to match before ingest.
@@ -81,6 +85,47 @@ struct TrustVerifySharedArgs {
     /// Use this UTC date (YYYY-MM-DD) for **`exact_date`** instead of wall clock (for expired fixtures / reproducible CI).
     #[arg(long, value_name = "YYYY-MM-DD")]
     as_of: Option<String>,
+    /// Fetch missing issuer certificates from AIA `caIssuers` HTTP URLs while building the chain.
+    #[arg(long)]
+    online_aia: bool,
+    /// Deterministic AIA issuer URL override for local tests.
+    #[arg(long, value_name = "URL")]
+    aia_url_override: Option<String>,
+    /// Query OCSP responders while applying online revocation policy.
+    #[arg(long)]
+    online_ocsp: bool,
+    /// Deterministic OCSP responder URL override for local tests.
+    #[arg(long, value_name = "URL")]
+    ocsp_url_override: Option<String>,
+    /// Online revocation policy for CRL checks.
+    #[arg(long, value_enum, default_value_t = CliRevocationMode::Off)]
+    revocation_mode: CliRevocationMode,
+    /// Deterministic CRL URL override for local tests.
+    #[arg(long, value_name = "URL")]
+    crl_url_override: Option<String>,
+    /// Timeout for online trust HTTP requests.
+    #[arg(long, default_value_t = 5)]
+    online_timeout_secs: u64,
+    /// Maximum bytes accepted for an online issuer certificate download.
+    #[arg(long, default_value_t = 1024 * 1024)]
+    online_max_download_bytes: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum CliRevocationMode {
+    Off,
+    BestEffort,
+    Require,
+}
+
+impl From<CliRevocationMode> for RevocationMode {
+    fn from(value: CliRevocationMode) -> Self {
+        match value {
+            CliRevocationMode::Off => Self::Off,
+            CliRevocationMode::BestEffort => Self::BestEffort,
+            CliRevocationMode::Require => Self::Require,
+        }
+    }
 }
 
 fn trust_verify_options_from_shared(a: &TrustVerifySharedArgs) -> Result<TrustVerifyPeOptions> {
@@ -94,10 +139,21 @@ fn trust_verify_options_from_shared(a: &TrustVerifySharedArgs) -> Result<TrustVe
     };
     Ok(TrustVerifyPeOptions {
         anchor_dir: a.anchor_dir.clone(),
+        trusted_ca_files: a.trusted_ca.clone(),
         authroot_cab: a.authroot_cab.clone(),
         expect_authroot_cab_sha256,
         verification_instant_override,
         verbose_chain: a.verbose_chain,
+        online: OnlineTrustOptions {
+            enable_aia: a.online_aia,
+            aia_url_override: a.aia_url_override.clone(),
+            enable_ocsp: a.online_ocsp,
+            ocsp_url_override: a.ocsp_url_override.clone(),
+            revocation_mode: a.revocation_mode.into(),
+            crl_url_override: a.crl_url_override.clone(),
+            timeout: std::time::Duration::from_secs(a.online_timeout_secs),
+            max_download_bytes: a.online_max_download_bytes,
+        },
         policy: AuthenticodeTrustPolicy {
             strict_code_signing_eku: !a.allow_loose_signing_cert,
             prefer_timestamp_signing_time: a.prefer_timestamp_signing_time,

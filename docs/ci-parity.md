@@ -31,6 +31,8 @@ The server returns RFC 3161 **`TimeStampResp`** DER with a generated test TSA ce
 
 For a local Windows timestamp parity run, use [`scripts/run-local-timestamp-parity.ps1`](../scripts/run-local-timestamp-parity.ps1). It builds **`psign-server`**, prepares a signed PE fixture with the Devolutions test certificate, starts a local RFC 3161 server, exports **`PSIGN_TIMESTAMP_URL`**, and runs **`scripts/run-parity-diff.ps1`**. The server can also write its generated test certificates with **`--cert-output`** (root CA) and **`--tsa-cert-output`** (TSA leaf) for manual Windows trust experiments.
 
+For local no-admin online certificate checks, use [`scripts/run-local-online-cert-parity.ps1`](../scripts/run-local-online-cert-parity.ps1). It builds **`psign-server`** with timestamp HTTP support and runs the feature-gated loopback PKI tests for explicit **`--trusted-ca`** anchors, AIA, CRL, OCSP, and trusted RFC3161 timestamp validation. These tests intentionally exercise the portable trust backend because Windows **`WinVerifyTrust`** custom-root parity still requires either persistent user/machine store changes or deeper custom chain-policy integration.
+
 For a **baseline** report matching the static tier (verify/remove scenarios only, no optional blocks), clear process env vars whose names start with `PSIGN_`, then run `scripts/run-parity-diff.ps1`. Expect **21** scenarios, `missingScenarioCount: 0`, and `semanticMismatchCount: 0` (UTF-16 `@rsp` remains `documented_native_utf16_rsp_gap`, not a semantic failure).
 
 ## Tier 2 — Extensions (`parity-extensions.yml`)

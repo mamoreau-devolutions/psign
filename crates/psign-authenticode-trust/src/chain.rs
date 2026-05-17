@@ -42,11 +42,64 @@ pub fn issuer_chain_excluding_leaf<'a>(leaf: &'a Cert, pool: &'a [Cert]) -> Resu
     Ok(out)
 }
 
+/// Follow `leaf.issuer_name` through `pool`, fetching missing issuers through explicit online
+/// options when enabled. Returned certificates are owned so fetched intermediates can live for
+/// the duration of the caller's verification step without mutating global state.
+pub fn issuer_chain_excluding_leaf_online(
+    leaf: &Cert,
+    pool: &mut Vec<Cert>,
+    online: &crate::policy::OnlineTrustOptions,
+) -> Result<Vec<Cert>> {
+    if leaf.subject_name() == leaf.issuer_name() {
+        return Ok(Vec::new());
+    }
+
+    let mut out = Vec::new();
+    let mut current = leaf.clone();
+    let mut steps = 0usize;
+
+    loop {
+        let issuer_dn = current.issuer_name();
+        if let Some(parent) = pool.iter().find(|c| c.subject_name() == issuer_dn).cloned() {
+            steps += 1;
+            if steps > 32 {
+                return Err(anyhow!("certificate chain too long (possible loop)"));
+            }
+            let done = parent.subject_name() == parent.issuer_name();
+            out.push(parent.clone());
+            if done {
+                break;
+            }
+            current = parent;
+            continue;
+        }
+
+        let fetched = crate::online::issuer_candidates_from_aia(&current, online)?;
+        if fetched.is_empty() {
+            return Err(anyhow!(
+                "could not resolve issuer certificate for subject {:?}",
+                issuer_dn
+            ));
+        }
+        pool.extend(fetched);
+    }
+
+    Ok(out)
+}
+
 pub fn terminal_root_cert<'a>(leaf: &'a Cert, chain: &'a [&'a Cert]) -> &'a Cert {
     if leaf.subject_name() == leaf.issuer_name() {
         leaf
     } else {
         chain.last().copied().expect("non-empty issuer chain")
+    }
+}
+
+pub fn terminal_root_cert_owned<'a>(leaf: &'a Cert, chain: &'a [Cert]) -> &'a Cert {
+    if leaf.subject_name() == leaf.issuer_name() {
+        leaf
+    } else {
+        chain.last().expect("non-empty issuer chain")
     }
 }
 

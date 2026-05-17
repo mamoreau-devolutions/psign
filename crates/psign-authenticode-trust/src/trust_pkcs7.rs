@@ -1,8 +1,10 @@
 //! Shared PKCS#7 Authenticode trust step (digest already known).
 
 use crate::anchor::{AnchorStore, cert_sha1_thumbprint};
-use crate::chain::{issuer_chain_excluding_leaf, merge_unique_certs, terminal_root_cert};
-use crate::policy::AuthenticodeTrustPolicy;
+use crate::chain::{
+    issuer_chain_excluding_leaf_online, merge_unique_certs, terminal_root_cert_owned,
+};
+use crate::policy::{AuthenticodeTrustPolicy, OnlineTrustOptions};
 use anyhow::{Result, anyhow};
 use cms::cert::CertificateChoices;
 use cms::signed_data::SignedData;
@@ -24,16 +26,6 @@ use x509_cert::ext::pkix::ExtendedKeyUsage;
 const EKU_EXTENSION_OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.37");
 /// **`id-kp-codeSigning`** (RFC 5280).
 const CODE_SIGNING_EKU_OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.5.5.7.3.3");
-
-fn x509_name_der_equal(a: &x509_cert::name::Name, b: &x509_cert::name::Name) -> bool {
-    let Ok(da) = a.to_der() else {
-        return false;
-    };
-    let Ok(db) = b.to_der() else {
-        return false;
-    };
-    da == db
-}
 
 fn x509_cert_has_code_signing_eku(cert: &Certificate) -> Result<bool> {
     let Some(exts) = &cert.tbs_certificate.extensions else {
@@ -118,6 +110,7 @@ fn verify_pkcs7_trust_cms_rsa_sha256_fallback(
     anchors: &AnchorStore,
     anchor_certs: &[Cert],
     policy: &AuthenticodeTrustPolicy,
+    online: &OnlineTrustOptions,
     verification_instant: &UtcDate,
     verbose_chain: bool,
 ) -> Result<()> {
@@ -164,7 +157,7 @@ fn verify_pkcs7_trust_cms_rsa_sha256_fallback(
     }
 
     let embedded_certs = signed_data_embedded_picky_certs(&sd)?;
-    let merged = merge_unique_certs(anchor_certs.to_vec(), embedded_certs.clone())?;
+    let mut merged = merge_unique_certs(anchor_certs.to_vec(), embedded_certs.clone())?;
 
     let leaf_der = x509_leaf
         .to_der()
@@ -181,43 +174,9 @@ fn verify_pkcs7_trust_cms_rsa_sha256_fallback(
         .cloned()
         .unwrap_or(leaf_from_x509);
 
-    let mut chain_vec: Vec<&Cert> = Vec::new();
-    let mut cur_der = x509_leaf
-        .to_der()
-        .map_err(|e| anyhow!("encode leaf certificate (x509): {e}"))?;
-    loop {
-        let cur = Certificate::from_der(&cur_der)
-            .map_err(|e| anyhow!("x509 walk current certificate: {e}"))?;
-        let issuer = &cur.tbs_certificate.issuer;
-        let subject = &cur.tbs_certificate.subject;
-        if x509_name_der_equal(issuer, subject) {
-            break;
-        }
-        let parent: &Cert = merged
-            .iter()
-            .find(|c| {
-                let Ok(d) = c.to_der() else {
-                    return false;
-                };
-                let Ok(xc) = Certificate::from_der(&d) else {
-                    return false;
-                };
-                x509_name_der_equal(&xc.tbs_certificate.subject, issuer)
-            })
-            .ok_or_else(|| {
-                anyhow!("CMS fallback: could not resolve issuer certificate for subject {issuer:?}")
-            })?;
-        chain_vec.push(parent);
-        cur_der = parent
-            .to_der()
-            .map_err(|e| anyhow!("encode issuer certificate: {e}"))?;
-        if chain_vec.len() > 32 {
-            return Err(anyhow!(
-                "CMS fallback: certificate chain too long (possible loop) (PKCS#7 {pkcs7_index})"
-            ));
-        }
-    }
-    let root = terminal_root_cert(&leaf, &chain_vec);
+    let chain_owned = issuer_chain_excluding_leaf_online(&leaf, &mut merged, online)?;
+    let chain_vec: Vec<&Cert> = chain_owned.iter().collect();
+    let root = terminal_root_cert_owned(&leaf, &chain_owned);
 
     let root_thumb = cert_sha1_thumbprint(root)?;
     if !anchors.contains_thumbprint(&root_thumb) {
@@ -227,6 +186,7 @@ fn verify_pkcs7_trust_cms_rsa_sha256_fallback(
             root_thumb[1]
         ));
     }
+    crate::online::check_revocation_chain(&leaf, &chain_owned, online)?;
 
     verify_trust_chain_verbose(
         pkcs7_index,
@@ -251,6 +211,7 @@ pub fn verify_authenticode_pkcs7_trust(
     anchors: &AnchorStore,
     anchor_certs: &[Cert],
     policy: &AuthenticodeTrustPolicy,
+    online: &OnlineTrustOptions,
     verification_instant: &UtcDate,
     verbose_chain: bool,
 ) -> Result<()> {
@@ -269,6 +230,7 @@ pub fn verify_authenticode_pkcs7_trust(
                 anchors,
                 anchor_certs,
                 policy,
+                online,
                 verification_instant,
                 verbose_chain,
             );
@@ -296,14 +258,16 @@ pub fn verify_authenticode_pkcs7_trust(
     }
 
     let embedded = picky_sig.0.decode_certificates();
-    let merged = merge_unique_certs(embedded, anchor_certs.iter().cloned())?;
+    let mut merged = merge_unique_certs(embedded, anchor_certs.iter().cloned())?;
 
     let leaf = picky_sig
         .signing_certificate(&merged)
         .map_err(|e| anyhow!("resolve signing certificate: {e}"))?;
 
-    let chain_vec = issuer_chain_excluding_leaf(leaf, &merged)?;
-    let root = terminal_root_cert(leaf, &chain_vec);
+    let leaf = leaf.clone();
+    let chain_owned = issuer_chain_excluding_leaf_online(&leaf, &mut merged, online)?;
+    let chain_vec: Vec<&Cert> = chain_owned.iter().collect();
+    let root = terminal_root_cert_owned(&leaf, &chain_owned);
 
     let root_thumb = cert_sha1_thumbprint(root)?;
     if !anchors.contains_thumbprint(&root_thumb) {
@@ -313,10 +277,11 @@ pub fn verify_authenticode_pkcs7_trust(
             root_thumb[1]
         ));
     }
+    crate::online::check_revocation_chain(&leaf, &chain_owned, online)?;
 
     verify_trust_chain_verbose(
         pkcs7_index,
-        leaf,
+        &leaf,
         &chain_vec,
         root,
         &root_thumb,
@@ -334,6 +299,7 @@ pub fn verify_pkcs9_message_digest_pkcs7_trust(
     anchors: &AnchorStore,
     anchor_certs: &[Cert],
     policy: &AuthenticodeTrustPolicy,
+    online: &OnlineTrustOptions,
     verification_instant: &UtcDate,
     verbose_chain: bool,
 ) -> Result<()> {
@@ -346,6 +312,7 @@ pub fn verify_pkcs9_message_digest_pkcs7_trust(
         anchors,
         anchor_certs,
         policy,
+        online,
         verification_instant,
         verbose_chain,
     )

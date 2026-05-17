@@ -8,7 +8,9 @@ use der::{Decode, Encode};
 use rand::rngs::OsRng;
 use rsa::RsaPrivateKey;
 use rsa::pkcs1v15::SigningKey;
-use rsa::signature::Keypair;
+use rsa::pkcs8::EncodePrivateKey;
+use rsa::signature::{Keypair, SignatureEncoding, Signer};
+use sha1::Sha1;
 use sha2::{Digest as _, Sha256};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -27,10 +29,18 @@ use x509_cert::time::Validity;
 
 const OID_TSTINFO: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.9.16.1.4");
 const OID_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.1");
+const OID_CODE_SIGNING: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.5.5.7.3.3");
 const OID_TIME_STAMPING: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.5.5.7.3.8");
 const OID_SIGNING_CERTIFICATE_V2: ObjectIdentifier =
     ObjectIdentifier::new_unwrap("1.2.840.113549.1.9.16.2.47");
 const DEFAULT_POLICY_OID: &str = "1.3.6.1.4.1.311.97.99.1";
+const SHA256_WITH_RSA_ENCRYPTION_DER: &[u8] = &[
+    0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x0b, 0x05, 0x00,
+];
+const SHA1_ALGORITHM_IDENTIFIER_DER: &[u8] = &[
+    0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00,
+];
+const OID_OCSP_BASIC: &str = "1.3.6.1.5.5.7.48.1.1";
 
 #[derive(Parser, Debug)]
 #[command(name = "psign-server", version, about = "Local psign test services")]
@@ -43,6 +53,8 @@ struct Cli {
 enum Command {
     /// Serve a local RFC 3161 timestamp authority for deterministic tests.
     TimestampServer(TimestampServerArgs),
+    /// Serve local code-signing PKI material for online certificate feature tests.
+    PkiServer(PkiServerArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -70,11 +82,43 @@ struct TimestampServerArgs {
     max_requests: u64,
 }
 
+#[derive(Parser, Debug)]
+struct PkiServerArgs {
+    /// Address to bind, for example 127.0.0.1:0 for an ephemeral port.
+    #[arg(long, default_value = "127.0.0.1:0")]
+    listen: String,
+    /// Write the generated root certificate as DER for local trust-anchor setup.
+    #[arg(long, value_name = "PATH")]
+    root_cert_output: Option<PathBuf>,
+    /// Write the generated code-signing leaf certificate as DER.
+    #[arg(long, value_name = "PATH")]
+    leaf_cert_output: Option<PathBuf>,
+    /// Write the generated code-signing leaf private key as unencrypted PKCS#8 DER.
+    #[arg(long, value_name = "PATH")]
+    leaf_key_output: Option<PathBuf>,
+    /// Include the generated code-signing leaf serial in the served CRL.
+    #[arg(long)]
+    crl_revoke_leaf: bool,
+    /// OCSP certificate status to return for the generated code-signing leaf.
+    #[arg(long, value_enum, default_value_t = PkiOcspStatus::Good)]
+    ocsp_status: PkiOcspStatus,
+    /// Exit after serving this many requests. Zero means run until interrupted.
+    #[arg(long, default_value_t = 0)]
+    max_requests: u64,
+}
+
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum ServerStatus {
     Granted,
     Rejection,
     Waiting,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum PkiOcspStatus {
+    Good,
+    Revoked,
+    Unknown,
 }
 
 impl ServerStatus {
@@ -127,6 +171,7 @@ fn main() {
 fn run() -> Result<()> {
     match Cli::parse().command {
         Command::TimestampServer(args) => run_timestamp_server(args),
+        Command::PkiServer(args) => run_pki_server(args),
     }
 }
 
@@ -178,11 +223,21 @@ fn handle_client(
         .set_read_timeout(Some(Duration::from_secs(10)))
         .context("set read timeout")?;
     let request = read_http_request(&mut stream)?;
+    if request.method != "POST" {
+        return write_http_response(
+            &mut stream,
+            405,
+            "Method Not Allowed",
+            "text/plain",
+            b"timestamp server expects POST",
+        );
+    }
     if matches!(args.response_mode, ResponseMode::HttpError) {
         return write_http_response(
             &mut stream,
             500,
             "Internal Server Error",
+            "text/plain",
             b"psign-server configured HTTP error",
         );
     }
@@ -220,10 +275,18 @@ fn handle_client(
         }
         ResponseMode::HttpError => unreachable!("handled before TimeStampResp construction"),
     };
-    write_http_response(&mut stream, 200, "OK", &response_der)
+    write_http_response(
+        &mut stream,
+        200,
+        "OK",
+        "application/timestamp-reply",
+        &response_der,
+    )
 }
 
 struct HttpRequest {
+    method: String,
+    path: String,
     body: Vec<u8>,
 }
 
@@ -247,9 +310,19 @@ fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest> {
     }
 
     let headers = std::str::from_utf8(&buf[..header_end]).context("HTTP headers are not UTF-8")?;
-    if !headers.starts_with("POST ") {
-        return Err(anyhow!("timestamp server expects POST"));
-    }
+    let request_line = headers
+        .lines()
+        .next()
+        .ok_or_else(|| anyhow!("missing HTTP request line"))?;
+    let mut request_parts = request_line.split_whitespace();
+    let method = request_parts
+        .next()
+        .ok_or_else(|| anyhow!("missing HTTP method"))?
+        .to_string();
+    let path = request_parts
+        .next()
+        .ok_or_else(|| anyhow!("missing HTTP path"))?
+        .to_string();
     let content_len = headers
         .lines()
         .find_map(|line| {
@@ -258,7 +331,7 @@ fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest> {
                 .then(|| value.trim().parse::<usize>().ok())
                 .flatten()
         })
-        .ok_or_else(|| anyhow!("missing Content-Length"))?;
+        .unwrap_or(0);
     let body_start = header_end + 4;
     while buf.len() < body_start + content_len {
         let n = stream.read(&mut tmp).context("read HTTP body")?;
@@ -268,6 +341,8 @@ fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest> {
         buf.extend_from_slice(&tmp[..n]);
     }
     Ok(HttpRequest {
+        method,
+        path,
         body: buf[body_start..body_start + content_len].to_vec(),
     })
 }
@@ -280,15 +355,325 @@ fn write_http_response(
     stream: &mut TcpStream,
     status: u16,
     reason: &str,
+    content_type: &str,
     body: &[u8],
 ) -> Result<()> {
     write!(
         stream,
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/timestamp-reply\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     )
     .context("write HTTP response headers")?;
     stream.write_all(body).context("write HTTP response body")
+}
+
+struct PkiAuthority {
+    root_cert: Certificate,
+    leaf_cert: Certificate,
+    leaf_key_der: Vec<u8>,
+    crl_der: Vec<u8>,
+    ocsp_der: Vec<u8>,
+}
+
+fn run_pki_server(args: PkiServerArgs) -> Result<()> {
+    let listener =
+        TcpListener::bind(&args.listen).with_context(|| format!("bind {}", args.listen))?;
+    let local = listener.local_addr().context("read listener address")?;
+    let pki = PkiAuthority::new(args.crl_revoke_leaf, args.ocsp_status)?;
+
+    if let Some(path) = &args.root_cert_output {
+        std::fs::write(
+            path,
+            pki.root_cert
+                .to_der()
+                .context("encode generated PKI root certificate")?,
+        )
+        .with_context(|| format!("write generated PKI root certificate {}", path.display()))?;
+    }
+    if let Some(path) = &args.leaf_cert_output {
+        std::fs::write(
+            path,
+            pki.leaf_cert
+                .to_der()
+                .context("encode generated PKI leaf certificate")?,
+        )
+        .with_context(|| format!("write generated PKI leaf certificate {}", path.display()))?;
+    }
+    if let Some(path) = &args.leaf_key_output {
+        std::fs::write(path, &pki.leaf_key_der)
+            .with_context(|| format!("write generated PKI leaf private key {}", path.display()))?;
+    }
+
+    println!("psign-server pki-server listening on http://{local}/");
+    println!("psign-server pki-server root http://{local}/root.der");
+    println!("psign-server pki-server issuer http://{local}/issuer.der");
+    println!("psign-server pki-server leaf http://{local}/leaf.der");
+    println!("psign-server pki-server crl http://{local}/crl.der");
+    println!("psign-server pki-server ocsp http://{local}/ocsp");
+    std::io::stdout().flush().ok();
+
+    for (served, stream) in listener.incoming().enumerate() {
+        let stream = stream.context("accept HTTP client")?;
+        if let Err(e) = handle_pki_client(stream, &pki) {
+            eprintln!("request failed: {e:#}");
+        }
+        if args.max_requests != 0 && (served as u64 + 1) >= args.max_requests {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn handle_pki_client(mut stream: TcpStream, pki: &PkiAuthority) -> Result<()> {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .context("set read timeout")?;
+    let request = read_http_request(&mut stream)?;
+    match (request.method.as_str(), request.path.as_str()) {
+        ("GET", "/" | "/health") => {
+            write_http_response(&mut stream, 200, "OK", "text/plain", b"ok\n")
+        }
+        ("GET", "/root.der" | "/issuer.der") => write_http_response(
+            &mut stream,
+            200,
+            "OK",
+            "application/pkix-cert",
+            &pki.root_cert
+                .to_der()
+                .context("encode PKI root certificate")?,
+        ),
+        ("GET", "/leaf.der") => write_http_response(
+            &mut stream,
+            200,
+            "OK",
+            "application/pkix-cert",
+            &pki.leaf_cert
+                .to_der()
+                .context("encode PKI leaf certificate")?,
+        ),
+        ("GET", "/crl.der") => {
+            write_http_response(&mut stream, 200, "OK", "application/pkix-crl", &pki.crl_der)
+        }
+        ("POST", "/ocsp") => write_http_response(
+            &mut stream,
+            200,
+            "OK",
+            "application/ocsp-response",
+            &pki.ocsp_der,
+        ),
+        _ => write_http_response(&mut stream, 404, "Not Found", "text/plain", b"not found\n"),
+    }
+}
+
+impl PkiAuthority {
+    fn new(revoke_leaf: bool, ocsp_status: PkiOcspStatus) -> Result<Self> {
+        let root_private_key =
+            RsaPrivateKey::new(&mut OsRng, 2048).context("generate PKI root RSA key")?;
+        let root_key = SigningKey::<Sha256>::new(root_private_key);
+        let root_subject = Name::from_str("CN=psign local online certificate test root CA")
+            .context("PKI root subject")?;
+        let root_spki = SubjectPublicKeyInfoOwned::from_key(root_key.verifying_key())
+            .context("PKI root subject public key info")?;
+        let root_builder = CertificateBuilder::new(
+            Profile::Root,
+            SerialNumber::from(10u32),
+            Validity::from_now(Duration::from_secs(86_400 * 365)).context("PKI root validity")?,
+            root_subject.clone(),
+            root_spki,
+            &root_key,
+        )
+        .context("PKI root certificate builder")?;
+        let root_cert = root_builder
+            .build::<rsa::pkcs1v15::Signature>()
+            .context("self-sign PKI root certificate")?;
+
+        let leaf_private_key =
+            RsaPrivateKey::new(&mut OsRng, 2048).context("generate code-signing leaf RSA key")?;
+        let leaf_key_der = leaf_private_key
+            .to_pkcs8_der()
+            .context("encode code-signing leaf private key")?
+            .as_bytes()
+            .to_vec();
+        let leaf_key = SigningKey::<Sha256>::new(leaf_private_key);
+        let leaf_subject = Name::from_str("CN=psign local online code signing leaf")
+            .context("PKI leaf subject")?;
+        let leaf_spki = SubjectPublicKeyInfoOwned::from_key(leaf_key.verifying_key())
+            .context("PKI leaf subject public key info")?;
+        let mut leaf_builder = CertificateBuilder::new(
+            Profile::Leaf {
+                issuer: root_subject,
+                enable_key_agreement: false,
+                enable_key_encipherment: false,
+            },
+            SerialNumber::from(11u32),
+            Validity::from_now(Duration::from_secs(86_400 * 365)).context("PKI leaf validity")?,
+            leaf_subject,
+            leaf_spki,
+            &root_key,
+        )
+        .context("PKI leaf certificate builder")?;
+        leaf_builder
+            .add_extension(&ExtendedKeyUsage(vec![OID_CODE_SIGNING]))
+            .context("add code-signing EKU")?;
+        let leaf_cert = leaf_builder
+            .build::<rsa::pkcs1v15::Signature>()
+            .context("sign PKI leaf certificate")?;
+        let crl_der = build_crl_der(&root_cert, &root_key, revoke_leaf.then_some(&leaf_cert))?;
+        let ocsp_der = build_ocsp_response_der(&root_cert, &root_key, &leaf_cert, ocsp_status)?;
+
+        Ok(Self {
+            root_cert,
+            leaf_cert,
+            leaf_key_der,
+            crl_der,
+            ocsp_der,
+        })
+    }
+}
+
+fn build_ocsp_response_der(
+    issuer: &Certificate,
+    issuer_key: &SigningKey<Sha256>,
+    leaf: &Certificate,
+    status: PkiOcspStatus,
+) -> Result<Vec<u8>> {
+    let mut cert_id_body = Vec::new();
+    cert_id_body.extend_from_slice(SHA1_ALGORITHM_IDENTIFIER_DER);
+    cert_id_body.extend_from_slice(&octet_string_der(&Sha1::digest(
+        issuer
+            .tbs_certificate
+            .subject
+            .to_der()
+            .context("encode OCSP issuer subject")?,
+    )));
+    cert_id_body.extend_from_slice(&octet_string_der(&Sha1::digest(
+        issuer
+            .tbs_certificate
+            .subject_public_key_info
+            .subject_public_key
+            .raw_bytes(),
+    )));
+    cert_id_body.extend_from_slice(
+        &leaf
+            .tbs_certificate
+            .serial_number
+            .to_der()
+            .context("encode OCSP leaf serial")?,
+    );
+    let mut cert_id = Vec::new();
+    push_sequence(&mut cert_id, &cert_id_body);
+
+    let mut single_body = Vec::new();
+    single_body.extend_from_slice(&cert_id);
+    match status {
+        PkiOcspStatus::Good => push_tlv(&mut single_body, 0x80, &[]),
+        PkiOcspStatus::Revoked => {
+            let mut revoked = Vec::new();
+            push_generalized_time(&mut revoked, "20240101000000Z")?;
+            push_tlv(&mut single_body, 0xa1, &revoked);
+        }
+        PkiOcspStatus::Unknown => push_tlv(&mut single_body, 0x82, &[]),
+    }
+    push_generalized_time(&mut single_body, "20240101000000Z")?;
+    let mut next_update = Vec::new();
+    push_generalized_time(&mut next_update, "20490101000000Z")?;
+    push_tlv(&mut single_body, 0xa0, &next_update);
+    let mut single = Vec::new();
+    push_sequence(&mut single, &single_body);
+
+    let mut responses = Vec::new();
+    push_sequence(&mut responses, &single);
+
+    let mut response_data_body = Vec::new();
+    response_data_body.extend_from_slice(&context_constructed_der(
+        0xa1,
+        &issuer
+            .tbs_certificate
+            .subject
+            .to_der()
+            .context("encode OCSP responder name")?,
+    ));
+    push_generalized_time(&mut response_data_body, "20240101000000Z")?;
+    response_data_body.extend_from_slice(&responses);
+    let mut response_data = Vec::new();
+    push_sequence(&mut response_data, &response_data_body);
+
+    let sig = issuer_key.sign(&response_data).to_bytes();
+    let mut sig_bits = Vec::with_capacity(sig.len() + 1);
+    sig_bits.push(0);
+    sig_bits.extend_from_slice(&sig);
+
+    let mut basic_body = Vec::new();
+    basic_body.extend_from_slice(&response_data);
+    basic_body.extend_from_slice(SHA256_WITH_RSA_ENCRYPTION_DER);
+    push_tlv(&mut basic_body, 0x03, &sig_bits);
+    let mut basic = Vec::new();
+    push_sequence(&mut basic, &basic_body);
+
+    let mut response_bytes_body = Vec::new();
+    push_oid(&mut response_bytes_body, OID_OCSP_BASIC)?;
+    push_octet_string(&mut response_bytes_body, &basic);
+    let mut response_bytes = Vec::new();
+    push_sequence(&mut response_bytes, &response_bytes_body);
+
+    let mut ocsp_response_body = Vec::new();
+    push_tlv(&mut ocsp_response_body, 0x0a, &[0]);
+    push_tlv(&mut ocsp_response_body, 0xa0, &response_bytes);
+    let mut ocsp_response = Vec::new();
+    push_sequence(&mut ocsp_response, &ocsp_response_body);
+    Ok(ocsp_response)
+}
+
+fn build_crl_der(
+    issuer: &Certificate,
+    issuer_key: &SigningKey<Sha256>,
+    revoked_leaf: Option<&Certificate>,
+) -> Result<Vec<u8>> {
+    let mut tbs_body = Vec::new();
+    push_integer_u64(&mut tbs_body, 1);
+    tbs_body.extend_from_slice(SHA256_WITH_RSA_ENCRYPTION_DER);
+    tbs_body.extend_from_slice(
+        &issuer
+            .tbs_certificate
+            .subject
+            .to_der()
+            .context("encode CRL issuer subject")?,
+    );
+    push_utctime(&mut tbs_body, "240101000000Z");
+    push_utctime(&mut tbs_body, "490101000000Z");
+
+    if let Some(cert) = revoked_leaf {
+        let mut entry = Vec::new();
+        entry.extend_from_slice(
+            &cert
+                .tbs_certificate
+                .serial_number
+                .to_der()
+                .context("encode revoked certificate serial")?,
+        );
+        push_utctime(&mut entry, "240101000000Z");
+        let mut entry_seq = Vec::new();
+        push_sequence(&mut entry_seq, &entry);
+
+        let mut revoked = Vec::new();
+        revoked.extend_from_slice(&entry_seq);
+        push_sequence(&mut tbs_body, &revoked);
+    }
+
+    let mut tbs = Vec::new();
+    push_sequence(&mut tbs, &tbs_body);
+    let sig = issuer_key.sign(&tbs).to_bytes();
+    let mut sig_bits = Vec::with_capacity(sig.len() + 1);
+    sig_bits.push(0);
+    sig_bits.extend_from_slice(&sig);
+
+    let mut crl_body = Vec::new();
+    crl_body.extend_from_slice(&tbs);
+    crl_body.extend_from_slice(SHA256_WITH_RSA_ENCRYPTION_DER);
+    push_tlv(&mut crl_body, 0x03, &sig_bits);
+    let mut crl = Vec::new();
+    push_sequence(&mut crl, &crl_body);
+    Ok(crl)
 }
 
 impl TimestampAuthority {
@@ -625,6 +1010,18 @@ fn push_octet_string(out: &mut Vec<u8>, body: &[u8]) {
     push_tlv(out, 0x04, body);
 }
 
+fn octet_string_der(body: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    push_octet_string(&mut out, body);
+    out
+}
+
+fn context_constructed_der(tag: u8, body: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    push_tlv(&mut out, tag, body);
+    out
+}
+
 fn push_utf8_string(out: &mut Vec<u8>, body: &str) {
     push_tlv(out, 0x0c, body.as_bytes());
 }
@@ -633,6 +1030,10 @@ fn push_generalized_time(out: &mut Vec<u8>, value: &str) -> Result<()> {
     validate_generalized_time_z(value)?;
     push_tlv(out, 0x18, value.as_bytes());
     Ok(())
+}
+
+fn push_utctime(out: &mut Vec<u8>, value: &str) {
+    push_tlv(out, 0x17, value.as_bytes());
 }
 
 fn validate_generalized_time_z(value: &str) -> Result<()> {

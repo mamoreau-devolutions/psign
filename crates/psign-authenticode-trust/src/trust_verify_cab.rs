@@ -2,7 +2,7 @@
 
 use crate::trust_pkcs7::verify_authenticode_pkcs7_trust;
 use crate::trust_verify_pe::{TrustVerifyPeOptions, TrustVerifyPeReport, load_trust_material};
-use crate::verification_instant::resolve_verification_instant_for_pkcs7;
+use crate::verification_instant::resolve_verification_instant_for_pkcs7_with_trust;
 use anyhow::{Result, anyhow};
 use authenticode::AuthenticodeSignature;
 use psign_sip_digest::cab_digest::{
@@ -28,10 +28,14 @@ pub fn trust_verify_cab_bytes(
         ));
     }
 
-    let verification_instant = resolve_verification_instant_for_pkcs7(
+    let verification_instant = resolve_verification_instant_for_pkcs7_with_trust(
         pkcs7,
         &opts.policy,
         opts.verification_instant_override.as_ref(),
+        &anchors,
+        &anchor_certs,
+        &opts.online,
+        opts.verbose_chain,
     )?;
     verify_authenticode_pkcs7_trust(
         pkcs7,
@@ -40,6 +44,7 @@ pub fn trust_verify_cab_bytes(
         &anchors,
         &anchor_certs,
         &opts.policy,
+        &opts.online,
         &verification_instant,
         opts.verbose_chain,
     )?;
