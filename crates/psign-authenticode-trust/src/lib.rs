@@ -11,6 +11,7 @@ pub mod authroot_cab;
 pub mod authroot_ctl;
 pub mod chain;
 pub mod inspect;
+pub mod online;
 pub mod policy;
 pub mod rfc3161_extract;
 pub mod trust_pkcs7;

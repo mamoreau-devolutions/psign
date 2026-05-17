@@ -1016,6 +1016,28 @@ fn trust_verify_pe_succeeds_with_extracted_embedded_root_anchor() {
 }
 
 #[test]
+fn unified_verify_mode_portable_accepts_trusted_ca_without_os_store() {
+    let fixture = tiny32_fixture();
+    let bytes = std::fs::read(&fixture).expect("read fixture");
+    let root = pe_first_pkcs7_terminal_root(&bytes).expect("terminal root");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root_path = dir.path().join("root.cer");
+    std::fs::write(&root_path, root.to_der().expect("root DER")).expect("write anchor");
+
+    let mut cmd = Command::cargo_bin("psign-tool").unwrap();
+    cmd.arg("--mode")
+        .arg("portable")
+        .arg("verify")
+        .arg("--trusted-ca")
+        .arg(&root_path)
+        .args(["--as-of", "2023-07-01"])
+        .arg(&fixture);
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("trust-verify-pe: ok"));
+}
+
+#[test]
 fn trust_verify_pe_ok_with_prefer_timestamp_signing_time_and_as_of() {
     let fixture = tiny32_fixture();
     let bytes = std::fs::read(&fixture).expect("read fixture");
@@ -1036,10 +1058,10 @@ fn trust_verify_pe_ok_with_prefer_timestamp_signing_time_and_as_of() {
         .stdout(predicate::str::contains("trust-verify-pe: ok"));
 }
 
-/// **`tiny32.signed.efi`** PKCS#9 **`signing-time`** satisfies **`--require-valid-timestamp`**
-/// (no **`--as-of`** needed) when **`--prefer-timestamp-signing-time`** is set.
+/// **`--require-valid-timestamp`** now requires a cryptographically trusted RFC3161 token;
+/// PKCS#9 **`signing-time`** alone remains usable only for non-required instant selection.
 #[test]
-fn trust_verify_pe_ok_require_valid_timestamp_pkcs9_signing_time_on_tiny32() {
+fn trust_verify_pe_require_valid_timestamp_rejects_pkcs9_only_tiny32() {
     let fixture = tiny32_fixture();
     let bytes = std::fs::read(&fixture).expect("read fixture");
     let root = pe_first_pkcs7_terminal_root(&bytes).expect("terminal root");
@@ -1054,14 +1076,14 @@ fn trust_verify_pe_ok_require_valid_timestamp_pkcs9_signing_time_on_tiny32() {
         .arg("--prefer-timestamp-signing-time")
         .arg("--require-valid-timestamp")
         .arg(&fixture);
-    cmd.assert()
-        .success()
-        .stdout(predicate::str::contains("trust-verify-pe: ok"));
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "no cryptographically valid trusted RFC3161 timestamp token",
+    ));
 }
 
-/// Same PKCS#9 **`signing-time`** / **`--require-valid-timestamp`** behavior as **`tiny32`**, on **`tiny64.signed.efi`**.
+/// Same strict **`--require-valid-timestamp`** behavior as **`tiny32`**, on **`tiny64.signed.efi`**.
 #[test]
-fn trust_verify_pe_ok_require_valid_timestamp_pkcs9_signing_time_on_tiny64() {
+fn trust_verify_pe_require_valid_timestamp_rejects_pkcs9_only_tiny64() {
     let fixture = tiny64_fixture();
     let bytes = std::fs::read(&fixture).expect("read fixture");
     let root = pe_first_pkcs7_terminal_root(&bytes).expect("terminal root");
@@ -1076,9 +1098,9 @@ fn trust_verify_pe_ok_require_valid_timestamp_pkcs9_signing_time_on_tiny64() {
         .arg("--prefer-timestamp-signing-time")
         .arg("--require-valid-timestamp")
         .arg(&fixture);
-    cmd.assert()
-        .success()
-        .stdout(predicate::str::contains("trust-verify-pe: ok"));
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "no cryptographically valid trusted RFC3161 timestamp token",
+    ));
 }
 
 #[test]
@@ -2214,10 +2236,10 @@ fn portable_rfc3161_timestamp_resp_inspect_granted_with_token_prefix_hex() {
         ));
 }
 
-#[cfg(all(feature = "timestamp-server", feature = "timestamp-http"))]
+#[cfg(feature = "timestamp-server")]
 struct PsignServerGuard(std::process::Child);
 
-#[cfg(all(feature = "timestamp-server", feature = "timestamp-http"))]
+#[cfg(feature = "timestamp-server")]
 impl Drop for PsignServerGuard {
     fn drop(&mut self) {
         let _ = self.0.kill();
@@ -2227,13 +2249,21 @@ impl Drop for PsignServerGuard {
 
 #[cfg(all(feature = "timestamp-server", feature = "timestamp-http"))]
 fn spawn_psign_server(extra_args: &[&str]) -> (PsignServerGuard, String) {
+    spawn_psign_server_with_gen_time("20240102030405Z", extra_args)
+}
+
+#[cfg(all(feature = "timestamp-server", feature = "timestamp-http"))]
+fn spawn_psign_server_with_gen_time(
+    gen_time: &str,
+    extra_args: &[&str],
+) -> (PsignServerGuard, String) {
     let mut server_cmd = std::process::Command::new(assert_cmd::cargo::cargo_bin("psign-server"));
     server_cmd.args([
         "timestamp-server",
         "--listen",
         "127.0.0.1:0",
         "--gen-time",
-        "20240102030405Z",
+        gen_time,
         "--max-requests",
         "1",
     ]);
@@ -2251,6 +2281,107 @@ fn spawn_psign_server(extra_args: &[&str]) -> (PsignServerGuard, String) {
         .expect("listening URL")
         .to_string();
     (guard, url)
+}
+
+#[cfg(all(feature = "timestamp-server", feature = "timestamp-http"))]
+fn generalized_time_tomorrow_noon_utc() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time after unix epoch")
+        .as_secs();
+    let days = (now / 86_400) as i64 + 1;
+    let (year, month, day) = civil_from_unix_days(days);
+    format!("{year:04}{month:02}{day:02}120000Z")
+}
+
+#[cfg(all(feature = "timestamp-server", feature = "timestamp-http"))]
+fn civil_from_unix_days(days: i64) -> (i64, i64, i64) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let mut year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    year += if month <= 2 { 1 } else { 0 };
+    (year, month, day)
+}
+
+#[cfg(feature = "timestamp-server")]
+fn spawn_psign_pki_server(extra_args: &[&str]) -> (PsignServerGuard, String) {
+    spawn_psign_pki_server_requests(1, extra_args)
+}
+
+#[cfg(feature = "timestamp-server")]
+fn spawn_psign_pki_server_requests(
+    max_requests: u64,
+    extra_args: &[&str],
+) -> (PsignServerGuard, String) {
+    let mut server_cmd = std::process::Command::new(assert_cmd::cargo::cargo_bin("psign-server"));
+    let max_requests = max_requests.to_string();
+    server_cmd.args([
+        "pki-server",
+        "--listen",
+        "127.0.0.1:0",
+        "--max-requests",
+        max_requests.as_str(),
+    ]);
+    server_cmd.args(extra_args);
+    server_cmd.stdout(std::process::Stdio::piped());
+    server_cmd.stderr(std::process::Stdio::piped());
+    let mut guard = PsignServerGuard(server_cmd.spawn().expect("spawn psign-server"));
+    let stdout = guard.0.stdout.take().expect("server stdout");
+    let mut reader = std::io::BufReader::new(stdout);
+    let mut line = String::new();
+    std::io::BufRead::read_line(&mut reader, &mut line).expect("read listening line");
+    for _ in 0..5 {
+        let mut ignored = String::new();
+        std::io::BufRead::read_line(&mut reader, &mut ignored).expect("read endpoint line");
+    }
+    let url = line
+        .trim()
+        .strip_prefix("psign-server pki-server listening on ")
+        .expect("listening URL")
+        .to_string();
+    (guard, url)
+}
+
+#[cfg(feature = "timestamp-server")]
+fn http_get_bytes(url: &str) -> Vec<u8> {
+    use std::io::{Read, Write};
+    use std::net::TcpStream;
+
+    let without_scheme = url.strip_prefix("http://").expect("http URL");
+    let (authority, path) = without_scheme
+        .split_once('/')
+        .map(|(a, p)| (a, format!("/{p}")))
+        .unwrap_or((without_scheme, "/".to_string()));
+    let (host, port) = authority
+        .rsplit_once(':')
+        .map(|(h, p)| (h, p.parse::<u16>().expect("port")))
+        .unwrap_or((authority, 80));
+    let mut stream = TcpStream::connect((host, port)).expect("connect test HTTP server");
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\r\n"
+    )
+    .expect("write HTTP request");
+    let mut response = Vec::new();
+    stream
+        .read_to_end(&mut response)
+        .expect("read HTTP response");
+    let header_end = response
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .expect("HTTP header end");
+    let headers = std::str::from_utf8(&response[..header_end]).expect("headers UTF-8");
+    assert!(
+        headers.starts_with("HTTP/1.1 200 OK"),
+        "unexpected response headers: {headers}"
+    );
+    response[header_end + 4..].to_vec()
 }
 
 #[cfg(all(feature = "timestamp-server", feature = "timestamp-http"))]
@@ -2272,6 +2403,314 @@ fn post_timestamp_request(
         resp_path.to_str().unwrap(),
     ]);
     post.assert()
+}
+
+#[cfg(all(feature = "timestamp-server", feature = "timestamp-http"))]
+fn timestamp_detached_pkcs7(pkcs7_der: &[u8], tsa_url: &str, resp_path: &Path) -> Vec<u8> {
+    use cms::signed_data::UnsignedAttributes;
+    use der::asn1::{Any, ObjectIdentifier, OctetStringRef, SetOfVec};
+    use psign_sip_digest::timestamp::parse_time_stamp_resp_der;
+    use x509_cert::attr::Attribute;
+
+    const ID_AA_TIME_STAMP_TOKEN: ObjectIdentifier =
+        ObjectIdentifier::new_unwrap("1.2.840.113549.1.9.16.2.14");
+
+    let sd = pkcs7::parse_pkcs7_signed_data_der(pkcs7_der).expect("parse detached PKCS7");
+    let si0 = sd
+        .signer_infos
+        .0
+        .as_slice()
+        .first()
+        .expect("SignerInfo")
+        .clone();
+    let digest_hex = hex_lower(&Sha256::digest(si0.signature.as_bytes()));
+    post_timestamp_request(tsa_url, &digest_hex, resp_path).success();
+    let resp = std::fs::read(resp_path).expect("read timestamp response");
+    let parsed = parse_time_stamp_resp_der(&resp).expect("parse timestamp response");
+    let token = parsed.time_stamp_token.expect("timestamp response token");
+
+    let mut vals = SetOfVec::new();
+    vals.insert(
+        Any::new(
+            der::Tag::OctetString,
+            OctetStringRef::new(token)
+                .expect("timestamp token octets")
+                .as_bytes(),
+        )
+        .expect("timestamp token attribute value"),
+    )
+    .expect("timestamp token value insert");
+    let attr = Attribute {
+        oid: ID_AA_TIME_STAMP_TOKEN,
+        values: vals,
+    };
+    let mut attrs: Vec<Attribute> = si0
+        .unsigned_attrs
+        .as_ref()
+        .map(|a| a.iter().cloned().collect())
+        .unwrap_or_default();
+    attrs.push(attr);
+    let mut si = si0;
+    si.unsigned_attrs =
+        Some(UnsignedAttributes::try_from(attrs).expect("unsigned attrs canonicalization"));
+    let updated = pkcs7::signed_data_replace_signer_info_at(&sd, 0, si).expect("replace signer");
+    pkcs7::encode_pkcs7_content_info_signed_data_der(&updated).expect("encode timestamped PKCS7")
+}
+
+#[cfg(feature = "timestamp-server")]
+#[test]
+fn psign_server_pki_server_serves_certificates_for_non_admin_tests() {
+    let dir = tempfile::tempdir().unwrap();
+    let root_path = dir.path().join("root.der");
+    let leaf_path = dir.path().join("leaf.der");
+    let root_arg = root_path.to_str().unwrap();
+    let leaf_arg = leaf_path.to_str().unwrap();
+    let (mut guard, url) = spawn_psign_pki_server(&[
+        "--root-cert-output",
+        root_arg,
+        "--leaf-cert-output",
+        leaf_arg,
+    ]);
+
+    let root_from_http = http_get_bytes(&format!("{url}root.der"));
+    let status = guard.0.wait().expect("server exit");
+    assert!(status.success(), "server failed with {status}");
+
+    let root_from_file = std::fs::read(&root_path).expect("read root output");
+    let leaf_from_file = std::fs::read(&leaf_path).expect("read leaf output");
+    assert_eq!(root_from_http, root_from_file);
+    assert!(root_from_file.starts_with(&[0x30]));
+    assert!(leaf_from_file.starts_with(&[0x30]));
+}
+
+#[cfg(feature = "timestamp-server")]
+#[test]
+fn psign_server_pki_server_serves_signed_crls() {
+    let (mut guard, url) = spawn_psign_pki_server(&[]);
+    let crl = http_get_bytes(&format!("{url}crl.der"));
+    let status = guard.0.wait().expect("server exit");
+    assert!(status.success(), "server failed with {status}");
+    assert!(crl.starts_with(&[0x30]), "CRL should be DER sequence");
+
+    let (mut guard, url) = spawn_psign_pki_server(&["--crl-revoke-leaf"]);
+    let revoked_crl = http_get_bytes(&format!("{url}crl.der"));
+    let status = guard.0.wait().expect("server exit");
+    assert!(status.success(), "server failed with {status}");
+    assert!(
+        revoked_crl.len() > crl.len(),
+        "revoked CRL should include a revoked certificate entry"
+    );
+}
+
+#[cfg(feature = "timestamp-server")]
+fn pki_signed_rdp_material(
+    dir: &Path,
+    prefix: &str,
+    extra_args: &[&str],
+) -> (PsignServerGuard, String, PathBuf, PathBuf, PathBuf) {
+    let root_path = dir.join(format!("{prefix}-root.der"));
+    let leaf_path = dir.join(format!("{prefix}-leaf.der"));
+    let key_path = dir.join(format!("{prefix}-leaf.key"));
+    let mut args = vec![
+        "--root-cert-output",
+        root_path.to_str().unwrap(),
+        "--leaf-cert-output",
+        leaf_path.to_str().unwrap(),
+        "--leaf-key-output",
+        key_path.to_str().unwrap(),
+    ];
+    args.extend_from_slice(extra_args);
+    let (guard, url) = spawn_psign_pki_server_requests(1, &args);
+
+    let records = rdp::parse_records("full address:s:localhost\r\n");
+    let prepared = rdp::prepare_for_signature(records).expect("prepare RDP");
+    let leaf_cert = rdp::parse_certificate(&std::fs::read(&leaf_path).expect("read leaf cert"))
+        .expect("parse leaf cert");
+    let root_cert = rdp::parse_certificate(&std::fs::read(&root_path).expect("read root cert"))
+        .expect("parse root cert");
+    let leaf_key = rdp::parse_rsa_private_key(&std::fs::read(&key_path).expect("read leaf key"))
+        .expect("parse leaf key");
+    let pkcs7 = rdp::sign_secure_blob_rsa_sha256(
+        &prepared.secure_blob,
+        leaf_cert,
+        vec![root_cert],
+        leaf_key,
+    )
+    .expect("sign RDP secure blob");
+    let sig_path = dir.join(format!("{prefix}-sig.p7"));
+    let content_path = dir.join(format!("{prefix}-content.bin"));
+    std::fs::write(&sig_path, pkcs7).expect("write PKCS7");
+    std::fs::write(&content_path, prepared.secure_blob).expect("write detached content");
+    (guard, url, root_path, content_path, sig_path)
+}
+
+#[cfg(feature = "timestamp-server")]
+#[test]
+fn portable_trust_verify_detached_uses_pki_server_crl_without_admin_trust_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut guard, url, root_path, content_path, sig_path) =
+        pki_signed_rdp_material(dir.path(), "clear", &[]);
+    let mut verify = Command::cargo_bin("psign-tool").unwrap();
+    verify
+        .arg("portable")
+        .arg("trust-verify-detached")
+        .arg(&content_path)
+        .arg(&sig_path)
+        .arg("--trusted-ca")
+        .arg(&root_path)
+        .arg("--revocation-mode")
+        .arg("require")
+        .arg("--crl-url-override")
+        .arg(format!("{url}crl.der"));
+    verify
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("trust-verify-detached: ok"));
+    let status = guard.0.wait().expect("server exit");
+    assert!(status.success(), "server failed with {status}");
+
+    let (mut guard, url, root_path, content_path, sig_path) =
+        pki_signed_rdp_material(dir.path(), "revoked", &["--crl-revoke-leaf"]);
+    let mut verify = Command::cargo_bin("psign-tool").unwrap();
+    verify
+        .arg("portable")
+        .arg("trust-verify-detached")
+        .arg(&content_path)
+        .arg(&sig_path)
+        .arg("--trusted-ca")
+        .arg(&root_path)
+        .arg("--revocation-mode")
+        .arg("require")
+        .arg("--crl-url-override")
+        .arg(format!("{url}crl.der"));
+    verify
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("certificate is revoked"));
+    let status = guard.0.wait().expect("server exit");
+    assert!(status.success(), "server failed with {status}");
+}
+
+#[cfg(feature = "timestamp-server")]
+#[test]
+fn portable_trust_verify_detached_uses_pki_server_ocsp_without_admin_trust_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut guard, url, root_path, content_path, sig_path) =
+        pki_signed_rdp_material(dir.path(), "ocsp-good", &["--ocsp-status", "good"]);
+    let mut verify = Command::cargo_bin("psign-tool").unwrap();
+    verify
+        .arg("portable")
+        .arg("trust-verify-detached")
+        .arg(&content_path)
+        .arg(&sig_path)
+        .arg("--trusted-ca")
+        .arg(&root_path)
+        .arg("--revocation-mode")
+        .arg("require")
+        .arg("--online-ocsp")
+        .arg("--ocsp-url-override")
+        .arg(format!("{url}ocsp"));
+    verify
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("trust-verify-detached: ok"));
+    let status = guard.0.wait().expect("server exit");
+    assert!(status.success(), "server failed with {status}");
+
+    let (mut guard, url, root_path, content_path, sig_path) =
+        pki_signed_rdp_material(dir.path(), "ocsp-revoked", &["--ocsp-status", "revoked"]);
+    let mut verify = Command::cargo_bin("psign-tool").unwrap();
+    verify
+        .arg("portable")
+        .arg("trust-verify-detached")
+        .arg(&content_path)
+        .arg(&sig_path)
+        .arg("--trusted-ca")
+        .arg(&root_path)
+        .arg("--revocation-mode")
+        .arg("require")
+        .arg("--online-ocsp")
+        .arg("--ocsp-url-override")
+        .arg(format!("{url}ocsp"));
+    verify
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("OCSP status is revoked"));
+    let status = guard.0.wait().expect("server exit");
+    assert!(status.success(), "server failed with {status}");
+}
+
+#[cfg(all(feature = "timestamp-server", feature = "timestamp-http"))]
+#[test]
+fn portable_trust_verify_detached_requires_trusted_rfc3161_timestamp_without_admin_trust_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_pki_guard, _pki_url, code_root_path, content_path, sig_path) =
+        pki_signed_rdp_material(dir.path(), "timestamp", &[]);
+    let original_pkcs7 = std::fs::read(&sig_path).expect("read detached PKCS7");
+    let gen_time = generalized_time_tomorrow_noon_utc();
+
+    let tsa_root_path = dir.path().join("tsa-root.der");
+    let resp_path = dir.path().join("tsa-response.der");
+    let (mut tsa_guard, tsa_url) = spawn_psign_server_with_gen_time(
+        &gen_time,
+        &["--cert-output", tsa_root_path.to_str().unwrap()],
+    );
+    let timestamped = timestamp_detached_pkcs7(&original_pkcs7, &tsa_url, &resp_path);
+    let status = tsa_guard.0.wait().expect("server exit");
+    assert!(status.success(), "server failed with {status}");
+    let timestamped_path = dir.path().join("timestamped-sig.p7");
+    std::fs::write(&timestamped_path, timestamped).expect("write timestamped PKCS7");
+
+    let mut verify = Command::cargo_bin("psign-tool").unwrap();
+    verify
+        .arg("portable")
+        .arg("trust-verify-detached")
+        .arg(&content_path)
+        .arg(&timestamped_path)
+        .arg("--trusted-ca")
+        .arg(&code_root_path)
+        .arg("--trusted-ca")
+        .arg(&tsa_root_path)
+        .arg("--prefer-timestamp-signing-time")
+        .arg("--require-valid-timestamp");
+    verify
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("trust-verify-detached: ok"));
+
+    let bad_tsa_root_path = dir.path().join("bad-tsa-root.der");
+    let bad_resp_path = dir.path().join("bad-tsa-response.der");
+    let (mut bad_tsa_guard, bad_tsa_url) = spawn_psign_server_with_gen_time(
+        &gen_time,
+        &[
+            "--cert-output",
+            bad_tsa_root_path.to_str().unwrap(),
+            "--response-mode",
+            "mismatched-imprint",
+        ],
+    );
+    let bad_timestamped = timestamp_detached_pkcs7(&original_pkcs7, &bad_tsa_url, &bad_resp_path);
+    let status = bad_tsa_guard.0.wait().expect("server exit");
+    assert!(status.success(), "server failed with {status}");
+    let bad_timestamped_path = dir.path().join("bad-timestamped-sig.p7");
+    std::fs::write(&bad_timestamped_path, bad_timestamped).expect("write bad timestamped PKCS7");
+
+    let mut verify_bad = Command::cargo_bin("psign-tool").unwrap();
+    verify_bad
+        .arg("portable")
+        .arg("trust-verify-detached")
+        .arg(&content_path)
+        .arg(&bad_timestamped_path)
+        .arg("--trusted-ca")
+        .arg(&code_root_path)
+        .arg("--trusted-ca")
+        .arg(&bad_tsa_root_path)
+        .arg("--prefer-timestamp-signing-time")
+        .arg("--require-valid-timestamp");
+    verify_bad
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("MessageImprint does not match"));
 }
 
 #[cfg(all(feature = "timestamp-server", feature = "timestamp-http"))]

@@ -7,7 +7,7 @@ Windows resolves Authenticode chains against machine/user certificate stores plu
 1. On a Windows machine with updates, sync roots you trust, for example:
    - **`certutil -generateSSTFromWU roots.sst`** then export, or  
    - Copy known **`.crt`** / **`.cer`** files into a folder (repo-local or CI cache).
-2. Pass **`--anchor-dir /path/to/certs`** to **`trust-verify-pe`**.  
+2. Pass **`--anchor-dir /path/to/certs`** to **`trust-verify-pe`**, or pass individual files with repeatable **`--trusted-ca /path/to/root.cer`**.  
    Non-recursive: only **`*.crt`**, **`*.cer`**, **`*.pem`** in that directory are loaded.
 3. Thumbprints are **SHA-1 over full certificate DER** (same convention as many Windows tools), not TBSCertificate-only.
 
@@ -35,6 +35,22 @@ psign-tool portable trust-verify-pe \
   ./signed.exe
 ```
 
+Single-file non-admin trust anchor:
+
+```bash
+psign-tool portable trust-verify-pe \
+  --trusted-ca ./test-root.cer \
+  ./signed.exe
+```
+
+The unified CLI can use the same trust path without writing to the Windows or Linux OS trust store:
+
+```bash
+psign-tool --mode portable verify \
+  --trusted-ca ./test-root.cer \
+  ./signed.exe
+```
+
 With Microsoft root harvest from CAB:
 
 ```bash
@@ -55,6 +71,36 @@ Expired corpora / reproducible CI: pin verification instant:
 
 ```bash
 psign-tool portable trust-verify-pe --anchor-dir ./roots --as-of 2023-07-01 ./fixture.exe
+```
+
+For local online issuer tests, enable bounded in-memory AIA fetching. Only **HTTP** AIA URLs are currently supported, intended for loopback `psign-server` tests:
+
+```bash
+psign-tool portable trust-verify-pe \
+  --trusted-ca ./test-root.cer \
+  --online-aia \
+  ./signed-with-missing-intermediate.exe
+```
+
+For local CRL revocation tests, use strict revocation with an explicit loopback CRL URL. The CRL is fetched into memory, checked against the issuing CA signature, and evaluated for revoked signer/intermediate serials without touching OS stores:
+
+```bash
+psign-tool portable trust-verify-detached \
+  ./content.bin ./signature.p7 \
+  --trusted-ca ./test-root.cer \
+  --revocation-mode require \
+  --crl-url-override http://127.0.0.1:5000/crl.der
+```
+
+OCSP loopback tests use the same revocation policy. The portable verifier sends a bounded OCSP request, verifies the BasicOCSPResponse signature with the issuing CA, and applies good/revoked/unknown status:
+
+```bash
+psign-tool portable trust-verify-detached \
+  ./content.bin ./signature.p7 \
+  --trusted-ca ./test-root.cer \
+  --revocation-mode require \
+  --online-ocsp \
+  --ocsp-url-override http://127.0.0.1:5000/ocsp
 ```
 
 ## Related docs

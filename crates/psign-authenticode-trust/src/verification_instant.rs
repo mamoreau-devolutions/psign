@@ -1,7 +1,9 @@
 //! Resolve picky **`exact_date`** instant from policy (wall clock vs timestamp token).
 
 use crate::policy::AuthenticodeTrustPolicy;
-use crate::rfc3161_extract::utc_date_from_authenticode_timestamp_token;
+use crate::rfc3161_extract::{
+    trusted_utc_date_from_authenticode_timestamp_token, utc_date_from_authenticode_timestamp_token,
+};
 use anyhow::{Result, anyhow};
 use picky::x509::date::UtcDate;
 
@@ -40,6 +42,38 @@ pub fn resolve_verification_instant_for_pkcs7(
 ) -> Result<UtcDate> {
     if let Some(d) = instant_override {
         return Ok(d.clone());
+    }
+    resolve_verification_utc_date(pkcs7_der, policy)
+}
+
+pub fn resolve_verification_instant_for_pkcs7_with_trust(
+    pkcs7_der: &[u8],
+    policy: &AuthenticodeTrustPolicy,
+    instant_override: Option<&UtcDate>,
+    anchors: &crate::anchor::AnchorStore,
+    anchor_certs: &[picky::x509::certificate::Cert],
+    online: &crate::policy::OnlineTrustOptions,
+    verbose_chain: bool,
+) -> Result<UtcDate> {
+    if let Some(d) = instant_override {
+        return Ok(d.clone());
+    }
+    if !policy.prefer_timestamp_signing_time {
+        return Ok(UtcDate::now());
+    }
+    if policy.require_valid_timestamp {
+        return match trusted_utc_date_from_authenticode_timestamp_token(
+            pkcs7_der,
+            anchors,
+            anchor_certs,
+            online,
+            verbose_chain,
+        )? {
+            Some(d) => Ok(d),
+            None => Err(anyhow!(
+                "timestamp required by policy but no cryptographically valid trusted RFC3161 timestamp token was found"
+            )),
+        };
     }
     resolve_verification_utc_date(pkcs7_der, policy)
 }

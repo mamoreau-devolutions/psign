@@ -2,9 +2,9 @@
 
 use crate::anchor::AnchorStore;
 use crate::chain::{issuer_chain_excluding_leaf, merge_unique_certs, terminal_root_cert};
-use crate::policy::AuthenticodeTrustPolicy;
+use crate::policy::{AuthenticodeTrustPolicy, OnlineTrustOptions};
 use crate::trust_pkcs7::verify_authenticode_pkcs7_trust;
-use crate::verification_instant::resolve_verification_instant_for_pkcs7;
+use crate::verification_instant::resolve_verification_instant_for_pkcs7_with_trust;
 use anyhow::{Context, Result, anyhow};
 use picky::x509::certificate::Cert;
 use picky::x509::date::UtcDate;
@@ -16,12 +16,14 @@ use sha2::Digest;
 #[derive(Debug, Clone, Default)]
 pub struct TrustVerifyPeOptions {
     pub anchor_dir: Option<std::path::PathBuf>,
+    pub trusted_ca_files: Vec<std::path::PathBuf>,
     pub authroot_cab: Option<std::path::PathBuf>,
     /// When set, require the AuthRoot CAB file to match this SHA-256 (bootstrap integrity).
     pub expect_authroot_cab_sha256: Option<[u8; 32]>,
     /// When set, use this instant for picky **`exact_date`** instead of wall clock / timestamp policy.
     pub verification_instant_override: Option<UtcDate>,
     pub verbose_chain: bool,
+    pub online: OnlineTrustOptions,
     pub policy: AuthenticodeTrustPolicy,
 }
 
@@ -42,6 +44,17 @@ pub fn load_trust_material(opts: &TrustVerifyPeOptions) -> Result<(AnchorStore, 
     } else {
         (AnchorStore::empty(), Vec::new())
     };
+
+    if !opts.trusted_ca_files.is_empty() {
+        let (_file_store, file_certs) = AnchorStore::load_files(&opts.trusted_ca_files)?;
+        anchor_store.merge_thumbprints_only(
+            &file_certs
+                .iter()
+                .map(crate::anchor::cert_sha1_thumbprint)
+                .collect::<Result<Vec<_>>>()?,
+        );
+        anchor_certs.extend(file_certs);
+    }
 
     if let Some(cab) = &opts.authroot_cab {
         let cab_bytes = std::fs::read(cab).with_context(|| format!("read {}", cab.display()))?;
@@ -107,10 +120,14 @@ fn verify_one_pkcs7(
         ));
     }
 
-    let verification_instant = resolve_verification_instant_for_pkcs7(
+    let verification_instant = resolve_verification_instant_for_pkcs7_with_trust(
         pkcs7_der,
         &opts.policy,
         opts.verification_instant_override.as_ref(),
+        anchors,
+        anchor_certs,
+        &opts.online,
+        opts.verbose_chain,
     )?;
     verify_authenticode_pkcs7_trust(
         pkcs7_der,
@@ -119,6 +136,7 @@ fn verify_one_pkcs7(
         anchors,
         anchor_certs,
         &opts.policy,
+        &opts.online,
         &verification_instant,
         opts.verbose_chain,
     )

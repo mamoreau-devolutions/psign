@@ -2,14 +2,29 @@
 //!
 //! Extracts **`genTime`** from CMS **`id-ct-TSTInfo`** timestamp tokens (typically carried in
 //! **`SignerInfo` unsigned attributes**) and falls back to PKCS#9 **`signing-time`** in signed
-//! attributes. **Does not** cryptographically verify the timestamp (TSA chain, **`MessageImprint`**).
+//! attributes. The `trusted_*` helper also verifies the timestamp token signature, MessageImprint,
+//! TSA EKU, and TSA chain against explicit anchors.
 
+use crate::anchor::{AnchorStore, cert_sha1_thumbprint};
+use crate::chain::{
+    issuer_chain_excluding_leaf_online, merge_unique_certs, terminal_root_cert_owned,
+};
+use crate::online::check_revocation_chain;
+use crate::policy::OnlineTrustOptions;
+use anyhow::{Result, anyhow};
 use cms::content_info::ContentInfo;
 use cms::signed_data::{SignedData, SignerInfo};
 use der::asn1::{GeneralizedTime, ObjectIdentifier, OctetStringRef};
 use der::{Decode, Encode, Header, Reader, SliceReader, Tag};
+use picky::x509::certificate::Cert;
 use picky::x509::date::UtcDate;
+use psign_sip_digest::pkcs7::{
+    signed_data_certificate_for_signer_identifier,
+    verify_signed_data_pkcs9_message_digest_and_rsa_sha256_pkcs1v15_signature,
+};
+use sha2::Digest as _;
 use x509_cert::attr::Attribute;
+use x509_cert::ext::pkix::ExtendedKeyUsage;
 use x509_cert::time::Time;
 
 const ID_SIGNED_DATA: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.7.2");
@@ -23,6 +38,8 @@ const ID_AA_TIME_STAMP_TOKEN: ObjectIdentifier =
 /// Microsoft nested Authenticode timestamp attribute (common on PE).
 const OID_MS_TIMESTAMP_TOKEN: ObjectIdentifier =
     ObjectIdentifier::new_unwrap("1.3.6.1.4.1.311.3.3.1");
+const EKU_EXTENSION_OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.37");
+const TIME_STAMPING_EKU_OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.5.5.7.3.8");
 
 /// Returns signing time from an embedded timestamp token and/or PKCS#9 **`signing-time`** when
 /// parsing succeeds.
@@ -47,6 +64,92 @@ pub fn utc_date_from_authenticode_timestamp_token(pkcs7_der: &[u8]) -> Option<Ut
     signing_time_fallback
 }
 
+pub fn trusted_utc_date_from_authenticode_timestamp_token(
+    pkcs7_der: &[u8],
+    anchors: &AnchorStore,
+    anchor_certs: &[Cert],
+    online: &OnlineTrustOptions,
+    verbose_chain: bool,
+) -> Result<Option<UtcDate>> {
+    let outer_sd = match signed_data_from_pkcs7(pkcs7_der) {
+        Some(sd) => sd,
+        None => return Ok(None),
+    };
+    let Some(primary_si) = outer_sd.signer_infos.0.as_slice().first() else {
+        return Ok(None);
+    };
+    let primary_signature = primary_si.signature.as_bytes();
+    let Some((token, tstinfo_der, gen_date)) =
+        timestamp_token_from_signer_unsigned_attrs(primary_si)
+    else {
+        return Ok(None);
+    };
+
+    let ts_sd: SignedData = token
+        .content
+        .decode_as()
+        .map_err(|e| anyhow!("timestamp token SignedData: {e}"))?;
+    let parsed = psign_sip_digest::timestamp::parse_tst_info_der(&tstinfo_der)
+        .ok_or_else(|| anyhow!("timestamp token TSTInfo parse failed"))?;
+    let expected_imprint =
+        digest_for_oid(&parsed.message_imprint_digest_alg_oid, primary_signature)?;
+    if parsed.message_imprint_hashed_message != expected_imprint {
+        return Err(anyhow!(
+            "timestamp token MessageImprint does not match primary signer signature"
+        ));
+    }
+    let tst_digest = sha2::Sha256::digest(&tstinfo_der);
+    verify_signed_data_pkcs9_message_digest_and_rsa_sha256_pkcs1v15_signature(
+        &ts_sd,
+        0,
+        &tst_digest,
+    )
+    .map_err(|e| anyhow!("timestamp token CMS signature: {e}"))?;
+
+    let si = ts_sd
+        .signer_infos
+        .0
+        .as_slice()
+        .first()
+        .ok_or_else(|| anyhow!("timestamp token SignedData has no SignerInfo"))?;
+    let tsa_x509 = signed_data_certificate_for_signer_identifier(&ts_sd, &si.sid)
+        .map_err(|e| anyhow!("timestamp token signer certificate: {e}"))?;
+    if !x509_cert_has_time_stamping_eku(tsa_x509)? {
+        return Err(anyhow!(
+            "timestamp token signer certificate lacks timeStamping extended key usage"
+        ));
+    }
+    let tsa_der = tsa_x509
+        .to_der()
+        .map_err(|e| anyhow!("encode timestamp signer certificate: {e}"))?;
+    let tsa_leaf = Cert::from_der(&tsa_der).map_err(|e| anyhow!("timestamp signer Cert: {e}"))?;
+    let embedded_certs = signed_data_embedded_picky_certs(&ts_sd)?;
+    let mut merged = merge_unique_certs(anchor_certs.to_vec(), embedded_certs.clone())?;
+    let chain_owned = issuer_chain_excluding_leaf_online(&tsa_leaf, &mut merged, online)?;
+    let chain_vec: Vec<&Cert> = chain_owned.iter().collect();
+    let root = terminal_root_cert_owned(&tsa_leaf, &chain_owned);
+    let root_thumb = cert_sha1_thumbprint(root)?;
+    if !anchors.contains_thumbprint(&root_thumb) {
+        return Err(anyhow!(
+            "timestamp token TSA chain terminates at an untrusted root"
+        ));
+    }
+    check_revocation_chain(&tsa_leaf, &chain_owned, online)?;
+    if verbose_chain {
+        eprintln!(
+            "trust-verify: timestamp TSA leaf subject: {}",
+            tsa_leaf.subject_name()
+        );
+    }
+    tsa_leaf
+        .verifier()
+        .chain(chain_vec.iter().copied())
+        .exact_date(&gen_date)
+        .verify()
+        .map_err(|e| anyhow!("timestamp token TSA chain verification: {e}"))?;
+    Ok(Some(gen_date))
+}
+
 fn signed_data_from_pkcs7(pkcs7_der: &[u8]) -> Option<SignedData> {
     let mut r = SliceReader::new(pkcs7_der).ok()?;
     let ci = ContentInfo::decode(&mut r).ok()?;
@@ -54,6 +157,92 @@ fn signed_data_from_pkcs7(pkcs7_der: &[u8]) -> Option<SignedData> {
         return None;
     }
     ci.content.decode_as::<SignedData>().ok()
+}
+
+fn timestamp_token_from_signer_unsigned_attrs(
+    si: &SignerInfo,
+) -> Option<(ContentInfo, Vec<u8>, UtcDate)> {
+    let attrs = si.unsigned_attrs.as_ref()?;
+    for attr in attrs
+        .iter()
+        .filter(|attr| timestamp_attr_priority(attr).is_some())
+    {
+        if let Some(v) = timestamp_token_from_attribute(attr) {
+            return Some(v);
+        }
+    }
+    for attr in attrs
+        .iter()
+        .filter(|attr| timestamp_attr_priority(attr).is_none())
+    {
+        if let Some(v) = timestamp_token_from_attribute(attr) {
+            return Some(v);
+        }
+    }
+    None
+}
+
+fn timestamp_token_from_attribute(attr: &Attribute) -> Option<(ContentInfo, Vec<u8>, UtcDate)> {
+    for val in attr.values.iter() {
+        let token = decode_content_info_loose(attribute_value_bytes(val))?;
+        if token.content_type != ID_SIGNED_DATA {
+            continue;
+        }
+        let sd: SignedData = token.content.decode_as().ok()?;
+        if sd.encap_content_info.econtent_type != ID_CT_TSTINFO {
+            continue;
+        }
+        let any = sd.encap_content_info.econtent.as_ref()?;
+        let tstinfo_der = tstinfo_bytes_from_encapsulated_econtent(any)?;
+        let gen_date = tstinfo_gen_time(tstinfo_der)?;
+        return Some((token, tstinfo_der.to_vec(), gen_date));
+    }
+    None
+}
+
+fn digest_for_oid(oid: &str, data: &[u8]) -> Result<Vec<u8>> {
+    Ok(match oid {
+        "1.3.14.3.2.26" => sha1::Sha1::digest(data).to_vec(),
+        "2.16.840.1.101.3.4.2.1" => sha2::Sha256::digest(data).to_vec(),
+        "2.16.840.1.101.3.4.2.2" => sha2::Sha384::digest(data).to_vec(),
+        "2.16.840.1.101.3.4.2.3" => sha2::Sha512::digest(data).to_vec(),
+        _ => {
+            return Err(anyhow!(
+                "unsupported timestamp MessageImprint digest algorithm {oid}"
+            ));
+        }
+    })
+}
+
+fn signed_data_embedded_picky_certs(sd: &SignedData) -> Result<Vec<Cert>> {
+    let mut out = Vec::new();
+    let Some(set) = &sd.certificates else {
+        return Ok(out);
+    };
+    for choice in set.0.iter() {
+        let cms::cert::CertificateChoices::Certificate(cert) = choice else {
+            continue;
+        };
+        let der = cert
+            .to_der()
+            .map_err(|e| anyhow!("encode timestamp embedded certificate: {e}"))?;
+        out.push(Cert::from_der(&der).map_err(|e| anyhow!("timestamp embedded certificate: {e}"))?);
+    }
+    Ok(out)
+}
+
+fn x509_cert_has_time_stamping_eku(cert: &x509_cert::Certificate) -> Result<bool> {
+    let Some(exts) = &cert.tbs_certificate.extensions else {
+        return Ok(false);
+    };
+    for ext in exts.iter().filter(|e| e.extn_id == EKU_EXTENSION_OID) {
+        let eku = ExtendedKeyUsage::from_der(ext.extn_value.as_bytes())
+            .map_err(|e| anyhow!("timestamp ExtendedKeyUsage extension: {e}"))?;
+        if eku.0.contains(&TIME_STAMPING_EKU_OID) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn utc_date_from_signer_unsigned_attrs(si: &SignerInfo) -> Option<UtcDate> {
