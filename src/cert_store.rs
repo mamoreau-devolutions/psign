@@ -538,7 +538,7 @@ fn write_private_key_file(path: &Path, bytes: &[u8]) -> Result<()> {
             .with_context(|| format!("write private key '{}'", path.display()))?;
         file.write_all(bytes)
             .with_context(|| format!("write private key '{}'", path.display()))?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(unix))]
