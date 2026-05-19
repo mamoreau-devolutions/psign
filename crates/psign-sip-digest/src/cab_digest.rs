@@ -75,6 +75,52 @@ fn read_u32_le(buf: &[u8], off: usize) -> Result<u32> {
         .ok_or_else(|| anyhow!("read past end at {off}"))
 }
 
+fn write_u16_le(buf: &mut [u8], off: usize, value: u16) -> Result<()> {
+    let dst = buf
+        .get_mut(off..off + 2)
+        .ok_or_else(|| anyhow!("write past end at {off}"))?;
+    dst.copy_from_slice(&value.to_le_bytes());
+    Ok(())
+}
+
+fn write_u32_le(buf: &mut [u8], off: usize, value: u32) -> Result<()> {
+    let dst = buf
+        .get_mut(off..off + 4)
+        .ok_or_else(|| anyhow!("write past end at {off}"))?;
+    dst.copy_from_slice(&value.to_le_bytes());
+    Ok(())
+}
+
+fn checked_u32_add(a: u32, b: u32, what: &str) -> Result<u32> {
+    a.checked_add(b)
+        .ok_or_else(|| anyhow!("{what} exceeds CAB u32 range"))
+}
+
+fn skip_cab_sz(data: &[u8], mut idx: usize) -> Result<usize> {
+    while idx < data.len() {
+        let b = data[idx];
+        idx += 1;
+        if b == 0 {
+            return Ok(idx);
+        }
+    }
+    Err(anyhow!("truncated CAB sz field"))
+}
+
+fn cffolder_table_offset(data: &[u8], flags: u16) -> Result<usize> {
+    let mut idx = 36usize;
+    if flags & FLAG_PREV_CABINET != 0 {
+        return Err(anyhow!(
+            "multivolume CAB (FLAG_PREV_CABINET) is unsupported for portable signing"
+        ));
+    }
+    if flags & FLAG_NEXT_CABINET != 0 {
+        idx = skip_cab_sz(data, idx)?;
+        idx = skip_cab_sz(data, idx)?;
+    }
+    Ok(idx)
+}
+
 /// Validate CAB layout and signature extents (osslsigncode `cab_ctx_get`).
 pub fn parse_cab_context(data: &[u8]) -> Result<CabCtx> {
     if data.len() < 44 {
@@ -134,6 +180,118 @@ pub fn parse_cab_context(data: &[u8]) -> Result<CabCtx> {
         fileend,
         flags,
     })
+}
+
+/// Add the Authenticode reserve header required before appending a CAB PKCS#7 signature.
+///
+/// This intentionally supports only unsigned, single-volume CABs with no pre-existing reserve area.
+/// It updates header offsets that are shifted by the new 24-byte CAB reserve block and leaves
+/// the caller to append the PKCS#7 blob at the returned `sigpos`.
+pub fn prepare_unsigned_cab_for_authenticode_signature(
+    data: &[u8],
+    signature_len: usize,
+) -> Result<Vec<u8>> {
+    let ctx = parse_cab_context(data)?;
+    if ctx.flags & FLAG_RESERVE_PRESENT != 0 {
+        return Err(anyhow!(
+            "CAB already has a reserve header; replacing CAB signatures is not implemented"
+        ));
+    }
+    if ctx.sigpos != 0 || ctx.siglen != 0 {
+        return Err(anyhow!("CAB already has an embedded signature"));
+    }
+    let signature_len =
+        u32::try_from(signature_len).map_err(|_| anyhow!("CAB signature too large"))?;
+    let original_len = u32::try_from(data.len()).map_err(|_| anyhow!("CAB file too large"))?;
+    let sigpos = checked_u32_add(original_len, 24, "signed CAB header")?;
+    let original_cb_cabinet = read_u32_le(data, 8)?;
+    if original_cb_cabinet != original_len {
+        return Err(anyhow!(
+            "unsupported CAB cbCabinet {} (expected unsigned file size {})",
+            original_cb_cabinet,
+            original_len
+        ));
+    }
+    let original_coff_files = read_u32_le(data, 16)?;
+    let folder_count = read_u16_le(data, 26)? as usize;
+    let original_folder_table = cffolder_table_offset(data, ctx.flags)?;
+    let original_coff_files_usize =
+        usize::try_from(original_coff_files).map_err(|_| anyhow!("coffFiles"))?;
+    let folder_table_end = original_folder_table
+        .checked_add(folder_count.saturating_mul(8))
+        .ok_or_else(|| anyhow!("CFFOLDER table overflow"))?;
+    if folder_table_end > original_coff_files_usize {
+        return Err(anyhow!(
+            "CFFOLDER table extends past coffFiles (end={folder_table_end}, coffFiles={original_coff_files_usize})"
+        ));
+    }
+
+    let mut out = Vec::with_capacity(
+        usize::try_from(sigpos)
+            .unwrap_or(usize::MAX)
+            .saturating_add(signature_len as usize),
+    );
+    out.extend_from_slice(&data[..36]);
+    out.extend_from_slice(&[
+        0x14, 0x00, 0x00, 0x00, // cbCFHeader=20, cbCFFolder=0, cbCFData=0
+        0x00, 0x00, 0x10, 0x00, // abReserve=0x00100000 (Authenticode CAB signature block)
+        0x00, 0x00, 0x00, 0x00, // sigpos
+        0x00, 0x00, 0x00, 0x00, // siglen
+        0x00, 0x00, 0x00, 0x00, // reserved
+        0x00, 0x00, 0x00, 0x00, // reserved
+    ]);
+    out.extend_from_slice(&data[36..]);
+
+    let new_flags = ctx.flags | FLAG_RESERVE_PRESENT;
+    write_u32_le(&mut out, 8, sigpos)?;
+    write_u32_le(
+        &mut out,
+        16,
+        checked_u32_add(original_coff_files, 24, "coffFiles")?,
+    )?;
+    write_u16_le(&mut out, 30, new_flags)?;
+    write_u32_le(&mut out, 44, sigpos)?;
+    write_u32_le(&mut out, 48, signature_len)?;
+
+    let new_folder_table = original_folder_table
+        .checked_add(24)
+        .ok_or_else(|| anyhow!("CFFOLDER table offset overflow"))?;
+    for folder_index in 0..folder_count {
+        let entry = new_folder_table + folder_index * 8;
+        let coff_cab_start = read_u32_le(&out, entry)?;
+        write_u32_le(
+            &mut out,
+            entry,
+            checked_u32_add(coff_cab_start, 24, "CFFOLDER coffCabStart")?,
+        )?;
+    }
+
+    Ok(out)
+}
+
+/// Prepare an unsigned CAB and append a PKCS#7 Authenticode signature blob.
+pub fn cab_append_authenticode_pkcs7_signature(data: &[u8], pkcs7: &[u8]) -> Result<Vec<u8>> {
+    let mut out = prepare_unsigned_cab_for_authenticode_signature(data, pkcs7.len())?;
+    out.extend_from_slice(pkcs7);
+    Ok(out)
+}
+
+/// Compute the CAB Authenticode digest over the post-reserve, pre-signature byte layout.
+pub fn cab_authenticode_digest_for_signing(
+    unsigned_cab: &[u8],
+    kind: PeAuthenticodeHashKind,
+) -> Result<Vec<u8>> {
+    let prepared = prepare_unsigned_cab_for_authenticode_signature(unsigned_cab, 0)?;
+    let sigpos = u32::try_from(prepared.len()).map_err(|_| anyhow!("CAB file too large"))?;
+    let flags = read_u16_le(&prepared, 30)?;
+    let ctx = CabCtx {
+        header_size: SIGNED_HEADER_EXTRA,
+        sigpos,
+        siglen: 0,
+        fileend: sigpos,
+        flags,
+    };
+    compute_cab_authenticode_digest(&prepared, &ctx, kind)
 }
 
 fn hash_sz_field(

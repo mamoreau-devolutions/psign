@@ -1,6 +1,6 @@
 # Linux signing pipelines (what works today)
 
-**`psign-tool portable`** on Linux/macOS does **not** embed Authenticode PKCS#7 into PE/CAB/MSIX yet (`pe_embed.rs` / CMS producer stubs — see [`rust-sip-gaps.md`](rust-sip-gaps.md)). This page describes **practical hybrid** flows and **verify-only** flows.
+**`psign-tool portable`** on Linux/macOS can now sign PE, unsigned single-volume CAB, MSI/MSP, generic catalogs, and RDP files with local RSA/SHA-2 keys. It still does not provide a broad native-compatible `sign` verb, MSIX signing/embed, OS catalog database policy, or WinTrust policy emulation (see [`rust-sip-gaps.md`](rust-sip-gaps.md)). This page describes **practical portable**, **hybrid**, and **verify-only** flows.
 
 For tool-by-tool gaps vs **`signtool.exe`**, AzureSignTool, and Artifact Signing, see [`gap-analysis-signing-platforms.md`](gap-analysis-signing-platforms.md). On Windows, for writable copies of native signing binaries outside protected install paths, see [`writable-signing-binaries.md`](writable-signing-binaries.md).
 
@@ -16,9 +16,22 @@ After any Windows signing job:
 
 Automation: **`scripts/linux-portable-validation.sh`**, GitHub **`ci-unix`**, and the portable crate/test commands documented in [`roadmap-authenticode-linux.md`](roadmap-authenticode-linux.md). Windows differential parity: **`scripts/run-parity-diff.ps1`** (see [`ci-parity.md`](ci-parity.md)).
 
+## 1.1 Local portable signing
+
+Local RSA/SHA-2 signing is intentionally exposed through scoped portable commands before routing the native-shaped `sign` verb:
+
+```bash
+psign-tool portable sign-pe --cert cert.der --key key.pk8 --output signed.exe unsigned.exe
+psign-tool portable sign-cab --cert cert.der --key key.pk8 --output signed.cab unsigned.cab
+psign-tool portable sign-msi --cert cert.der --key key.pk8 --output signed.msi unsigned.msi
+psign-tool portable sign-catalog --cert cert.der --key key.pk8 --output files.cat file1.exe file2.txt
+```
+
+`sign-catalog` authors generic CTL member entries and signs the catalog PKCS#7. Pair it with `verify-catalog` and `verify-catalog-member --catalog files.cat file1.exe`; driver/INF policy and OS catalog database lookup remain Windows-only.
+
 ## 1.5 RFC 3161 TSA query/reply (DER only; no embed)
 
-**`psign-tool portable rfc3161-timestamp-req`** builds **`TimeStampReq`** DER from **`--digest-hex`** / **`--digest-file`** (message-imprint preimage; optional **`--nonce`**, **`--cert-req`**). **`rfc3161-timestamp-resp-inspect`** prints **`pki_status`** / **`pki_status_int`** (raw **`PKIStatus`** INTEGER) / **`granted`** / token length, **`time_stamp_token_prefix_hex`** (first **16** octets of the **`timeStampToken`** TLV), **`status_strings_json`**, **`fail_info_tlv_hex`**, and **`fail_info_flags_json`** from **`TimeStampResp`** DER. When the token is a parseable CMS **`id-ct-TSTInfo`** timestamp token, it also prints structural **`tst_info_*`** fields for policy OID, message-imprint digest OID/hash, serial, **`genTime`**, and nonce; **`--expect-digest-hex`** and **`--expect-nonce`** add request-binding diagnostics (`tst_info_message_imprint_match`, `tst_info_nonce_match`). These fields are diagnostic only and do not imply TSA trust or CMS signature validation. Build with **`--features timestamp-http`** for **`rfc3161-timestamp-http-post --url …`** (Rustls POST **`application/timestamp-query`**, response DER to stdout / **`--output`**); otherwise use **`curl`** or OpenSSL **`ts`**. Wiring the token into **`SignerInfo`** as an Authenticode countersignature still goes through **`psign-tool`** / **`SignerTimeStampEx3`** (or future portable CMS) today.
+**`psign-tool portable rfc3161-timestamp-req`** builds **`TimeStampReq`** DER from **`--digest-hex`** / **`--digest-file`** (message-imprint preimage; optional **`--nonce`**, **`--cert-req`**). **`rfc3161-timestamp-resp-inspect`** prints **`pki_status`** / **`pki_status_int`** (raw **`PKIStatus`** INTEGER) / **`granted`** / token length, **`time_stamp_token_prefix_hex`** (first **16** octets of the **`timeStampToken`** TLV), **`status_strings_json`**, **`fail_info_tlv_hex`**, and **`fail_info_flags_json`** from **`TimeStampResp`** DER. When the token is a parseable CMS **`id-ct-TSTInfo`** timestamp token, it also prints structural **`tst_info_*`** fields for policy OID, message-imprint digest OID/hash, serial, **`genTime`**, and nonce; **`--expect-digest-hex`** and **`--expect-nonce`** add request-binding diagnostics (`tst_info_message_imprint_match`, `tst_info_nonce_match`). These fields are diagnostic only and do not imply TSA trust or CMS signature validation. Build with **`--features timestamp-http`** for **`rfc3161-timestamp-http-post --url …`** (Rustls POST **`application/timestamp-query`**, response DER to stdout / **`--output`**); otherwise use **`curl`** or OpenSSL **`ts`**. **`timestamp-pe-rfc3161`** can attach the granted token to an existing PE Authenticode `SignerInfo`; non-PE timestamp mutation still goes through **`psign-tool`** / **`SignerTimeStampEx3`** today.
 
 For deterministic local tests, build **`psign-server`** with **`--features timestamp-server`** and run:
 

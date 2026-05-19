@@ -43,7 +43,7 @@ psign-tool portable trust-verify-pe \
   ./signed.exe
 ```
 
-The unified CLI can use the same trust path without writing to the Windows or Linux OS trust store:
+The unified CLI can use the same trust path without writing to the Windows or Linux OS trust store. With **`--mode portable verify`**, trust inputs such as **`--trusted-ca`**, **`--anchor-dir`**, **`--authroot-cab`**, AIA/OCSP/CRL flags, and timestamp policy flags route to the corresponding portable **`trust-verify-*`** command inferred from the subject file:
 
 ```bash
 psign-tool --mode portable verify \
@@ -54,7 +54,7 @@ psign-tool --mode portable verify \
 With Microsoft root harvest from CAB:
 
 ```bash
-psign-tool portable trust-verify-pe \
+psign-tool --mode portable verify \
   --authroot-cab ./authrootstl.cab \
   --anchor-dir ./extra-enterprise-roots \
   --verbose-chain \

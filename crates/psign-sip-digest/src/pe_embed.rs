@@ -223,6 +223,76 @@ pub fn pe_append_authenticode_pkcs7_certificate(
     Ok(pe_image)
 }
 
+/// Replace the **`pkcs7_index`**-th `WIN_CERT_TYPE_PKCS_SIGNED_DATA` row in the PE certificate table.
+///
+/// This is used by portable post-sign mutation flows such as timestamp insertion. The certificate table is
+/// rebuilt at the same file offset, PE bytes after the old table are discarded, the security directory size is
+/// updated, and `Optional Header.CheckSum` is recomputed.
+pub fn pe_replace_authenticode_pkcs7_certificate_at(
+    mut pe_image: Vec<u8>,
+    pkcs7_index: usize,
+    pkcs7_der: &[u8],
+) -> Result<Vec<u8>> {
+    let replacement = wrap_pkcs7_der_authenticode_win_certificate(pkcs7_der);
+    let (va, size) = read_security_data_directory(&pe_image)?;
+    if va == 0 || size == 0 {
+        return Err(anyhow!("PE has no certificate table"));
+    }
+    let start = va as usize;
+    let end = start
+        .checked_add(size as usize)
+        .ok_or_else(|| anyhow!("security directory size overflow"))?;
+    if start > pe_image.len() || end > pe_image.len() {
+        return Err(anyhow!(
+            "security directory range {start}..{end} is outside PE length {}",
+            pe_image.len()
+        ));
+    }
+
+    let table = pe_image[start..end].to_vec();
+    let mut rebuilt = Vec::with_capacity(table.len() + replacement.len());
+    let mut offset = 0usize;
+    let mut pkcs7_seen = 0usize;
+    let mut replaced = false;
+    while offset < table.len() {
+        if offset + 8 > table.len() {
+            return Err(anyhow!(
+                "truncated WIN_CERTIFICATE header at table offset {offset}"
+            ));
+        }
+        let len = u32::from_le_bytes(table[offset..offset + 4].try_into().unwrap()) as usize;
+        if len < 8 || offset + len > table.len() {
+            return Err(anyhow!(
+                "invalid WIN_CERTIFICATE length {len} at table offset {offset}"
+            ));
+        }
+        let cert_type = u16::from_le_bytes(table[offset + 6..offset + 8].try_into().unwrap());
+        if cert_type == WIN_CERT_TYPE_PKCS_SIGNED_DATA {
+            if pkcs7_seen == pkcs7_index {
+                rebuilt.extend_from_slice(&replacement);
+                replaced = true;
+            } else {
+                rebuilt.extend_from_slice(&table[offset..offset + len]);
+            }
+            pkcs7_seen += 1;
+        } else {
+            rebuilt.extend_from_slice(&table[offset..offset + len]);
+        }
+        offset += len;
+    }
+    if !replaced {
+        return Err(anyhow!(
+            "no PKCS#7 Authenticode entry at index {pkcs7_index} (found {pkcs7_seen})"
+        ));
+    }
+
+    pe_image.truncate(start);
+    pe_image.extend_from_slice(&rebuilt);
+    write_security_data_directory(&mut pe_image, va, rebuilt.len() as u32)?;
+    pe_refresh_image_checksum(&mut pe_image)?;
+    Ok(pe_image)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

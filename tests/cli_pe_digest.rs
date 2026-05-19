@@ -15,6 +15,8 @@ use rsa::RsaPrivateKey;
 use rsa::pkcs1v15::SigningKey;
 use rsa::pkcs8::EncodePrivateKey;
 use rsa::signature::Keypair;
+use rsa::signature::SignatureEncoding;
+use rsa::signature::hazmat::PrehashSigner;
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 use std::path::{Path, PathBuf};
@@ -66,6 +68,7 @@ fn help_lists_core_subcommands() {
         "verify-esd",
         "verify-msix",
         "verify-catalog",
+        "verify-catalog-member",
         "catalog-signer-rs256-prehash",
         "verify-script",
         "cab-digest",
@@ -81,6 +84,11 @@ fn help_lists_core_subcommands() {
         "pe-signer-rs256-prehash",
         "pkcs7-signer-rs256-prehash",
         "append-pe-pkcs7",
+        "sign-pe",
+        "sign-cab",
+        "sign-msi",
+        "sign-catalog",
+        "timestamp-pe-rfc3161",
         "rdp",
         "nupkg-signature-info",
         "nupkg-digest",
@@ -716,6 +724,111 @@ fn cat_rs256_verify_catalog_fails_on_pe_pkcs7_as_cat() {
 }
 
 #[test]
+fn verify_catalog_member_accepts_makecat_single_member_fixtures() {
+    for (catalog, subject) in [
+        ("single-pe.cat", "tiny32.efi"),
+        ("single-text.cat", "hello.txt"),
+        ("single-binary.cat", "blob.bin"),
+    ] {
+        let mut cmd = portable_cmd();
+        cmd.arg("verify-catalog-member")
+            .arg("--catalog")
+            .arg(catalog_workflow_fixture(catalog))
+            .arg(catalog_workflow_subject(subject));
+        cmd.assert()
+            .success()
+            .stdout(predicate::str::contains("verify-catalog-member: ok"))
+            .stdout(predicate::str::contains(subject));
+    }
+}
+
+#[test]
+fn verify_catalog_member_accepts_makecat_multi_member_fixture() {
+    for subject in ["tiny32.efi", "hello.txt", "blob.bin"] {
+        let mut cmd = portable_cmd();
+        cmd.arg("verify-catalog-member")
+            .arg("--catalog")
+            .arg(catalog_workflow_fixture("multi-member.cat"))
+            .arg(catalog_workflow_subject(subject));
+        cmd.assert()
+            .success()
+            .stdout(predicate::str::contains("verify-catalog-member: ok"))
+            .stdout(predicate::str::contains(subject));
+    }
+}
+
+#[test]
+fn verify_catalog_member_rejects_subject_not_in_catalog() {
+    let mut cmd = portable_cmd();
+    cmd.arg("verify-catalog-member")
+        .arg("--catalog")
+        .arg(catalog_workflow_fixture("single-text.cat"))
+        .arg(catalog_workflow_subject("blob.bin"));
+    cmd.assert()
+        .failure()
+        .stderr(predicate::str::contains("not a member"));
+}
+
+#[test]
+fn sign_catalog_creates_portable_catalog_with_members() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cert = dir.path().join("signer.der");
+    let key = dir.path().join("signer.pk8");
+    let out_cat = dir.path().join("portable.cat");
+    write_test_rsa_cert_key(&cert, &key);
+    let subjects = [
+        tiny32_unsigned_fixture(),
+        catalog_workflow_subject("hello.txt"),
+        catalog_workflow_subject("blob.bin"),
+    ];
+
+    let mut sign = portable_cmd();
+    sign.arg("sign-catalog")
+        .arg(subjects[0].as_path())
+        .arg(subjects[1].as_path())
+        .arg(subjects[2].as_path())
+        .arg("--cert")
+        .arg(&cert)
+        .arg("--key")
+        .arg(&key)
+        .arg("--output")
+        .arg(&out_cat);
+    sign.assert()
+        .success()
+        .stdout(predicate::str::contains("sign-catalog: ok"))
+        .stdout(predicate::str::contains("members=3"));
+
+    let mut verify = portable_cmd();
+    verify.arg("verify-catalog").arg(&out_cat);
+    verify.assert().success();
+
+    for subject in &subjects {
+        let mut member = portable_cmd();
+        member
+            .arg("verify-catalog-member")
+            .arg("--catalog")
+            .arg(&out_cat)
+            .arg(subject);
+        member
+            .assert()
+            .success()
+            .stdout(predicate::str::contains("verify-catalog-member: ok"));
+    }
+
+    let cat = std::fs::read(&out_cat).expect("read catalog");
+    let members = catalog_digest::catalog_members_bytes(&cat).expect("catalog members");
+    assert_eq!(members.len(), 3);
+    let econtent_digest = catalog_digest::catalog_econtent_digest(&cat).expect("eContent digest");
+    let sd = pkcs7::parse_pkcs7_signed_data_der(&cat).expect("catalog SignedData");
+    pkcs7::verify_signed_data_pkcs9_message_digest_and_rsa_sha256_pkcs1v15_signature(
+        &sd,
+        0,
+        &econtent_digest,
+    )
+    .expect("portable catalog RSA signature verifies");
+}
+
+#[test]
 fn cat_rs256_signer_matches_pkcs7_cli_on_tiny32_content_cat() {
     let dir = tempfile::tempdir().unwrap();
     let out_cat = dir.path().join("from_cat.bin");
@@ -939,8 +1052,50 @@ fn tiny32_fixture() -> PathBuf {
     repo_root().join("tests/fixtures/pe-authenticode-upstream/tiny32.signed.efi")
 }
 
+fn tiny32_unsigned_fixture() -> PathBuf {
+    repo_root().join("tests/fixtures/pe-authenticode-upstream/tiny32.efi")
+}
+
 fn tiny64_fixture() -> PathBuf {
     repo_root().join("tests/fixtures/pe-authenticode-upstream/tiny64.signed.efi")
+}
+
+fn catalog_workflow_fixture(name: &str) -> PathBuf {
+    repo_root()
+        .join("tests/fixtures/catalog-workflows")
+        .join(name)
+}
+
+fn catalog_workflow_subject(name: &str) -> PathBuf {
+    catalog_workflow_fixture("subjects").join(name)
+}
+
+fn minimal_unsigned_cab_fixture_bytes() -> Vec<u8> {
+    let name = b"a.txt\0";
+    let payload = b"hi";
+    let coff_files = 44usize;
+    let cfdata_offset = coff_files + 16 + name.len();
+    let cb_cabinet = cfdata_offset + 8 + payload.len();
+    let mut cab = vec![0u8; cb_cabinet];
+    cab[0..4].copy_from_slice(b"MSCF");
+    cab[8..12].copy_from_slice(&(cb_cabinet as u32).to_le_bytes());
+    cab[16..20].copy_from_slice(&(coff_files as u32).to_le_bytes());
+    cab[24] = 3;
+    cab[25] = 1;
+    cab[26..28].copy_from_slice(&1u16.to_le_bytes());
+    cab[28..30].copy_from_slice(&1u16.to_le_bytes());
+    cab[32..34].copy_from_slice(&1u16.to_le_bytes());
+    cab[36..40].copy_from_slice(&(cfdata_offset as u32).to_le_bytes());
+    cab[40..42].copy_from_slice(&1u16.to_le_bytes());
+    cab[44..48].copy_from_slice(&(payload.len() as u32).to_le_bytes());
+    cab[58..60].copy_from_slice(&0x20u16.to_le_bytes());
+    cab[60..60 + name.len()].copy_from_slice(name);
+    cab[cfdata_offset + 4..cfdata_offset + 6]
+        .copy_from_slice(&(payload.len() as u16).to_le_bytes());
+    cab[cfdata_offset + 6..cfdata_offset + 8]
+        .copy_from_slice(&(payload.len() as u16).to_le_bytes());
+    cab[cfdata_offset + 8..cfdata_offset + 8 + payload.len()].copy_from_slice(payload);
+    cab
 }
 
 fn repo_root() -> PathBuf {
@@ -1030,6 +1185,11 @@ fn unified_verify_mode_portable_accepts_trusted_ca_without_os_store() {
         .arg("verify")
         .arg("--trusted-ca")
         .arg(&root_path)
+        .arg("--verbose-chain")
+        .arg("--allow-loose-signing-cert")
+        .arg("--prefer-timestamp-signing-time")
+        .args(["--online-timeout-secs", "7"])
+        .args(["--online-max-download-bytes", "2048"])
         .args(["--as-of", "2023-07-01"])
         .arg(&fixture);
     cmd.assert()
@@ -1250,6 +1410,231 @@ fn append_pe_pkcs7_duplicate_row_lists_two_entries() {
         chk_out.contains("match=yes"),
         "append-pe-pkcs7 output should satisfy pe-checksum --strict, got {chk_out:?}"
     );
+}
+
+#[test]
+fn sign_pe_creates_portable_authenticode_signature() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cert = dir.path().join("signer.der");
+    let key = dir.path().join("signer.pk8");
+    let out_pe = dir.path().join("tiny32.signed.exe");
+    write_test_rsa_cert_key(&cert, &key);
+
+    let mut sign = portable_cmd();
+    sign.arg("sign-pe")
+        .arg(tiny32_unsigned_fixture())
+        .arg("--cert")
+        .arg(&cert)
+        .arg("--key")
+        .arg(&key)
+        .arg("--output")
+        .arg(&out_pe);
+    sign.assert()
+        .success()
+        .stdout(predicate::str::contains("sign-pe: ok"));
+
+    let mut verify = portable_cmd();
+    verify.arg("verify-pe").arg(&out_pe);
+    verify.assert().success();
+
+    let signed = std::fs::read(&out_pe).expect("read signed PE");
+    let pkcs7 = verify_pe::pe_nth_pkcs7_signed_data_der(&signed, 0).expect("extract PKCS#7");
+    let sd = pkcs7::parse_pkcs7_signed_data_der(&pkcs7).expect("parse SignedData");
+    let indirect = pkcs7::signed_data_spc_indirect_message_digest_octets(&sd).expect("indirect");
+    pkcs7::verify_signed_data_authenticode_indirect_digest_and_rsa_sha256_pkcs1v15_signature(
+        &sd, 0, &indirect,
+    )
+    .expect("portable Authenticode RSA signature verifies");
+}
+
+#[test]
+fn sign_cab_creates_portable_authenticode_signature() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cert = dir.path().join("signer.der");
+    let key = dir.path().join("signer.pk8");
+    let in_cab = dir.path().join("tiny.cab");
+    let out_cab = dir.path().join("tiny.signed.cab");
+    write_test_rsa_cert_key(&cert, &key);
+    let unsigned = minimal_unsigned_cab_fixture_bytes();
+    std::fs::write(&in_cab, &unsigned).expect("write unsigned CAB");
+
+    let mut sign = portable_cmd();
+    sign.arg("sign-cab")
+        .arg(&in_cab)
+        .arg("--cert")
+        .arg(&cert)
+        .arg("--key")
+        .arg(&key)
+        .arg("--output")
+        .arg(&out_cab);
+    sign.assert()
+        .success()
+        .stdout(predicate::str::contains("sign-cab: ok"));
+
+    let mut verify = portable_cmd();
+    verify.arg("verify-cab").arg(&out_cab);
+    verify.assert().success();
+
+    let signed = std::fs::read(&out_cab).expect("read signed CAB");
+    let pkcs7 = cab_digest::cab_signature_pkcs7_der(&signed).expect("extract CAB PKCS#7");
+    let sd = pkcs7::parse_pkcs7_signed_data_der(pkcs7).expect("parse SignedData");
+    let indirect = pkcs7::signed_data_spc_indirect_message_digest_octets(&sd).expect("indirect");
+    let expected = cab_digest::cab_authenticode_digest_for_signing(
+        &unsigned,
+        psign_sip_digest::pe_digest::PeAuthenticodeHashKind::Sha256,
+    )
+    .expect("CAB signing digest");
+    assert_eq!(indirect, expected);
+    pkcs7::verify_signed_data_authenticode_indirect_digest_and_rsa_sha256_pkcs1v15_signature(
+        &sd, 0, &indirect,
+    )
+    .expect("portable CAB Authenticode RSA signature verifies");
+}
+
+#[test]
+fn sign_msi_creates_portable_authenticode_signature() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cert = dir.path().join("signer.der");
+    let key = dir.path().join("signer.pk8");
+    let input = repo_root().join("tests/fixtures/msi-authenticode-upstream/tiny-pkcs7-stub.msi");
+    let out_msi = dir.path().join("tiny.signed.msi");
+    write_test_rsa_cert_key(&cert, &key);
+
+    let mut sign = portable_cmd();
+    sign.arg("sign-msi")
+        .arg(&input)
+        .arg("--cert")
+        .arg(&cert)
+        .arg("--key")
+        .arg(&key)
+        .arg("--output")
+        .arg(&out_msi);
+    sign.assert()
+        .success()
+        .stdout(predicate::str::contains("sign-msi: ok"));
+
+    let mut verify = portable_cmd();
+    verify.arg("verify-msi").arg(&out_msi);
+    verify.assert().success();
+
+    let signed = std::fs::read(&out_msi).expect("read signed MSI");
+    let pkcs7 = msi_digest::msi_digital_signature_pkcs7_der(&signed).expect("extract MSI PKCS#7");
+    let sd = pkcs7::parse_pkcs7_signed_data_der(&pkcs7).expect("parse SignedData");
+    let indirect = pkcs7::signed_data_spc_indirect_message_digest_octets(&sd).expect("indirect");
+    let expected = msi_digest::compute_msi_authenticode_digest(
+        &signed,
+        psign_sip_digest::pe_digest::PeAuthenticodeHashKind::Sha256,
+    )
+    .expect("MSI signing digest");
+    assert_eq!(indirect, expected);
+    pkcs7::verify_signed_data_authenticode_indirect_digest_and_rsa_sha256_pkcs1v15_signature(
+        &sd, 0, &indirect,
+    )
+    .expect("portable MSI Authenticode RSA signature verifies");
+}
+
+#[test]
+fn remote_rsa_signature_injection_creates_authenticode_pkcs7() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cert_path = dir.path().join("signer.der");
+    let key_path = dir.path().join("signer.pk8");
+    write_test_rsa_cert_key(&cert_path, &key_path);
+
+    let pe = std::fs::read(tiny32_unsigned_fixture()).expect("read unsigned PE");
+    let pe_digest = psign_sip_digest::pe_digest::pe_authenticode_digest(
+        &pe,
+        pkcs7::AuthenticodeSigningDigest::Sha256.pe_hash_kind(),
+    )
+    .expect("PE digest");
+    let indirect =
+        pkcs7::pe_spc_indirect_data(pkcs7::AuthenticodeSigningDigest::Sha256, &pe_digest)
+            .expect("SpcIndirectData");
+    let prehash = pkcs7::authenticode_remote_rsa_signed_attrs_digest(
+        &indirect,
+        pkcs7::AuthenticodeSigningDigest::Sha256,
+    )
+    .expect("remote prehash");
+    let key_bytes = std::fs::read(&key_path).expect("read key");
+    let private_key = rdp::parse_rsa_private_key(&key_bytes).expect("parse key");
+    let signing_key = SigningKey::<Sha256>::new(private_key);
+    let signature: rsa::pkcs1v15::Signature = signing_key
+        .sign_prehash(&prehash)
+        .expect("sign remote prehash");
+    let cert_bytes = std::fs::read(&cert_path).expect("read cert");
+    let signer_cert = rdp::parse_certificate(&cert_bytes).expect("parse cert");
+    let pkcs7 = pkcs7::create_authenticode_pkcs7_der_with_rsa_signature(
+        indirect,
+        pkcs7::AuthenticodeSigningDigest::Sha256,
+        signer_cert,
+        Vec::new(),
+        &signature.to_bytes(),
+    )
+    .expect("remote-injected PKCS#7");
+    let sd = pkcs7::parse_pkcs7_signed_data_der(&pkcs7).expect("parse SignedData");
+    pkcs7::verify_signed_data_authenticode_indirect_digest_and_rsa_sha256_pkcs1v15_signature(
+        &sd, 0, &pe_digest,
+    )
+    .expect("remote injected RSA signature verifies");
+}
+
+#[test]
+fn timestamp_pe_rfc3161_attaches_unsigned_timestamp_attribute() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cert = dir.path().join("signer.der");
+    let key = dir.path().join("signer.pk8");
+    let signed_pe = dir.path().join("tiny32.signed.exe");
+    let token = dir.path().join("token.der");
+    let stamped_pe = dir.path().join("tiny32.timestamped.exe");
+    write_test_rsa_cert_key(&cert, &key);
+
+    let mut sign = portable_cmd();
+    sign.arg("sign-pe")
+        .arg(tiny32_unsigned_fixture())
+        .arg("--cert")
+        .arg(&cert)
+        .arg("--key")
+        .arg(&key)
+        .arg("--output")
+        .arg(&signed_pe);
+    sign.assert().success();
+
+    let pkcs7 = verify_pe::pe_nth_pkcs7_signed_data_der(
+        &std::fs::read(&signed_pe).expect("read signed PE"),
+        0,
+    )
+    .expect("extract PKCS#7");
+    std::fs::write(&token, pkcs7).expect("write stand-in timestamp token");
+
+    let mut stamp = portable_cmd();
+    stamp
+        .arg("timestamp-pe-rfc3161")
+        .arg(&signed_pe)
+        .arg("--token")
+        .arg(&token)
+        .arg("--output")
+        .arg(&stamped_pe);
+    stamp
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("timestamp-pe-rfc3161: ok"));
+
+    let mut verify = portable_cmd();
+    verify.arg("verify-pe").arg(&stamped_pe);
+    verify.assert().success();
+
+    let mut inspect = portable_cmd();
+    inspect
+        .arg("inspect-authenticode")
+        .arg(&stamped_pe)
+        .arg("--input")
+        .arg("pe");
+    inspect
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "microsoft_nested_rfc3161_attribute",
+        ))
+        .stdout(predicate::str::contains("1.3.6.1.4.1.311.3.3.1"));
 }
 
 #[test]

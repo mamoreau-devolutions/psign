@@ -475,6 +475,30 @@ pub struct VerifyArgs {
     /// Portable trust: fixed verification date (YYYY-MM-DD).
     #[arg(long)]
     pub as_of: Option<String>,
+    /// Portable trust: ingest roots and disallowed CTL data from an AuthRoot-style CAB.
+    #[arg(long)]
+    pub authroot_cab: Option<PathBuf>,
+    /// Portable trust: require the AuthRoot CAB SHA-256 before ingesting it.
+    #[arg(long)]
+    pub expect_authroot_cab_sha256: Option<String>,
+    /// Portable trust: print certificate-chain diagnostics.
+    #[arg(long)]
+    pub verbose_chain: bool,
+    /// Portable trust: skip strict code-signing EKU/policy checks on the signing certificate.
+    #[arg(long)]
+    pub allow_loose_signing_cert: bool,
+    /// Portable trust: prefer embedded timestamp signing instants for chain validation.
+    #[arg(long)]
+    pub prefer_timestamp_signing_time: bool,
+    /// Portable trust: require a cryptographically valid timestamp when timestamp preference is enabled.
+    #[arg(long)]
+    pub require_valid_timestamp: bool,
+    /// Portable trust: timeout for online issuer, OCSP, and CRL HTTP requests.
+    #[arg(long, default_value_t = 5)]
+    pub online_timeout_secs: u64,
+    /// Portable trust: maximum bytes accepted for online issuer downloads.
+    #[arg(long, default_value_t = 1024 * 1024)]
+    pub online_max_download_bytes: usize,
     /// Files to verify (native `<filename(s)>`; one or more trailing paths).
     #[arg(required = true)]
     pub files: Vec<PathBuf>,

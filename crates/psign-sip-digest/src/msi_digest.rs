@@ -16,7 +16,7 @@ use sha1::Sha1;
 use sha2::{Sha256, Sha384, Sha512};
 use std::cmp::Ordering;
 use std::fs::File;
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -235,6 +235,33 @@ pub fn msi_digital_signature_pkcs7_der(data: &[u8]) -> Result<Vec<u8>> {
     let cur = std::io::Cursor::new(data);
     let mut cfb = CompoundFile::open(cur).map_err(|e| anyhow!("open as OLE compound file: {e}"))?;
     msi_digital_signature_pkcs7_from_cfb(&mut cfb)
+}
+
+/// Create or replace the root **`\u{5}DigitalSignature`** stream in an MSI/MSP OLE file.
+pub fn write_msi_digital_signature_pkcs7(path: &Path, pkcs7: &[u8]) -> Result<()> {
+    let mut cfb =
+        cfb::open_rw(path).map_err(|e| anyhow!("open OLE compound file read/write: {e}"))?;
+    let sig_path = root_stream(DIGITAL_SIGNATURE_ENTRY);
+    let mut s = cfb.create_stream(&sig_path)?;
+    s.write_all(pkcs7)?;
+    Ok(())
+}
+
+/// Copy an MSI/MSP OLE file and write the root **`\u{5}DigitalSignature`** PKCS#7 stream.
+pub fn msi_embed_authenticode_pkcs7_signature(
+    input: &Path,
+    output: &Path,
+    pkcs7: &[u8],
+) -> Result<()> {
+    let same_path = input == output
+        || match (std::fs::canonicalize(input), std::fs::canonicalize(output)) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        };
+    if !same_path {
+        std::fs::copy(input, output)?;
+    }
+    write_msi_digital_signature_pkcs7(output, pkcs7)
 }
 
 /// **RS256** prehash over **`SignerInfo`** authenticated attributes for MSI-embedded PKCS#7 (same as **`pkcs7-signer-rs256-prehash`** on [`msi_digital_signature_pkcs7_der`] output).

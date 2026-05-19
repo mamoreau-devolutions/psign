@@ -80,6 +80,48 @@ fn verify_repeatable_thumbprints_and_quiet_short_parse() {
 }
 
 #[test]
+fn verify_portable_trust_options_parse() {
+    let c = Cli::try_parse_from([
+        "psign-tool",
+        "--mode",
+        "portable",
+        "verify",
+        "--authroot-cab",
+        "authrootstl.cab",
+        "--expect-authroot-cab-sha256",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "--verbose-chain",
+        "--allow-loose-signing-cert",
+        "--prefer-timestamp-signing-time",
+        "--require-valid-timestamp",
+        "--online-timeout-secs",
+        "9",
+        "--online-max-download-bytes",
+        "4096",
+        "x.exe",
+    ])
+    .expect("parse");
+
+    let SubCommand::Verify(v) = c.command else {
+        panic!("expected verify");
+    };
+    assert_eq!(
+        v.authroot_cab.as_deref(),
+        Some(Path::new("authrootstl.cab"))
+    );
+    assert_eq!(
+        v.expect_authroot_cab_sha256.as_deref(),
+        Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    );
+    assert!(v.verbose_chain);
+    assert!(v.allow_loose_signing_cert);
+    assert!(v.prefer_timestamp_signing_time);
+    assert!(v.require_valid_timestamp);
+    assert_eq!(v.online_timeout_secs, 9);
+    assert_eq!(v.online_max_download_bytes, 4096);
+}
+
+#[test]
 fn verify_accepts_multiple_trailing_files() {
     let c = Cli::try_parse_from([
         "psign-tool",

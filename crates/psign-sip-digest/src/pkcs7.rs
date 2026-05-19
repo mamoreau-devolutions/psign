@@ -10,21 +10,58 @@
 //! [`parse_pe_pkcs7_spc_indirect_data_at`] / [`parse_pe_pkcs7_spc_indirect_data`] and [`spc_indirect_data_replace_message_digest`] support **Linux-side digest substitution** before a future **`SignedData`** signer assembles countersignatures / PKCS#9 attributes. [`cms_digest_encapsulated_econtent_bytes`] and [`signer_info_pkcs9_message_digest_octets`] pin **RFC 5652 §5.4** **`eContent`** hashing to PKCS#9 **`messageDigest`** on fixtures (RustCrypto **`cms` SignerInfoBuilder** semantics). [`signer_info_signed_attributes_sequence_der`] yields the **`SET OF Attribute`** octets for §5.4 authenticated-attribute signing; [`signed_attributes_replace_pkcs9_message_digest`] refreshes PKCS#9 **`messageDigest`** after **`encapContentInfo`** changes (**`encryptedDigest`** still requires re-sign). [`signer_info_sha256_digest_over_signed_attrs`] and [`signed_data_rsa_sha256_signer_prehash_digest`] **SHA-256**-hash **of** that **`SET`** (staging digest before PKCS#1 **DigestInfo** / **KV `RS256`** validation). [`signer_info_clone_with_signed_attrs`] / [`signer_info_clone_with_signature_octets`] patch **`SignerInfo`** after remote signing; [`signed_data_replace_signer_info_at`] / [`signed_data_replace_first_signer_info`] splice it back into **`SignedData.signerInfos`**. **`WIN_CERTIFICATE`** embedding remains [`crate::pe_embed`].
 
 use anyhow::{Context as _, Result, anyhow};
-use authenticode::{DigestInfo, SpcIndirectDataContent};
+use authenticode::{DigestInfo, SpcAttributeTypeAndOptionalValue, SpcIndirectDataContent};
+use cms::builder::{SignedDataBuilder, SignerInfoBuilder};
 use cms::cert::CertificateChoices;
-use cms::content_info::ContentInfo;
+use cms::cert::IssuerAndSerialNumber;
+use cms::content_info::{CmsVersion, ContentInfo};
 use cms::signed_data::{
-    SignatureValue, SignedAttributes, SignedData, SignerIdentifier, SignerInfo, SignerInfos,
+    CertificateSet, EncapsulatedContentInfo, SignatureValue, SignedAttributes, SignedData,
+    SignerIdentifier, SignerInfo, SignerInfos,
 };
-use der::asn1::{Any, ObjectIdentifier, OctetString, OctetStringRef, SetOfVec};
+use der::asn1::{Any, AnyRef, ObjectIdentifier, OctetString, OctetStringRef, SetOfVec};
 use der::{Decode, Encode, Reader, SliceReader, Tag};
 use digest::Digest as _;
+use rsa::RsaPrivateKey;
+use sha2::{Sha256, Sha384, Sha512};
 use x509_cert::Certificate;
 use x509_cert::attr::Attribute;
 use x509_cert::ext::pkix::SubjectKeyIdentifier;
+use x509_cert::spki::AlgorithmIdentifierOwned;
 
 /// CMS **`signedData`** content type OID (`id-signedData`).
 const ID_SIGNED_DATA_OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.7.2");
+/// Authenticode PE image-data OID (`SPC_PE_IMAGE_DATA_OBJID`).
+const SPC_PE_IMAGE_DATA_OBJID: ObjectIdentifier =
+    ObjectIdentifier::new_unwrap("1.3.6.1.4.1.311.2.1.15");
+/// CAB Authenticode data OID observed in Windows CAB signatures (`SPC_LINK_OBJID`).
+const SPC_CAB_LINK_OBJID: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.4.1.311.2.1.28");
+/// Windows Installer Authenticode data OID observed in MSI signatures (`SPC_SIGINFO_OBJID`).
+const SPC_MSI_SIGINFO_OBJID: ObjectIdentifier =
+    ObjectIdentifier::new_unwrap("1.3.6.1.4.1.311.2.1.30");
+/// Stable minimal `SpcPeImageData` body used by Windows SignTool for PE Authenticode.
+///
+/// This is the DER **value** of the `SEQUENCE`:
+/// `BIT STRING ''`, followed by an obsolete `SpcLink` placeholder (`<<<Obsolete>>>`).
+const SPC_PE_IMAGE_DATA_VALUE: &[u8] = &[
+    0x03, 0x01, 0x00, 0xa0, 0x20, 0xa2, 0x1e, 0x80, 0x1c, 0x00, 0x3c, 0x00, 0x3c, 0x00, 0x3c, 0x00,
+    0x4f, 0x00, 0x62, 0x00, 0x73, 0x00, 0x6f, 0x00, 0x6c, 0x00, 0x65, 0x00, 0x74, 0x00, 0x65, 0x00,
+    0x3e, 0x00, 0x3e, 0x00, 0x3e,
+];
+/// Stable CAB `SpcLink` value DER observed in Windows CAB Authenticode signatures.
+const SPC_CAB_LINK_VALUE_DER: &[u8] = &[
+    0xa1, 0x48, 0x04, 0x10, 0xa6, 0xb5, 0x86, 0xd5, 0xb4, 0xa1, 0x24, 0x66, 0xae, 0x05, 0xa2, 0x17,
+    0xda, 0x8e, 0x60, 0xd6, 0x04, 0x34, 0x31, 0x32, 0x30, 0x30, 0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04,
+    0x01, 0x82, 0x37, 0x02, 0x05, 0x01, 0x31, 0x22, 0x04, 0x20, 0x1f, 0xa1, 0x2d, 0xdc, 0xd1, 0x11,
+    0x50, 0x32, 0xe8, 0x90, 0x3f, 0x91, 0x52, 0x54, 0xb2, 0x19, 0x3a, 0x87, 0x34, 0xb1, 0x7e, 0x92,
+    0x10, 0xd5, 0x52, 0x10, 0x8b, 0x77, 0x16, 0xee, 0x52, 0x9b,
+];
+/// Stable MSI `SpcSigInfo` value DER observed in Windows MSI/MSP Authenticode signatures.
+const SPC_MSI_SIGINFO_VALUE_DER: &[u8] = &[
+    0x30, 0x24, 0x02, 0x01, 0x02, 0x04, 0x10, 0xf1, 0x10, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46, 0x02, 0x01, 0x00, 0x02, 0x01, 0x00, 0x02, 0x01, 0x00,
+    0x02, 0x01, 0x00, 0x02, 0x01, 0x00,
+];
 
 /// **`SignerInfo.digestAlgorithm`** / **`DigestInfo.digestAlgorithm`** SHA-1 OID.
 const DIGEST_OID_SHA1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.14.3.2.26");
@@ -38,12 +75,493 @@ const DIGEST_OID_SHA512: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.8
 /// PKCS#9 **`messageDigest`** authenticated-attribute type OID.
 pub const PKCS9_MESSAGE_DIGEST_OID: ObjectIdentifier =
     ObjectIdentifier::new_unwrap("1.2.840.113549.1.9.4");
+/// PKCS#9 **`contentType`** authenticated-attribute type OID.
+pub const PKCS9_CONTENT_TYPE_OID: ObjectIdentifier =
+    ObjectIdentifier::new_unwrap("1.2.840.113549.1.9.3");
+/// Microsoft Authenticode RFC3161 timestamp-token unsigned attribute.
+pub const MS_RFC3161_TIMESTAMP_TOKEN_OID: ObjectIdentifier =
+    ObjectIdentifier::new_unwrap("1.3.6.1.4.1.311.3.3.1");
 
 /// CMS **`data`** content type OID (`id-data`).
 pub const PKCS7_ID_DATA_OID: &str = "1.2.840.113549.1.7.1";
 
 /// CMS **`signedData`** content type OID (string form).
 pub const PKCS7_ID_SIGNED_DATA_OID: &str = "1.2.840.113549.1.7.2";
+
+/// Digest algorithms supported by the portable Authenticode CMS producer.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AuthenticodeSigningDigest {
+    /// SHA-256 (`id-sha256`) with RSA PKCS#1 v1.5 `sha256WithRSAEncryption`.
+    Sha256,
+    /// SHA-384 (`id-sha384`) with RSA PKCS#1 v1.5 `sha384WithRSAEncryption`.
+    Sha384,
+    /// SHA-512 (`id-sha512`) with RSA PKCS#1 v1.5 `sha512WithRSAEncryption`.
+    Sha512,
+}
+
+impl AuthenticodeSigningDigest {
+    /// Matching PE image digest kind.
+    pub fn pe_hash_kind(self) -> crate::pe_digest::PeAuthenticodeHashKind {
+        match self {
+            Self::Sha256 => crate::pe_digest::PeAuthenticodeHashKind::Sha256,
+            Self::Sha384 => crate::pe_digest::PeAuthenticodeHashKind::Sha384,
+            Self::Sha512 => crate::pe_digest::PeAuthenticodeHashKind::Sha512,
+        }
+    }
+
+    fn digest_algorithm(self) -> AlgorithmIdentifierOwned {
+        AlgorithmIdentifierOwned {
+            oid: match self {
+                Self::Sha256 => DIGEST_OID_SHA256,
+                Self::Sha384 => DIGEST_OID_SHA384,
+                Self::Sha512 => DIGEST_OID_SHA512,
+            },
+            parameters: None,
+        }
+    }
+
+    fn rsa_signature_algorithm(self) -> AlgorithmIdentifierOwned {
+        AlgorithmIdentifierOwned {
+            oid: match self {
+                Self::Sha256 => ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.11"),
+                Self::Sha384 => ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.12"),
+                Self::Sha512 => ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.13"),
+            },
+            parameters: Some(Any::from(AnyRef::NULL)),
+        }
+    }
+
+    fn digest_bytes(self, bytes: &[u8]) -> Vec<u8> {
+        match self {
+            Self::Sha256 => Sha256::digest(bytes).to_vec(),
+            Self::Sha384 => Sha384::digest(bytes).to_vec(),
+            Self::Sha512 => Sha512::digest(bytes).to_vec(),
+        }
+    }
+}
+
+/// Build the Authenticode `SpcIndirectDataContent` for a PE image digest.
+pub fn pe_spc_indirect_data(
+    digest_algorithm: AuthenticodeSigningDigest,
+    pe_digest: &[u8],
+) -> Result<SpcIndirectDataContent> {
+    spc_indirect_data(
+        digest_algorithm,
+        pe_digest,
+        SPC_PE_IMAGE_DATA_OBJID,
+        Any::new(Tag::Sequence, SPC_PE_IMAGE_DATA_VALUE)
+            .map_err(|e| anyhow!("SPC_PE_IMAGE_DATA Any: {e}"))?,
+        "PE",
+    )
+}
+
+/// Build the Authenticode `SpcIndirectDataContent` for a CAB file digest.
+pub fn cab_spc_indirect_data(
+    digest_algorithm: AuthenticodeSigningDigest,
+    cab_digest: &[u8],
+) -> Result<SpcIndirectDataContent> {
+    spc_indirect_data(
+        digest_algorithm,
+        cab_digest,
+        SPC_CAB_LINK_OBJID,
+        Any::from_der(SPC_CAB_LINK_VALUE_DER).map_err(|e| anyhow!("SPC_CAB_LINK Any: {e}"))?,
+        "CAB",
+    )
+}
+
+/// Build the Authenticode `SpcIndirectDataContent` for an MSI/MSP OLE package digest.
+pub fn msi_spc_indirect_data(
+    digest_algorithm: AuthenticodeSigningDigest,
+    msi_digest: &[u8],
+) -> Result<SpcIndirectDataContent> {
+    spc_indirect_data(
+        digest_algorithm,
+        msi_digest,
+        SPC_MSI_SIGINFO_OBJID,
+        Any::from_der(SPC_MSI_SIGINFO_VALUE_DER)
+            .map_err(|e| anyhow!("SPC_MSI_SIGINFO Any: {e}"))?,
+        "MSI",
+    )
+}
+
+fn spc_indirect_data(
+    digest_algorithm: AuthenticodeSigningDigest,
+    subject_digest: &[u8],
+    value_type: ObjectIdentifier,
+    value: Any,
+    label: &str,
+) -> Result<SpcIndirectDataContent> {
+    let expected = digest_algorithm.pe_hash_kind().digest_output_len();
+    if subject_digest.len() != expected {
+        return Err(anyhow!(
+            "{label} digest length {} does not match {:?} ({expected} octets)",
+            subject_digest.len(),
+            digest_algorithm
+        ));
+    }
+    let digest = OctetString::new(subject_digest.to_vec())
+        .map_err(|e| anyhow!("SpcIndirectData digest OCTET STRING: {e}"))?;
+    Ok(SpcIndirectDataContent {
+        data: SpcAttributeTypeAndOptionalValue { value_type, value },
+        message_digest: DigestInfo {
+            digest_algorithm: digest_algorithm.digest_algorithm(),
+            digest,
+        },
+    })
+}
+
+/// Create PKCS#7 `ContentInfo(SignedData)` DER for a CAB Authenticode signature using an RSA private key.
+pub fn create_cab_authenticode_pkcs7_der_rsa(
+    cab_image: &[u8],
+    digest_algorithm: AuthenticodeSigningDigest,
+    signer_cert: Certificate,
+    chain_certs: Vec<Certificate>,
+    private_key: RsaPrivateKey,
+) -> Result<Vec<u8>> {
+    let cab_digest = crate::cab_digest::cab_authenticode_digest_for_signing(
+        cab_image,
+        digest_algorithm.pe_hash_kind(),
+    )?;
+    let indirect = cab_spc_indirect_data(digest_algorithm, &cab_digest)?;
+    create_authenticode_pkcs7_der_rsa(
+        indirect,
+        digest_algorithm,
+        signer_cert,
+        chain_certs,
+        private_key,
+    )
+}
+
+/// Create PKCS#7 `ContentInfo(SignedData)` DER for an MSI/MSP Authenticode signature using an RSA private key.
+pub fn create_msi_authenticode_pkcs7_der_rsa(
+    msi_image: &[u8],
+    digest_algorithm: AuthenticodeSigningDigest,
+    signer_cert: Certificate,
+    chain_certs: Vec<Certificate>,
+    private_key: RsaPrivateKey,
+) -> Result<Vec<u8>> {
+    let msi_digest = crate::msi_digest::compute_msi_authenticode_digest(
+        msi_image,
+        digest_algorithm.pe_hash_kind(),
+    )?;
+    let indirect = msi_spc_indirect_data(digest_algorithm, &msi_digest)?;
+    create_authenticode_pkcs7_der_rsa(
+        indirect,
+        digest_algorithm,
+        signer_cert,
+        chain_certs,
+        private_key,
+    )
+}
+
+/// Create PKCS#7 `ContentInfo(SignedData)` DER for a PE Authenticode signature using an RSA private key.
+///
+/// This is the portable CMS producer used before format-specific embedding (for PE, `pe_embed` wraps the
+/// returned DER in a `WIN_CERTIFICATE`). It intentionally supports the modern RSA/SHA-2 subset first.
+pub fn create_pe_authenticode_pkcs7_der_rsa(
+    pe_image: &[u8],
+    digest_algorithm: AuthenticodeSigningDigest,
+    signer_cert: Certificate,
+    chain_certs: Vec<Certificate>,
+    private_key: RsaPrivateKey,
+) -> Result<Vec<u8>> {
+    let pe_digest =
+        crate::pe_digest::pe_authenticode_digest(pe_image, digest_algorithm.pe_hash_kind())?;
+    let indirect = pe_spc_indirect_data(digest_algorithm, &pe_digest)?;
+    create_authenticode_pkcs7_der_rsa(
+        indirect,
+        digest_algorithm,
+        signer_cert,
+        chain_certs,
+        private_key,
+    )
+}
+
+/// Create PKCS#7 `ContentInfo(SignedData)` DER for an Authenticode `SpcIndirectDataContent`.
+pub fn create_authenticode_pkcs7_der_rsa(
+    indirect: SpcIndirectDataContent,
+    digest_algorithm: AuthenticodeSigningDigest,
+    signer_cert: Certificate,
+    chain_certs: Vec<Certificate>,
+    private_key: RsaPrivateKey,
+) -> Result<Vec<u8>> {
+    match digest_algorithm {
+        AuthenticodeSigningDigest::Sha256 => {
+            create_authenticode_pkcs7_der_rsa_for_digest::<Sha256, rsa::pkcs1v15::Signature>(
+                indirect,
+                digest_algorithm,
+                signer_cert,
+                chain_certs,
+                private_key,
+            )
+        }
+        AuthenticodeSigningDigest::Sha384 => {
+            create_authenticode_pkcs7_der_rsa_for_digest::<Sha384, rsa::pkcs1v15::Signature>(
+                indirect,
+                digest_algorithm,
+                signer_cert,
+                chain_certs,
+                private_key,
+            )
+        }
+        AuthenticodeSigningDigest::Sha512 => {
+            create_authenticode_pkcs7_der_rsa_for_digest::<Sha512, rsa::pkcs1v15::Signature>(
+                indirect,
+                digest_algorithm,
+                signer_cert,
+                chain_certs,
+                private_key,
+            )
+        }
+    }
+}
+
+/// Return the digest that a remote RSA PKCS#1 v1.5 signer must sign for this Authenticode payload.
+///
+/// The returned bytes are the SHA-2 digest of DER `SignedAttributes` (`SET OF Attribute`) per RFC 5652 §5.4.
+/// Pass the corresponding raw signature to [`create_authenticode_pkcs7_der_with_rsa_signature`].
+pub fn authenticode_remote_rsa_signed_attrs_digest(
+    indirect: &SpcIndirectDataContent,
+    digest_algorithm: AuthenticodeSigningDigest,
+) -> Result<Vec<u8>> {
+    let attrs = authenticode_signed_attrs(indirect, digest_algorithm)?;
+    let der = signed_attributes_der(&attrs)?;
+    Ok(digest_algorithm.digest_bytes(&der))
+}
+
+/// Create PKCS#7 `ContentInfo(SignedData)` DER from externally produced RSA PKCS#1 v1.5 signature bytes.
+///
+/// This supports remote signers such as Key Vault or Trusted Signing once the caller has signed
+/// [`authenticode_remote_rsa_signed_attrs_digest`] with the matching RSA/SHA-2 algorithm.
+pub fn create_authenticode_pkcs7_der_with_rsa_signature(
+    indirect: SpcIndirectDataContent,
+    digest_algorithm: AuthenticodeSigningDigest,
+    signer_cert: Certificate,
+    chain_certs: Vec<Certificate>,
+    encrypted_digest: &[u8],
+) -> Result<Vec<u8>> {
+    let attrs = authenticode_signed_attrs(&indirect, digest_algorithm)?;
+    let signer_id = SignerIdentifier::IssuerAndSerialNumber(IssuerAndSerialNumber {
+        issuer: signer_cert.tbs_certificate.issuer.clone(),
+        serial_number: signer_cert.tbs_certificate.serial_number.clone(),
+    });
+    let signer_info = SignerInfo {
+        version: CmsVersion::V1,
+        sid: signer_id,
+        digest_alg: digest_algorithm.digest_algorithm(),
+        signed_attrs: Some(attrs),
+        signature_algorithm: digest_algorithm.rsa_signature_algorithm(),
+        signature: SignatureValue::new(encrypted_digest.to_vec())
+            .map_err(|e| anyhow!("SignerInfo.signature OCTET STRING: {e}"))?,
+        unsigned_attrs: None,
+    };
+    let indirect_der = encode_spc_indirect_data_der(&indirect)?;
+    let mut rd = SliceReader::new(indirect_der.as_slice())
+        .map_err(|e| anyhow!("indirect DER reader: {e}"))?;
+    let econtent = Any::decode(&mut rd).map_err(|e| anyhow!("SpcIndirectData as CMS Any: {e}"))?;
+    rd.finish(())
+        .map_err(|e| anyhow!("trailing octets after SpcIndirectDataContent DER: {e}"))?;
+    let digest_algorithms = SetOfVec::try_from(vec![digest_algorithm.digest_algorithm()])
+        .map_err(|e| anyhow!("DigestAlgorithmIdentifiers SET: {e}"))?;
+    let mut certs = Vec::with_capacity(chain_certs.len() + 1);
+    certs.push(CertificateChoices::Certificate(signer_cert));
+    certs.extend(chain_certs.into_iter().map(CertificateChoices::Certificate));
+    let certificates = Some(CertificateSet(
+        SetOfVec::try_from(certs).map_err(|e| anyhow!("CertificateSet SET: {e}"))?,
+    ));
+    let signer_infos = SignerInfos(
+        SetOfVec::try_from(vec![signer_info]).map_err(|e| anyhow!("SignerInfos SET: {e}"))?,
+    );
+    let sd = SignedData {
+        version: CmsVersion::V1,
+        digest_algorithms,
+        encap_content_info: EncapsulatedContentInfo {
+            econtent_type: authenticode::SPC_INDIRECT_DATA_OBJID,
+            econtent: Some(econtent),
+        },
+        certificates,
+        crls: None,
+        signer_infos,
+    };
+    encode_pkcs7_content_info_signed_data_der(&sd)
+}
+
+/// Attach a raw RFC3161 `timeStampToken` `ContentInfo` as a Microsoft Authenticode unsigned attribute.
+pub fn signed_data_add_rfc3161_timestamp_token(
+    sd: &SignedData,
+    signer_index: usize,
+    timestamp_token_der: &[u8],
+) -> Result<SignedData> {
+    let signers = sd.signer_infos.0.as_slice();
+    let si = signers.get(signer_index).ok_or_else(|| {
+        anyhow!(
+            "SignerInfo index {} out of range (len {})",
+            signer_index,
+            signers.len()
+        )
+    })?;
+    let token_der = crate::pkcs7_wire::pkcs7_outer_sequence_prefix(timestamp_token_der)
+        .unwrap_or(timestamp_token_der);
+    let mut rd =
+        SliceReader::new(token_der).map_err(|e| anyhow!("timestamp token DER reader: {e}"))?;
+    let token_any =
+        Any::decode(&mut rd).map_err(|e| anyhow!("timestamp token ContentInfo: {e}"))?;
+    rd.finish(())
+        .map_err(|e| anyhow!("trailing octets after timestamp token ContentInfo: {e}"))?;
+    let mut values = SetOfVec::new();
+    values
+        .insert(token_any)
+        .map_err(|e| anyhow!("timestamp AttributeValue SET: {e}"))?;
+    let timestamp_attr = Attribute {
+        oid: MS_RFC3161_TIMESTAMP_TOKEN_OID,
+        values,
+    };
+    let mut attrs: Vec<Attribute> = si
+        .unsigned_attrs
+        .as_ref()
+        .map(|attrs| attrs.iter().cloned().collect())
+        .unwrap_or_default();
+    attrs.retain(|attr| attr.oid != MS_RFC3161_TIMESTAMP_TOKEN_OID);
+    attrs.push(timestamp_attr);
+    let mut stamped = si.clone();
+    stamped.unsigned_attrs = Some(
+        SetOfVec::try_from(attrs)
+            .map_err(|e| anyhow!("UnsignedAttributes SET canonicalization: {e}"))?,
+    );
+    signed_data_replace_signer_info_at(sd, signer_index, stamped)
+}
+
+fn create_authenticode_pkcs7_der_rsa_for_digest<D, Sig>(
+    indirect: SpcIndirectDataContent,
+    digest_algorithm: AuthenticodeSigningDigest,
+    signer_cert: Certificate,
+    chain_certs: Vec<Certificate>,
+    private_key: RsaPrivateKey,
+) -> Result<Vec<u8>>
+where
+    D: digest::Digest + rsa::pkcs8::AssociatedOid + rsa::pkcs1v15::RsaSignatureAssociatedOid,
+    rsa::pkcs1v15::SigningKey<D>: rsa::signature::Keypair
+        + rsa::signature::Signer<Sig>
+        + x509_cert::spki::DynSignatureAlgorithmIdentifier,
+    Sig: x509_cert::spki::SignatureBitStringEncoding,
+{
+    let indirect_der = encode_spc_indirect_data_der(&indirect)?;
+    create_pkcs7_signed_data_der_rsa_for_digest::<D, Sig>(
+        authenticode::SPC_INDIRECT_DATA_OBJID,
+        &indirect_der,
+        digest_algorithm,
+        signer_cert,
+        chain_certs,
+        private_key,
+    )
+}
+
+/// Create PKCS#7 `ContentInfo(SignedData)` DER for an arbitrary encapsulated content type using an RSA private key.
+///
+/// This is shared by Authenticode `SpcIndirectDataContent` producers and Microsoft CTL/catalog
+/// authoring. `econtent_der` must be one complete DER TLV for the value placed inside
+/// `EncapsulatedContentInfo.eContent`.
+pub fn create_pkcs7_signed_data_der_rsa(
+    econtent_type: ObjectIdentifier,
+    econtent_der: &[u8],
+    digest_algorithm: AuthenticodeSigningDigest,
+    signer_cert: Certificate,
+    chain_certs: Vec<Certificate>,
+    private_key: RsaPrivateKey,
+) -> Result<Vec<u8>> {
+    match digest_algorithm {
+        AuthenticodeSigningDigest::Sha256 => {
+            create_pkcs7_signed_data_der_rsa_for_digest::<Sha256, rsa::pkcs1v15::Signature>(
+                econtent_type,
+                econtent_der,
+                digest_algorithm,
+                signer_cert,
+                chain_certs,
+                private_key,
+            )
+        }
+        AuthenticodeSigningDigest::Sha384 => {
+            create_pkcs7_signed_data_der_rsa_for_digest::<Sha384, rsa::pkcs1v15::Signature>(
+                econtent_type,
+                econtent_der,
+                digest_algorithm,
+                signer_cert,
+                chain_certs,
+                private_key,
+            )
+        }
+        AuthenticodeSigningDigest::Sha512 => {
+            create_pkcs7_signed_data_der_rsa_for_digest::<Sha512, rsa::pkcs1v15::Signature>(
+                econtent_type,
+                econtent_der,
+                digest_algorithm,
+                signer_cert,
+                chain_certs,
+                private_key,
+            )
+        }
+    }
+}
+
+fn create_pkcs7_signed_data_der_rsa_for_digest<D, Sig>(
+    econtent_type: ObjectIdentifier,
+    econtent_der: &[u8],
+    digest_algorithm: AuthenticodeSigningDigest,
+    signer_cert: Certificate,
+    chain_certs: Vec<Certificate>,
+    private_key: RsaPrivateKey,
+) -> Result<Vec<u8>>
+where
+    D: digest::Digest + rsa::pkcs8::AssociatedOid + rsa::pkcs1v15::RsaSignatureAssociatedOid,
+    rsa::pkcs1v15::SigningKey<D>: rsa::signature::Keypair
+        + rsa::signature::Signer<Sig>
+        + x509_cert::spki::DynSignatureAlgorithmIdentifier,
+    Sig: x509_cert::spki::SignatureBitStringEncoding,
+{
+    let signer = rsa::pkcs1v15::SigningKey::<D>::new(private_key);
+    let digest_alg = digest_algorithm.digest_algorithm();
+    let mut rd = SliceReader::new(econtent_der)
+        .map_err(|e| anyhow!("encapsulated content DER reader: {e}"))?;
+    let econtent =
+        Any::decode(&mut rd).map_err(|e| anyhow!("encapsulated content as CMS Any: {e}"))?;
+    rd.finish(())
+        .map_err(|e| anyhow!("trailing octets after encapsulated content DER: {e}"))?;
+    let content = EncapsulatedContentInfo {
+        econtent_type,
+        econtent: Some(econtent),
+    };
+    let signer_id = SignerIdentifier::IssuerAndSerialNumber(IssuerAndSerialNumber {
+        issuer: signer_cert.tbs_certificate.issuer.clone(),
+        serial_number: signer_cert.tbs_certificate.serial_number.clone(),
+    });
+    let signer_info =
+        SignerInfoBuilder::new(&signer, signer_id, digest_alg.clone(), &content, None)
+            .map_err(|e| anyhow!("build CMS SignerInfo: {e}"))?;
+    let mut builder = SignedDataBuilder::new(&content);
+    builder
+        .add_digest_algorithm(digest_alg)
+        .map_err(|e| anyhow!("add CMS digest algorithm: {e}"))?
+        .add_certificate(CertificateChoices::Certificate(signer_cert))
+        .map_err(|e| anyhow!("add CMS signer certificate: {e}"))?;
+    for cert in chain_certs {
+        builder
+            .add_certificate(CertificateChoices::Certificate(cert))
+            .map_err(|e| anyhow!("add CMS chain certificate: {e}"))?;
+    }
+    let pkcs7 = builder
+        .add_signer_info::<rsa::pkcs1v15::SigningKey<D>, Sig>(signer_info)
+        .map_err(|e| anyhow!("sign CMS signed attributes: {e}"))?
+        .build()
+        .map_err(|e| anyhow!("build CMS SignedData: {e}"))?
+        .to_der()
+        .map_err(|e| anyhow!("encode CMS PKCS#7 ContentInfo: {e}"))?;
+    let mut sd = parse_pkcs7_signed_data_der(&pkcs7)?;
+    // Microsoft Authenticode/catalog PKCS#7 profiles use SignedData.version v1 even though
+    // RFC 5652 would normally select v3 for non-id-data encapsulated content. The existing
+    // parser and Windows fixtures expect this value; it is outside the signed attribute digest.
+    sd.version = CmsVersion::V1;
+    encode_pkcs7_content_info_signed_data_der(&sd)
+}
 
 /// Encode **`SignedData`** as a PKCS#7 **`ContentInfo`** (**`contentType`** = **`id-signedData`**, RFC 5652).
 ///
@@ -464,6 +982,54 @@ fn pkcs9_message_digest_attribute(new_digest: &[u8]) -> Result<Attribute> {
         oid: PKCS9_MESSAGE_DIGEST_OID,
         values,
     })
+}
+
+fn pkcs9_content_type_attribute(content_type: ObjectIdentifier) -> Result<Attribute> {
+    let oid_der = content_type
+        .to_der()
+        .map_err(|e| anyhow!("contentType OID DER: {e}"))?;
+    let mut rd = SliceReader::new(oid_der.as_slice())
+        .map_err(|e| anyhow!("contentType OID DER reader: {e}"))?;
+    let val = Any::decode(&mut rd).map_err(|e| anyhow!("contentType AttributeValue ANY: {e}"))?;
+    rd.finish(())
+        .map_err(|e| anyhow!("trailing octets after contentType OID DER: {e}"))?;
+    let mut values = SetOfVec::new();
+    values
+        .insert(val)
+        .map_err(|e| anyhow!("SET OF AttributeValue insert: {e}"))?;
+    Ok(Attribute {
+        oid: PKCS9_CONTENT_TYPE_OID,
+        values,
+    })
+}
+
+fn signed_attributes_der(attrs: &SignedAttributes) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    attrs
+        .encode_to_vec(&mut out)
+        .map_err(|e| anyhow!("encode authenticated attributes SET OF Attribute: {e}"))?;
+    Ok(out)
+}
+
+fn authenticode_signed_attrs(
+    indirect: &SpcIndirectDataContent,
+    digest_algorithm: AuthenticodeSigningDigest,
+) -> Result<SignedAttributes> {
+    let indirect_der = encode_spc_indirect_data_der(indirect)?;
+    let mut rd = SliceReader::new(indirect_der.as_slice())
+        .map_err(|e| anyhow!("indirect DER reader: {e}"))?;
+    let econtent = Any::decode(&mut rd).map_err(|e| anyhow!("SpcIndirectData as CMS Any: {e}"))?;
+    rd.finish(())
+        .map_err(|e| anyhow!("trailing octets after SpcIndirectDataContent DER: {e}"))?;
+    let econtent_digest = cms_digest_encapsulated_econtent_bytes(
+        &digest_algorithm.digest_algorithm().oid,
+        &econtent,
+    )?;
+    SetOfVec::try_from(vec![
+        pkcs9_content_type_attribute(authenticode::SPC_INDIRECT_DATA_OBJID)?,
+        pkcs9_message_digest_attribute(&econtent_digest)?,
+    ])
+    .map_err(|e| anyhow!("SignedAttributes SET OF Attribute canonicalization: {e}"))
 }
 
 /// Clone authenticated **`SET OF Attribute`** and replace PKCS#9 **`messageDigest`** (**[`PKCS9_MESSAGE_DIGEST_OID`]**) with **`new_message_digest`**.
