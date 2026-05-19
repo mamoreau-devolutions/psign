@@ -1,15 +1,13 @@
 //! Normalize Windows-style `signtool.exe` argv (`/pa`, `/v`, …) into GNU-style tokens for clap.
 //!
-//! Only active on Windows: on Unix, a leading `/` often denotes an absolute path.
+//! Unknown slash-prefixed tokens are left untouched so Unix absolute paths still pass through.
 
 use std::ffi::OsString;
 
-#[cfg(windows)]
-use std::os::windows::ffi::OsStrExt;
-
-#[cfg(any(windows, test))]
+#[cfg(any(windows, unix, test))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Verb {
+    CertStore,
     Verify,
     Sign,
     Timestamp,
@@ -19,15 +17,16 @@ enum Verb {
     Unknown,
 }
 
-#[cfg(any(windows, test))]
+#[cfg(any(windows, unix, test))]
 fn lossy(arg: &OsString) -> String {
     arg.to_string_lossy().into_owned()
 }
 
-#[cfg(any(windows, test))]
+#[cfg(any(windows, unix, test))]
 fn is_verb(s: &str) -> Option<Verb> {
     match s.to_ascii_lowercase().as_str() {
         "verify" => Some(Verb::Verify),
+        "cert-store" | "certstore" => Some(Verb::CertStore),
         "sign" => Some(Verb::Sign),
         "timestamp" => Some(Verb::Timestamp),
         "catdb" => Some(Verb::Catdb),
@@ -37,19 +36,19 @@ fn is_verb(s: &str) -> Option<Verb> {
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, unix))]
 fn is_windows_slash_switch(arg: &OsString) -> bool {
-    let w: Vec<u16> = arg.as_os_str().encode_wide().collect();
-    w.len() >= 2 && w[0] == b'/' as u16 && w[1] != b'/' as u16
+    let s = arg.to_string_lossy();
+    s.len() >= 2 && s.starts_with('/') && !s.starts_with("//")
 }
 
-#[cfg(any(windows, test))]
+#[cfg(any(windows, unix, test))]
 fn strip_leading_slash(arg: &OsString) -> String {
     lossy(arg).trim_start_matches('/').to_ascii_lowercase()
 }
 
 /// Returns replacement argv pieces and how many **following** tokens to consume (0, 1, or 2).
-#[cfg(any(windows, test))]
+#[cfg(any(windows, unix, test))]
 fn translate_slash_switch(
     verb: Verb,
     key: &str,
@@ -145,6 +144,22 @@ fn translate_slash_switch(
             "rust-sip-all-digest-checks" => (vec!["--rust-sip-all-digest-checks".into()], 0),
             _ => (vec![], 0),
         },
+        CertStore => match key {
+            "sm" => (vec!["--sm".into()], 0),
+            "p" => {
+                let v = n.unwrap_or("");
+                (vec!["--p".into(), v.to_string()], 1)
+            }
+            "s" => {
+                let v = n.unwrap_or("MY");
+                (vec!["--s".into(), v.to_string()], 1)
+            }
+            "sha1" => {
+                let v = n.unwrap_or("");
+                (vec!["--sha1".into(), v.to_string()], 1)
+            }
+            _ => (vec![], 0),
+        },
         Sign => match key {
             "a" => (vec!["--a".into()], 0),
             "sm" => (vec!["--sm".into()], 0),
@@ -187,8 +202,8 @@ fn translate_slash_switch(
                 (vec!["--s".into(), v.to_string()], 1)
             }
             "fd" => {
-                let v = n.unwrap_or("sha256");
-                (vec!["--fd".into(), v.to_string()], 1)
+                let v = n.unwrap_or("sha256").to_ascii_lowercase();
+                (vec!["--fd".into(), v], 1)
             }
             "tr" => {
                 let v = n.unwrap_or("");
@@ -203,8 +218,8 @@ fn translate_slash_switch(
                 (vec!["--t".into(), v.to_string()], 1)
             }
             "td" => {
-                let v = n.unwrap_or("sha256");
-                (vec!["--td".into(), v.to_string()], 1)
+                let v = n.unwrap_or("sha256").to_ascii_lowercase();
+                (vec!["--td".into(), v], 1)
             }
             "d" => {
                 let v = n.unwrap_or("");
@@ -298,8 +313,8 @@ fn translate_slash_switch(
                 (vec!["--t".into(), v.to_string()], 1)
             }
             "td" => {
-                let v = n.unwrap_or("sha256");
-                (vec!["--td".into(), v.to_string()], 1)
+                let v = n.unwrap_or("sha256").to_ascii_lowercase();
+                (vec!["--td".into(), v], 1)
             }
             "tp" => {
                 let v = n.unwrap_or("0");
@@ -342,7 +357,7 @@ fn translate_slash_switch(
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, unix))]
 fn try_global_slash(arg: &OsString) -> Option<Vec<OsString>> {
     if !is_windows_slash_switch(arg) {
         return None;
@@ -356,7 +371,7 @@ fn try_global_slash(arg: &OsString) -> Option<Vec<OsString>> {
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, unix))]
 pub fn normalize_native_signtool_argv(args: Vec<OsString>) -> Vec<OsString> {
     if args.len() < 2 {
         return args;
@@ -423,7 +438,7 @@ pub fn normalize_native_signtool_argv(args: Vec<OsString>) -> Vec<OsString> {
     out
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, unix)))]
 pub fn normalize_native_signtool_argv(args: Vec<OsString>) -> Vec<OsString> {
     args
 }
@@ -437,6 +452,31 @@ mod tests {
         let (v, e) = translate_slash_switch(Verb::Verify, "pa", None, None);
         assert_eq!(e, 0);
         assert_eq!(v, vec!["--policy", "pa"]);
+    }
+
+    #[test]
+    fn translate_cert_store_selection_aliases() {
+        let (sm, esm) = translate_slash_switch(Verb::CertStore, "sm", None, None);
+        assert_eq!(esm, 0);
+        assert_eq!(sm, vec!["--sm"]);
+        let (store, estore) = translate_slash_switch(Verb::CertStore, "s", Some("Root"), None);
+        assert_eq!(estore, 1);
+        assert_eq!(store, vec!["--s", "Root"]);
+        let (sha1, esha1) = translate_slash_switch(
+            Verb::CertStore,
+            "sha1",
+            Some("0011223344556677889900112233445566778899"),
+            None,
+        );
+        assert_eq!(esha1, 1);
+        assert_eq!(
+            sha1,
+            vec!["--sha1", "0011223344556677889900112233445566778899"]
+        );
+        let (password, epassword) =
+            translate_slash_switch(Verb::CertStore, "p", Some("secret"), None);
+        assert_eq!(epassword, 1);
+        assert_eq!(password, vec!["--p", "secret"]);
     }
 
     #[test]
@@ -597,7 +637,7 @@ mod tests {
     fn translate_sign_fd_tr() {
         let (v, e) = translate_slash_switch(Verb::Sign, "fd", Some("SHA384"), None);
         assert_eq!(e, 1);
-        assert_eq!(v, vec!["--fd", "SHA384"]);
+        assert_eq!(v, vec!["--fd", "sha384"]);
         let (v2, e2) = translate_slash_switch(Verb::Sign, "tr", Some("http://ts/x"), None);
         assert_eq!(e2, 1);
         assert_eq!(v2, vec!["--tr", "http://ts/x"]);

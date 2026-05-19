@@ -75,6 +75,48 @@ cargo check -p psign-sip-digest -p psign-digest-cli -p psign-authenticode-trust 
 
 Unix CI (`ci-unix`) runs **`cargo fmt`**, strict **`clippy -D warnings`** on those crates plus the **`psign` library**, and the digest CLI tests. Local mirror (bash): **`scripts/linux-portable-validation.sh`** from the repo root.
 
+## Portable certificate store
+
+`psign-tool cert-store ...` manages a simple file-based certificate store for portable workflows. The default base directory is **`~/.psign/cert-store`**; set **`PSIGN_CERT_STORE`** or pass **`--cert-store-dir`** to override it. Certificates are stored as DER-encoded X.509 files named by Windows-style SHA-1 thumbprint over the full DER certificate. Optional local private keys live beside the certificate as PEM-encoded, unencrypted PKCS#8 **`.key`** files with the same thumbprint name.
+
+```text
+~/.psign/cert-store/
+  CurrentUser/
+    MY/
+      ABCDEF0123456789ABCDEF0123456789ABCDEF01.der
+      ABCDEF0123456789ABCDEF0123456789ABCDEF01.key
+    Root/
+    CA/
+  LocalMachine/
+    MY/
+    Root/
+    CA/
+```
+
+The default scope is **`CurrentUser`**; **`--machine-store`** (native alias **`/sm`** on Windows) selects **`LocalMachine`** under the same base directory. The default store is **`MY`**; use **`--store`** (native alias **`/s`**) for stores such as **`Root`** or **`CA`**.
+
+```powershell
+psign-tool cert-store import --store MY cert.pem
+psign-tool cert-store import --store MY --key cert.key cert.der
+psign-tool cert-store import-pfx --store MY --password "pfx-password" cert.pfx
+psign-tool cert-store list --store MY
+psign-tool cert-store print --store MY --sha1 ABCDEF0123456789ABCDEF0123456789ABCDEF01
+psign-tool cert-store export --store MY --sha1 ABCDEF0123456789ABCDEF0123456789ABCDEF01 --out cert.der
+psign-tool cert-store export --store MY --sha1 ABCDEF0123456789ABCDEF0123456789ABCDEF01 --out cert.der --with-key --key-out cert.key
+psign-tool cert-store remove --store MY --sha1 ABCDEF0123456789ABCDEF0123456789ABCDEF01
+```
+
+`cert-store import-pfx` extracts the certificate and private key from a password-protected PFX/PKCS#12 file but does not store the `.pfx` itself. `cert-store list` and `cert-store print` report whether a matching private key exists; they never print private key material.
+
+After importing a certificate and matching key, portable PE/WinMD signing can use the same store/thumbprint selection shape as native signtool:
+
+```powershell
+psign-tool cert-store import-pfx --store MY --password "pfx-password" cert.pfx
+psign-tool --mode portable sign /sha1 ABCDEF0123456789ABCDEF0123456789ABCDEF01 /s MY /fd SHA256 file.exe
+```
+
+The portable signing MVP supports local RSA/SHA-256 PE/WinMD Authenticode signing only. Unsupported native signing options, timestamping options, CSP/KSP selection, auto-selection, direct PFX signing, and non-PE formats return explicit errors in portable mode.
+
 ## Generate binary manifest and dependency graph
 
 ```powershell
