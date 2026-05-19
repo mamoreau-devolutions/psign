@@ -6,8 +6,10 @@
 //! `response_argv`) and depend on **`psign-sip-digest`** for portable digest code.
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
+pub mod cert_store;
 pub mod cli;
 pub mod native_argv;
+pub mod portable_sign;
 pub mod rdp;
 pub mod response_argv;
 #[cfg(windows)]
@@ -285,6 +287,7 @@ fn execute_portable_inspect(
 fn execute_windows(cli: &crate::cli::Cli) -> anyhow::Result<CommandOutput> {
     use crate::cli::Command;
     match &cli.command {
+        Command::CertStore(args) => crate::cert_store::cert_store_command(args),
         Command::Portable(args) => run_portable_args(&args.args),
         Command::Verify(args) => crate::win::verify::verify_file(args, &cli.global),
         Command::Sign(args) => crate::win::sign::sign_file(args, &cli.global),
@@ -312,12 +315,11 @@ fn execute_windows(_cli: &crate::cli::Cli) -> anyhow::Result<CommandOutput> {
 fn execute_portable(cli: &crate::cli::Cli) -> anyhow::Result<CommandOutput> {
     use crate::cli::Command;
     match &cli.command {
+        Command::CertStore(args) => crate::cert_store::cert_store_command(args),
         Command::Portable(args) => run_portable_args(&args.args),
         Command::Verify(args) => execute_portable_verify(args),
         Command::InspectSignature(args) => execute_portable_inspect(args),
-        Command::Sign(_) => Err(anyhow::anyhow!(
-            "--mode portable sign is not implemented; portable signing helpers are available under `psign-tool portable ...`"
-        )),
+        Command::Sign(args) => crate::portable_sign::sign_file(args, &cli.global),
         Command::Timestamp(_) => Err(anyhow::anyhow!(
             "--mode portable timestamp is not implemented; portable timestamp helpers are available under `psign-tool portable ...`"
         )),
@@ -338,6 +340,9 @@ fn execute_portable(cli: &crate::cli::Cli) -> anyhow::Result<CommandOutput> {
 }
 
 fn execute(cli: &crate::cli::Cli) -> anyhow::Result<CommandOutput> {
+    if let crate::cli::Command::CertStore(args) = &cli.command {
+        return crate::cert_store::cert_store_command(args);
+    }
     if let crate::cli::Command::Portable(args) = &cli.command {
         return run_portable_args(&args.args);
     }

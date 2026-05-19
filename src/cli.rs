@@ -41,6 +41,8 @@ pub enum ToolMode {
 #[derive(Subcommand, Debug)]
 #[allow(clippy::large_enum_variant)] // Subcommands mirror native `signtool` argv shapes; indirection hurts clap ergonomics.
 pub enum Command {
+    /// Manage the portable psign certificate store (`~/.psign/cert-store` by default).
+    CertStore(CertStoreArgs),
     /// Portable-only diagnostics and helpers (no Win32 APIs).
     Portable(PortableArgs),
     /// Verify embedded Authenticode signature on a file.
@@ -68,6 +70,114 @@ pub struct PortableArgs {
     /// Arguments passed to the portable command parser (for example: `pe-digest file.exe`).
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub args: Vec<OsString>,
+}
+
+#[derive(Args, Debug)]
+pub struct CertStoreArgs {
+    #[command(subcommand)]
+    pub command: CertStoreCommand,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CertStoreCommand {
+    /// Import a PEM or DER X.509 certificate into a store.
+    Import(CertStoreImportArgs),
+    /// Import a PFX/PKCS#12 certificate and private key into a store.
+    ImportPfx(CertStoreImportPfxArgs),
+    /// List certificates in a store.
+    List(CertStoreListArgs),
+    /// Print details for one certificate by SHA-1 thumbprint.
+    Print(CertStorePrintArgs),
+    /// Export one certificate as DER.
+    Export(CertStoreExportArgs),
+    /// Remove one certificate from a store.
+    Remove(CertStoreRemoveArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct CertStoreSelectionArgs {
+    /// Certificate store base directory. Defaults to `PSIGN_CERT_STORE` or `~/.psign/cert-store`.
+    #[arg(long)]
+    pub cert_store_dir: Option<PathBuf>,
+    /// Use the LocalMachine scope under the configured cert-store directory.
+    #[arg(long, visible_alias = "sm")]
+    pub machine_store: bool,
+    /// Certificate store name (default: MY).
+    #[arg(long = "store", visible_alias = "s", default_value = "MY")]
+    pub store_name: String,
+}
+
+#[derive(Args, Debug)]
+pub struct CertStoreImportArgs {
+    #[command(flatten)]
+    pub selection: CertStoreSelectionArgs,
+    /// PEM-encoded unencrypted PKCS#8 private key to store as `<thumb>.key`.
+    #[arg(long)]
+    pub key: Option<PathBuf>,
+    /// PEM or DER X.509 certificate to import.
+    pub cert: PathBuf,
+}
+
+#[derive(Args, Debug)]
+pub struct CertStoreImportPfxArgs {
+    #[command(flatten)]
+    pub selection: CertStoreSelectionArgs,
+    /// Password for the PFX/PKCS#12 file.
+    #[arg(long, visible_alias = "p")]
+    pub password: String,
+    /// PFX/PKCS#12 file to import. The store writes `<thumb>.der` and `<thumb>.key`, not `.pfx`.
+    pub pfx: PathBuf,
+}
+
+#[derive(Args, Debug)]
+pub struct CertStoreListArgs {
+    #[command(flatten)]
+    pub selection: CertStoreSelectionArgs,
+    /// Emit machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct CertStorePrintArgs {
+    #[command(flatten)]
+    pub selection: CertStoreSelectionArgs,
+    /// SHA-1 thumbprint of the certificate to print.
+    #[arg(long, visible_alias = "sha1")]
+    pub sha1: String,
+    /// Emit machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct CertStoreExportArgs {
+    #[command(flatten)]
+    pub selection: CertStoreSelectionArgs,
+    /// SHA-1 thumbprint of the certificate to export.
+    #[arg(long, visible_alias = "sha1")]
+    pub sha1: String,
+    /// Output DER certificate path.
+    #[arg(long)]
+    pub out: PathBuf,
+    /// Also export the matching `<thumb>.key` private key.
+    #[arg(long)]
+    pub with_key: bool,
+    /// Output private key path when `--with-key` is set.
+    #[arg(long, requires = "with_key")]
+    pub key_out: Option<PathBuf>,
+    /// Replace the output file if it already exists.
+    #[arg(long)]
+    pub force: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct CertStoreRemoveArgs {
+    #[command(flatten)]
+    pub selection: CertStoreSelectionArgs,
+    /// SHA-1 thumbprint of the certificate to remove.
+    #[arg(long, visible_alias = "sha1")]
+    pub sha1: String,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -402,6 +512,9 @@ pub struct SignArgs {
     /// Certificate store name for non-PFX selection (default: MY).
     #[arg(long, visible_alias = "s", default_value = "MY")]
     pub store_name: String,
+    /// Portable file-based certificate store root. Defaults to PSIGN_CERT_STORE or ~/.psign/cert-store.
+    #[arg(long)]
+    pub cert_store_dir: Option<PathBuf>,
     /// Append signature instead of replacing.
     #[arg(long, visible_alias = "as")]
     pub append_signature: bool,
@@ -427,7 +540,7 @@ pub struct SignArgs {
     )]
     pub trusted_signing_dlib_root: Option<PathBuf>,
     /// Digest algorithm for signing (native `/fd`).
-    #[arg(long, visible_alias = "fd", value_enum, default_value_t = DigestAlgorithm::Sha256)]
+    #[arg(long, visible_alias = "fd", value_enum, ignore_case = true, default_value_t = DigestAlgorithm::Sha256)]
     pub digest: DigestAlgorithm,
     /// RFC3161 timestamp URL at sign time (native `/tr`).
     #[arg(
@@ -451,7 +564,7 @@ pub struct SignArgs {
     )]
     pub seal_timestamp_url: Option<String>,
     /// RFC3161 timestamp digest algorithm (native `/td`).
-    #[arg(long, visible_alias = "td", value_enum)]
+    #[arg(long, visible_alias = "td", value_enum, ignore_case = true)]
     pub timestamp_digest: Option<DigestAlgorithm>,
     /// Authenticode description string (native `/d` on `sign`).
     #[arg(long, visible_alias = "d")]
@@ -600,7 +713,7 @@ pub struct TimestampArgs {
     )]
     pub seal_timestamp_url: Option<String>,
     /// Timestamp digest algorithm (native `/td`; required with RFC3161 `/tr` and `/tseal`).
-    #[arg(long, visible_alias = "td", value_enum)]
+    #[arg(long, visible_alias = "td", value_enum, ignore_case = true)]
     pub digest: Option<DigestAlgorithm>,
     /// Timestamp the signature at this index (native `/tp`).
     #[arg(long, visible_alias = "tp")]

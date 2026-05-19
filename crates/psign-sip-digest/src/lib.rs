@@ -11,6 +11,7 @@ pub mod msix_digest;
 pub mod page_hashes;
 pub mod pe_digest;
 pub mod pe_embed;
+pub mod pe_sign;
 pub mod pkcs7;
 pub mod pkcs7_wire;
 pub mod ps_script;
