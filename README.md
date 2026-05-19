@@ -62,6 +62,16 @@ From the repo root (see [`docs/roadmap-authenticode-linux.md`](docs/roadmap-auth
 cargo build -p psign --bin psign-tool --locked
 # Portable RDP signing:
 # psign-tool portable rdp --cert cert.der --key key.pk8 file.rdp
+# Portable PE signing with a local RSA key:
+# psign-tool portable sign-pe --cert cert.der --key key.pk8 --output signed.exe unsigned.exe
+# Portable unsigned CAB signing with a local RSA key:
+# psign-tool portable sign-cab --cert cert.der --key key.pk8 --output signed.cab unsigned.cab
+# Portable MSI/MSP signing with a local RSA key:
+# psign-tool portable sign-msi --cert cert.der --key key.pk8 --output signed.msi unsigned.msi
+# Portable generic catalog signing with a local RSA key:
+# psign-tool portable sign-catalog --cert cert.der --key key.pk8 --output files.cat file1.exe file2.txt
+# Portable RFC3161 timestamp token embedding after signing:
+# psign-tool portable timestamp-pe-rfc3161 signed.exe --response timestamp.tsr --output timestamped.exe
 # Portable package inspection helpers:
 # psign-tool portable nupkg-signature-info package.nupkg
 # psign-tool portable nupkg-digest package.nupkg --algorithm sha256

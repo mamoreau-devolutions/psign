@@ -24,7 +24,7 @@ use psign_codesigning_rest::{
     CodesigningAuth, CodesigningSubmitParams, submit_codesign_hash_blocking,
 };
 use psign_opc_sign::{nuget, vsix};
-use psign_sip_digest::cab_digest::{
+use psign_sip_digest::cab_digest::{self,
     cab_rsa_sha256_signer_prehash_digest, cab_signature_pkcs7_der, compute_cab_authenticode_digest,
     parse_cab_context, verify_cab_digest_consistency,
 };
@@ -582,6 +582,121 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         output: PathBuf,
     },
+    /// Sign an unsigned PE image with portable Authenticode CMS + `WIN_CERTIFICATE` embedding.
+    ///
+    /// This is the first production-oriented portable Authenticode signing path. It supports local RSA
+    /// PKCS#1 v1.5 keys and SHA-2 digests; timestamp embedding and non-PE formats remain separate backlog.
+    SignPe {
+        /// Input PE path.
+        #[arg(value_name = "PATH")]
+        path: PathBuf,
+        /// Signer certificate as DER or PEM.
+        #[arg(long, value_name = "PATH")]
+        cert: PathBuf,
+        /// RSA private key as PKCS#8 or PKCS#1, DER or unencrypted PEM.
+        #[arg(long, value_name = "PATH")]
+        key: PathBuf,
+        /// Additional certificate to include in the PKCS#7 certificate set.
+        #[arg(long = "chain-cert", value_name = "PATH")]
+        chain_certs: Vec<PathBuf>,
+        /// File digest algorithm for the PE Authenticode indirect digest and CMS signer.
+        #[arg(long, value_enum, default_value_t = PortableSignDigest::Sha256)]
+        digest: PortableSignDigest,
+        /// Output signed PE path.
+        #[arg(long, value_name = "PATH")]
+        output: PathBuf,
+    },
+    /// Sign an unsigned CAB file with portable Authenticode CMS and CAB reserve-header embedding.
+    ///
+    /// Supports single-volume unsigned CABs without an existing reserve header.
+    SignCab {
+        /// Input CAB path.
+        #[arg(value_name = "PATH")]
+        path: PathBuf,
+        /// Signer certificate as DER or PEM.
+        #[arg(long, value_name = "PATH")]
+        cert: PathBuf,
+        /// RSA private key as PKCS#8 or PKCS#1, DER or unencrypted PEM.
+        #[arg(long, value_name = "PATH")]
+        key: PathBuf,
+        /// Additional certificate to include in the PKCS#7 certificate set.
+        #[arg(long = "chain-cert", value_name = "PATH")]
+        chain_certs: Vec<PathBuf>,
+        /// File digest algorithm for the CAB Authenticode indirect digest and CMS signer.
+        #[arg(long, value_enum, default_value_t = PortableSignDigest::Sha256)]
+        digest: PortableSignDigest,
+        /// Output signed CAB path.
+        #[arg(long, value_name = "PATH")]
+        output: PathBuf,
+    },
+    /// Sign an MSI/MSP OLE package with portable Authenticode CMS and a DigitalSignature stream.
+    SignMsi {
+        /// Input MSI/MSP path.
+        #[arg(value_name = "PATH")]
+        path: PathBuf,
+        /// Signer certificate as DER or PEM.
+        #[arg(long, value_name = "PATH")]
+        cert: PathBuf,
+        /// RSA private key as PKCS#8 or PKCS#1, DER or unencrypted PEM.
+        #[arg(long, value_name = "PATH")]
+        key: PathBuf,
+        /// Additional certificate to include in the PKCS#7 certificate set.
+        #[arg(long = "chain-cert", value_name = "PATH")]
+        chain_certs: Vec<PathBuf>,
+        /// File digest algorithm for the MSI Authenticode indirect digest and CMS signer.
+        #[arg(long, value_enum, default_value_t = PortableSignDigest::Sha256)]
+        digest: PortableSignDigest,
+        /// Output signed MSI/MSP path.
+        #[arg(long, value_name = "PATH")]
+        output: PathBuf,
+    },
+    /// Sign a portable generic file catalog (`.cat`) with CTL members and CMS `SignedData`.
+    ///
+    /// This authors explicit file membership entries for the provided subjects. It does not implement
+    /// driver/INF policy, OS catalog database installation/search, or MakeCat byte-for-byte output.
+    SignCatalog {
+        /// Subject file(s) to include as catalog members.
+        #[arg(required = true, value_name = "PATH")]
+        files: Vec<PathBuf>,
+        /// Signer certificate as DER or PEM.
+        #[arg(long, value_name = "PATH")]
+        cert: PathBuf,
+        /// RSA private key as PKCS#8 or PKCS#1, DER or unencrypted PEM.
+        #[arg(long, value_name = "PATH")]
+        key: PathBuf,
+        /// Additional certificate to include in the PKCS#7 certificate set.
+        #[arg(long = "chain-cert", value_name = "PATH")]
+        chain_certs: Vec<PathBuf>,
+        /// File digest algorithm for catalog member digests and CMS signer.
+        #[arg(long, value_enum, default_value_t = PortableSignDigest::Sha256)]
+        digest: PortableSignDigest,
+        /// Output signed catalog path.
+        #[arg(long, value_name = "PATH")]
+        output: PathBuf,
+    },
+    /// Attach an RFC3161 timestamp token to an existing embedded PE Authenticode signature.
+    ///
+    /// Accepts either a raw `timeStampToken` `ContentInfo` DER file or a `TimeStampResp` DER file containing one.
+    TimestampPeRfc3161 {
+        /// Signed PE path to mutate.
+        #[arg(value_name = "PATH")]
+        path: PathBuf,
+        /// Embedded PKCS#7 row index in the PE certificate table.
+        #[arg(long, default_value_t = 0)]
+        index: usize,
+        /// SignerInfo index inside the selected PKCS#7 SignedData.
+        #[arg(long, default_value_t = 0)]
+        signer_index: usize,
+        /// Raw RFC3161 timeStampToken ContentInfo DER.
+        #[arg(long, value_name = "PATH", conflicts_with = "response")]
+        token: Option<PathBuf>,
+        /// RFC3161 TimeStampResp DER containing a granted timeStampToken.
+        #[arg(long, value_name = "PATH", conflicts_with = "token")]
+        response: Option<PathBuf>,
+        /// Output PE path.
+        #[arg(long, value_name = "PATH")]
+        output: PathBuf,
+    },
     /// Sign `.rdp` files using portable RDP SignScope/SecureSettingsBlob logic.
     ///
     /// Supply either **`--cert`** + **`--key`** for local RSA/SHA-256 PKCS#7 creation, or
@@ -686,6 +801,15 @@ enum Command {
     },
     /// Signed catalog `.cat`: compare PKCS#7 indirect digest to Rust catalog digest scan.
     VerifyCatalog { path: PathBuf },
+    /// Verify that a subject file is represented by a MakeCat-style CTL member in a signed catalog.
+    VerifyCatalogMember {
+        /// Catalog `.cat` file.
+        #[arg(long, value_name = "PATH")]
+        catalog: PathBuf,
+        /// Subject file whose catalog membership should be checked.
+        #[arg(value_name = "PATH")]
+        subject: PathBuf,
+    },
     /// Script signed file (PowerShell-class or WSH): compare PKCS#7 indirect digest to Rust heuristic strip/hash.
     VerifyScript { path: PathBuf },
     /// Inspect PKCS#7 layers: signers, timestamp-related attribute OIDs, nested signatures (`1.3.6.1.4.1.311.2.4.1`). JSON to stdout.
@@ -806,6 +930,23 @@ enum HashAlg {
     Sha256,
     Sha384,
     Sha512,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum PortableSignDigest {
+    Sha256,
+    Sha384,
+    Sha512,
+}
+
+impl From<PortableSignDigest> for pkcs7::AuthenticodeSigningDigest {
+    fn from(value: PortableSignDigest) -> Self {
+        match value {
+            PortableSignDigest::Sha256 => Self::Sha256,
+            PortableSignDigest::Sha384 => Self::Sha384,
+            PortableSignDigest::Sha512 => Self::Sha512,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -1653,6 +1794,264 @@ where
             std::fs::write(&output, &out_image)
                 .with_context(|| format!("write {}", output.display()))?;
         }
+        Command::SignPe {
+            path,
+            cert,
+            key,
+            chain_certs,
+            digest,
+            output,
+        } => {
+            let pe = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+            let cert_bytes =
+                std::fs::read(&cert).with_context(|| format!("read {}", cert.display()))?;
+            let signer_cert = rdp::parse_certificate(&cert_bytes)
+                .with_context(|| format!("parse signer certificate {}", cert.display()))?;
+            let key_bytes = std::fs::read(&key).with_context(|| format!("read {}", key.display()))?;
+            let private_key = rdp::parse_rsa_private_key(&key_bytes)
+                .with_context(|| format!("parse RSA private key {}", key.display()))?;
+            let mut chain = Vec::with_capacity(chain_certs.len());
+            for chain_cert in chain_certs {
+                let bytes = std::fs::read(&chain_cert)
+                    .with_context(|| format!("read {}", chain_cert.display()))?;
+                chain.push(
+                    rdp::parse_certificate(&bytes)
+                        .with_context(|| format!("parse chain certificate {}", chain_cert.display()))?,
+                );
+            }
+            let pkcs7 = pkcs7::create_pe_authenticode_pkcs7_der_rsa(
+                &pe,
+                digest.into(),
+                signer_cert,
+                chain,
+                private_key,
+            )
+            .with_context(|| {
+                format!(
+                    "create portable Authenticode signature for {}",
+                    path.display()
+                )
+            })?;
+            let signed = pe_embed::pe_append_authenticode_pkcs7_certificate(pe, &pkcs7)
+                .with_context(|| format!("embed Authenticode signature in {}", path.display()))?;
+            std::fs::write(&output, signed).with_context(|| format!("write {}", output.display()))?;
+            println!(
+                "sign-pe: ok output={} digest={:?} pkcs7_len={}",
+                output.display(),
+                digest,
+                pkcs7.len()
+            );
+        }
+        Command::SignCab {
+            path,
+            cert,
+            key,
+            chain_certs,
+            digest,
+            output,
+        } => {
+            let cab = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+            let cert_bytes =
+                std::fs::read(&cert).with_context(|| format!("read {}", cert.display()))?;
+            let signer_cert = rdp::parse_certificate(&cert_bytes)
+                .with_context(|| format!("parse signer certificate {}", cert.display()))?;
+            let key_bytes = std::fs::read(&key).with_context(|| format!("read {}", key.display()))?;
+            let private_key = rdp::parse_rsa_private_key(&key_bytes)
+                .with_context(|| format!("parse RSA private key {}", key.display()))?;
+            let mut chain = Vec::with_capacity(chain_certs.len());
+            for chain_cert in chain_certs {
+                let bytes = std::fs::read(&chain_cert)
+                    .with_context(|| format!("read {}", chain_cert.display()))?;
+                chain.push(
+                    rdp::parse_certificate(&bytes)
+                        .with_context(|| format!("parse chain certificate {}", chain_cert.display()))?,
+                );
+            }
+            let pkcs7 = pkcs7::create_cab_authenticode_pkcs7_der_rsa(
+                &cab,
+                digest.into(),
+                signer_cert,
+                chain,
+                private_key,
+            )
+            .with_context(|| {
+                format!(
+                    "create portable CAB Authenticode signature for {}",
+                    path.display()
+                )
+            })?;
+            let signed = cab_digest::cab_append_authenticode_pkcs7_signature(&cab, &pkcs7)
+                .with_context(|| format!("embed Authenticode signature in {}", path.display()))?;
+            std::fs::write(&output, signed).with_context(|| format!("write {}", output.display()))?;
+            println!(
+                "sign-cab: ok output={} digest={:?} pkcs7_len={}",
+                output.display(),
+                digest,
+                pkcs7.len()
+            );
+        }
+        Command::SignMsi {
+            path,
+            cert,
+            key,
+            chain_certs,
+            digest,
+            output,
+        } => {
+            let msi = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+            let cert_bytes =
+                std::fs::read(&cert).with_context(|| format!("read {}", cert.display()))?;
+            let signer_cert = rdp::parse_certificate(&cert_bytes)
+                .with_context(|| format!("parse signer certificate {}", cert.display()))?;
+            let key_bytes = std::fs::read(&key).with_context(|| format!("read {}", key.display()))?;
+            let private_key = rdp::parse_rsa_private_key(&key_bytes)
+                .with_context(|| format!("parse RSA private key {}", key.display()))?;
+            let mut chain = Vec::with_capacity(chain_certs.len());
+            for chain_cert in chain_certs {
+                let bytes = std::fs::read(&chain_cert)
+                    .with_context(|| format!("read {}", chain_cert.display()))?;
+                chain.push(
+                    rdp::parse_certificate(&bytes)
+                        .with_context(|| format!("parse chain certificate {}", chain_cert.display()))?,
+                );
+            }
+            let pkcs7 = pkcs7::create_msi_authenticode_pkcs7_der_rsa(
+                &msi,
+                digest.into(),
+                signer_cert,
+                chain,
+                private_key,
+            )
+            .with_context(|| {
+                format!(
+                    "create portable MSI Authenticode signature for {}",
+                    path.display()
+                )
+            })?;
+            msi_digest::msi_embed_authenticode_pkcs7_signature(&path, &output, &pkcs7)
+                .with_context(|| format!("embed Authenticode signature in {}", path.display()))?;
+            println!(
+                "sign-msi: ok output={} digest={:?} pkcs7_len={}",
+                output.display(),
+                digest,
+                pkcs7.len()
+            );
+        }
+        Command::SignCatalog {
+            files,
+            cert,
+            key,
+            chain_certs,
+            digest,
+            output,
+        } => {
+            let cert_bytes =
+                std::fs::read(&cert).with_context(|| format!("read {}", cert.display()))?;
+            let signer_cert = rdp::parse_certificate(&cert_bytes)
+                .with_context(|| format!("parse signer certificate {}", cert.display()))?;
+            let key_bytes = std::fs::read(&key).with_context(|| format!("read {}", key.display()))?;
+            let private_key = rdp::parse_rsa_private_key(&key_bytes)
+                .with_context(|| format!("parse RSA private key {}", key.display()))?;
+            let mut chain = Vec::with_capacity(chain_certs.len());
+            for chain_cert in chain_certs {
+                let bytes = std::fs::read(&chain_cert)
+                    .with_context(|| format!("read {}", chain_cert.display()))?;
+                chain.push(
+                    rdp::parse_certificate(&bytes)
+                        .with_context(|| format!("parse chain certificate {}", chain_cert.display()))?,
+                );
+            }
+            let mut subjects = Vec::with_capacity(files.len());
+            for file in &files {
+                let name = file
+                    .file_name()
+                    .and_then(OsStr::to_str)
+                    .ok_or_else(|| anyhow!("catalog subject path has no UTF-8 file name: {}", file.display()))?
+                    .to_owned();
+                let bytes =
+                    std::fs::read(file).with_context(|| format!("read {}", file.display()))?;
+                subjects.push(catalog_digest::CatalogSubjectInput { name, bytes });
+            }
+            let catalog = catalog_digest::create_catalog_pkcs7_der_rsa(
+                &subjects,
+                digest.into(),
+                signer_cert,
+                chain,
+                private_key,
+            )
+            .with_context(|| format!("create portable catalog {}", output.display()))?;
+            std::fs::write(&output, &catalog.pkcs7_der)
+                .with_context(|| format!("write {}", output.display()))?;
+            println!(
+                "sign-catalog: ok output={} digest={:?} members={} pkcs7_len={}",
+                output.display(),
+                digest,
+                catalog.members.len(),
+                catalog.pkcs7_der.len()
+            );
+        }
+        Command::TimestampPeRfc3161 {
+            path,
+            index,
+            signer_index,
+            token,
+            response,
+            output,
+        } => {
+            let pe = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
+            let token_der = match (token, response) {
+                (Some(token), None) => {
+                    std::fs::read(&token).with_context(|| format!("read {}", token.display()))?
+                }
+                (None, Some(response)) => {
+                    let bytes = std::fs::read(&response)
+                        .with_context(|| format!("read {}", response.display()))?;
+                    let parsed = parse_time_stamp_resp_der(&bytes).ok_or_else(|| {
+                        anyhow!("could not parse TimeStampResp DER from {}", response.display())
+                    })?;
+                    if !parsed.pki_status.granted() {
+                        return Err(anyhow!(
+                            "TimeStampResp status is not granted (status={})",
+                            parsed.pki_status.as_raw_integer()
+                        ));
+                    }
+                    parsed
+                        .time_stamp_token
+                        .map(|t| t.to_vec())
+                        .ok_or_else(|| anyhow!("TimeStampResp has no timeStampToken"))?
+                }
+                _ => return Err(anyhow!("provide exactly one of --token or --response")),
+            };
+            let pkcs7_der = verify_pe::pe_nth_pkcs7_signed_data_der(&pe, index)
+                .with_context(|| format!("extract PE PKCS#7 row {index} from {}", path.display()))?;
+            let sd = pkcs7::parse_pkcs7_signed_data_der(&pkcs7_der)
+                .with_context(|| format!("parse PE PKCS#7 row {index} from {}", path.display()))?;
+            let stamped = pkcs7::signed_data_add_rfc3161_timestamp_token(
+                &sd,
+                signer_index,
+                &token_der,
+            )
+            .with_context(|| {
+                format!(
+                    "attach RFC3161 timestamp to {} row {index} signer {signer_index}",
+                    path.display()
+                )
+            })?;
+            let stamped_pkcs7 = pkcs7::encode_pkcs7_content_info_signed_data_der(&stamped)?;
+            let out_image =
+                pe_embed::pe_replace_authenticode_pkcs7_certificate_at(pe, index, &stamped_pkcs7)
+                    .with_context(|| {
+                        format!("replace PE PKCS#7 row {index} in {}", path.display())
+                    })?;
+            std::fs::write(&output, out_image)
+                .with_context(|| format!("write {}", output.display()))?;
+            println!(
+                "timestamp-pe-rfc3161: ok output={} index={} signer_index={}",
+                output.display(),
+                index,
+                signer_index
+            );
+        }
         Command::Rdp {
             cert,
             key,
@@ -1783,6 +2182,25 @@ where
         Command::VerifyCatalog { path } => {
             catalog_digest::verify_catalog_digest_consistency(&path)
                 .with_context(|| format!("verify-catalog {}", path.display()))?;
+        }
+        Command::VerifyCatalogMember { catalog, subject } => {
+            let m = catalog_digest::verify_catalog_member(&catalog, &subject).with_context(|| {
+                format!(
+                    "verify-catalog-member --catalog {} {}",
+                    catalog.display(),
+                    subject.display()
+                )
+            })?;
+            println!(
+                "verify-catalog-member: ok catalog={} subject={} member_index={} member_name={} digest_alg_oid={} data_oid={} digest={}",
+                catalog.display(),
+                subject.display(),
+                m.member_index,
+                m.member.subject_name.as_deref().unwrap_or("-"),
+                m.member.digest_algorithm_oid,
+                m.member.data_oid,
+                hex_lower(&m.computed_digest)
+            );
         }
         Command::VerifyScript { path } => {
             let raw = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;

@@ -193,6 +193,12 @@ fn portable_verify_unsupported(args: &crate::cli::VerifyArgs) -> bool {
 fn portable_verify_trust_requested(args: &crate::cli::VerifyArgs) -> bool {
     args.anchor_dir.is_some()
         || !args.trusted_ca.is_empty()
+        || args.authroot_cab.is_some()
+        || args.expect_authroot_cab_sha256.is_some()
+        || args.verbose_chain
+        || args.allow_loose_signing_cert
+        || args.prefer_timestamp_signing_time
+        || args.require_valid_timestamp
         || args.online_aia
         || args.aia_url_override.is_some()
         || args.online_ocsp
@@ -200,6 +206,8 @@ fn portable_verify_trust_requested(args: &crate::cli::VerifyArgs) -> bool {
         || args.revocation_mode.is_some()
         || args.crl_url_override.is_some()
         || args.as_of.is_some()
+        || args.online_timeout_secs != 5
+        || args.online_max_download_bytes != 1024 * 1024
 }
 
 fn execute_portable_verify(args: &crate::cli::VerifyArgs) -> anyhow::Result<CommandOutput> {
@@ -235,6 +243,26 @@ fn execute_portable_verify(args: &crate::cli::VerifyArgs) -> anyhow::Result<Comm
             argv.push(std::ffi::OsString::from("--trusted-ca"));
             argv.push(ca.as_os_str().to_os_string());
         }
+        if let Some(cab) = &args.authroot_cab {
+            argv.push(std::ffi::OsString::from("--authroot-cab"));
+            argv.push(cab.as_os_str().to_os_string());
+        }
+        if let Some(expected) = &args.expect_authroot_cab_sha256 {
+            argv.push(std::ffi::OsString::from("--expect-authroot-cab-sha256"));
+            argv.push(std::ffi::OsString::from(expected));
+        }
+        if args.verbose_chain {
+            argv.push(std::ffi::OsString::from("--verbose-chain"));
+        }
+        if args.allow_loose_signing_cert {
+            argv.push(std::ffi::OsString::from("--allow-loose-signing-cert"));
+        }
+        if args.prefer_timestamp_signing_time {
+            argv.push(std::ffi::OsString::from("--prefer-timestamp-signing-time"));
+        }
+        if args.require_valid_timestamp {
+            argv.push(std::ffi::OsString::from("--require-valid-timestamp"));
+        }
         if args.online_aia {
             argv.push(std::ffi::OsString::from("--online-aia"));
         }
@@ -260,6 +288,18 @@ fn execute_portable_verify(args: &crate::cli::VerifyArgs) -> anyhow::Result<Comm
         if let Some(as_of) = &args.as_of {
             argv.push(std::ffi::OsString::from("--as-of"));
             argv.push(std::ffi::OsString::from(as_of));
+        }
+        if args.online_timeout_secs != 5 {
+            argv.push(std::ffi::OsString::from("--online-timeout-secs"));
+            argv.push(std::ffi::OsString::from(
+                args.online_timeout_secs.to_string(),
+            ));
+        }
+        if args.online_max_download_bytes != 1024 * 1024 {
+            argv.push(std::ffi::OsString::from("--online-max-download-bytes"));
+            argv.push(std::ffi::OsString::from(
+                args.online_max_download_bytes.to_string(),
+            ));
         }
         argv.push(path.as_os_str().to_os_string());
         run_portable_args(&argv)?;
